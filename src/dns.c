@@ -15,6 +15,19 @@
 
 #define DEBUG
 
+static __always_inline void print_ip(__u64 ip) {
+
+    __u8 fourth = ip >> 24;
+    __u8 third = (ip >> 16) & 0xFF;
+    __u8 second = (ip >> 8) & 0xFF;
+    __u8 first = ip & 0xFF;
+
+    #ifdef DEBUG
+        bpf_printk("IP: %d.%d.%d.%d", first, second, third, fourth);
+    #endif
+
+}
+
 static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
 {
 
