@@ -45,9 +45,71 @@ static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
+static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
+{
+    struct iphdr *ipv4;
+    ipv4 = data + *offset;
+
+    *offset += sizeof(struct iphdr);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No ip frame");
+        #endif
+        return 0;
+    }
+    
+    if (ipv4->frag_off & IP_FRAGMENTET)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] Frame fragmented");
+        #endif
+        return 0;
+    }
+
+    __u8 transport_protocol;
+    transport_protocol = ipv4->protocol;
+
+    if (transport_protocol != UDP_PROTOCOL)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] Ip protocol isn't UDP, %d != %d", transport_protocol, UDP_PROTOCOL);
+        #endif
+
+        return 0;
+    }
+
+    return 1;
+}
+
 SEC("dns_filter")
 int dns(struct xdp_md *ctx) {
 
+    void *data_end = (void*) (long) ctx->data_end;
+    void *data = (void*) (long) ctx->data;
+
+    __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
+    int a, b, c;
+
+    if(isIPV4(data, &offset_h, data_end))
+    {
+        #ifdef DEBUG
+            bpf_printk("Its IPV4");
+        #endif
+    }
+
+    else
+        return XDP_PASS;
+
+    if(isValidUDP(data, &offset_h, data_end))
+    {
+        #ifdef DEBUG
+            bpf_printk("Its UDP");
+        #endif
+    }
+
+    return XDP_PASS;
 }
 
 char _license[] SEC("license") = "GPL";
