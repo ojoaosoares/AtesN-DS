@@ -28,6 +28,65 @@ static __always_inline void print_ip(__u64 ip) {
 
 }
 
+static __always_inline __u64 ip_to_int(char *ip) {
+
+    __u64 final_sum = 0;
+    __u8 cont = 0;
+
+    __u16 octet = 256;
+    __u8 octet_cont = 0;
+    
+    __u8 digits[3];
+
+    #pragma unroll
+    for (__u8 i = 0; i < 15; i++)
+    {
+        
+        if(ip[i] == '.' || ip[i] == '\0' || cont == 3)
+        {
+            __u16 p, sum = 0;
+
+            #pragma unroll
+            for (__u8 j = 0; j < 3; j++)
+            {
+                if (cont)
+                {
+                    p = digits[j];
+
+                    #pragma unroll
+                    for (__u8 k = 0; k < 2; k++) 
+                    {
+                        if (cont - 1 > k)
+                            p *= 10;
+                    }
+
+                    cont--;
+
+                    sum += p;
+                }
+            }
+                
+            __u64 octet_p = 1;
+            for (__u8 j = 0; j < 3; j++)
+            {
+                if(octet_cont > j)
+                    octet_p *= octet;
+            }
+
+            octet_cont++;
+            final_sum += (sum*octet_p);
+
+        }
+
+        else {
+            digits[cont] = ip[i] - 48;
+            cont++;
+        }
+    }   
+
+    return final_sum;
+}
+
 static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
 {
 
