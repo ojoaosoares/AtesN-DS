@@ -83,6 +83,31 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
+static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
+{
+    struct udphdr *udp;
+    udp = data + *offset;
+    *offset += sizeof(struct udphdr);
+
+    if(data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No UDP datagram");
+        #endif
+        return 0;
+    }
+
+    if (bpf_ntohs(udp->source) != DNS_PORT)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] UDP datagram isn't port 53, %d %d != %d ", bpf_ntohs(udp->source), DNS_PORT);
+        #endif
+        return 0;
+    }
+
+    return 1;
+}
+
 SEC("dns_filter")
 int dns(struct xdp_md *ctx) {
 
@@ -108,6 +133,19 @@ int dns(struct xdp_md *ctx) {
             bpf_printk("Its UDP");
         #endif
     }
+
+    else
+        return XDP_PASS;
+
+    if(isPort53(data, &offset_h, data_end))
+    {
+        #ifdef DEBUG
+            bpf_printk("Its Port 53");
+        #endif
+    }
+
+    else
+        return XDP_PASS;
 
     return XDP_PASS;
 }
