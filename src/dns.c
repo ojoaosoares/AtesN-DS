@@ -219,6 +219,17 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
+    if (data + offset_h > data_end)
+            return XDP_DROP;
+
+    __u8 *conteudo = data + offset_h;
+
+    #ifdef DEBUG
+        bpf_printk("Target achieved, content %s", conteudo);
+    #endif
+
+    return XDP_PASS;
+
     return XDP_PASS;
 }
 
