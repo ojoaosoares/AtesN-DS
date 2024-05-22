@@ -105,7 +105,7 @@ static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
     if(ip_type != bpf_htons(IPV4))
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Ethernet type isn't IPV4, %d != %d", ip_type, bpf_htons(IPV4));
+            bpf_printk("[DROP] Ethernet type isn't IPV4. IP type: %d", ip_type);
         #endif
         return 0;
     }
@@ -142,7 +142,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     if (transport_protocol != UDP_PROTOCOL)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Ip protocol isn't UDP, %d != %d", transport_protocol, UDP_PROTOCOL);
+            bpf_printk("[DROP] Ip protocol isn't UDP. Protocol: %d", transport_protocol);
         #endif
 
         return 0;
@@ -165,11 +165,39 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->source) != DNS_PORT)
+    if (bpf_ntohs(udp->dest) != DNS_PORT)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] UDP datagram isn't port 53, %d %d != %d ", bpf_ntohs(udp->source), DNS_PORT);
+            bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
         #endif
+        return 0;
+    }
+
+    return 1;
+}
+
+static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
+{
+    struct dns_header *header;
+    header = data + *offset;
+    
+    *offset  += sizeof(struct dns_header);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No DNS header");
+        #endif
+        
+        return 0;
+    }
+
+    if (!(header->query_or_response & DNS_QUERY_TYPE))
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] It's not a DNS query");
+        #endif
+        
         return 0;
     }
 
@@ -215,16 +243,24 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
+    if (isDNSQuery(data, &offset_h, data_end))
+    {
+        #ifdef DEBUG
+            bpf_printk("Its DNS Query");
+        #endif
+    }
+
+    else
+        return XDP_PASS;
+
     if (data + offset_h > data_end)
-            return XDP_DROP;
+        return XDP_PASS;
 
     __u8 *conteudo = data + offset_h;
 
     #ifdef DEBUG
         bpf_printk("Target achieved, content %s", conteudo);
     #endif
-
-    return XDP_PASS;
 
     return XDP_PASS;
 }

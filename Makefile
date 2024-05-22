@@ -24,7 +24,7 @@ $(OBJ_FOLDER)%.o: $(SRC_FOLDER)%.c
 all: $(OBJ)
 
 load:
-	sudo ip -force link set ${DEV} xdp obj ${OBJ} sec dns_filter
+	sudo ip -force link set ${DEV} xdp obj ${OBJ_FOLDER}dns.o sec dns_filter
 
 reload:
 	make stop && make && make load 
