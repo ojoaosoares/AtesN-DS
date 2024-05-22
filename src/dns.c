@@ -151,7 +151,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
+static __always_inline int isPort53(void *data, __u64 *offset, void *data_end, __u16 *udp_size)
 {
     struct udphdr *udp;
     udp = data + *offset;
@@ -172,6 +172,8 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         #endif
         return 0;
     }
+
+    *udp_size = bpf_ntohs(udp->len) - sizeof(struct udphdr);
 
     return 1;
 }
@@ -223,6 +225,7 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
+
     if(isValidUDP(data, &offset_h, data_end))
     {
         #ifdef DEBUG
@@ -233,7 +236,9 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    if(isPort53(data, &offset_h, data_end))
+    __u16 udp_size = 0;
+
+    if(isPort53(data, &offset_h, data_end, &udp_size))
     {
         #ifdef DEBUG
             bpf_printk("Its Port 53");
@@ -260,6 +265,7 @@ int dns(struct xdp_md *ctx) {
 
     #ifdef DEBUG
         bpf_printk("Target achieved, content %s", conteudo);
+        bpf_printk("Domain size %lu", udp_size - sizeof(struct dns_header));
     #endif
 
     return XDP_PASS;
