@@ -151,7 +151,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isPort53(void *data, __u64 *offset, void *data_end, __u16 *udp_size)
+static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
 {
     struct udphdr *udp;
     udp = data + *offset;
@@ -172,8 +172,6 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end, _
         #endif
         return 0;
     }
-
-    *udp_size = bpf_ntohs(udp->len) - sizeof(struct udphdr);
 
     return 1;
 }
@@ -202,6 +200,37 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
         
         return 0;
     }
+
+    return 1;
+}
+
+static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, char *domain)
+{
+    void *content = data + *offset;
+    __u8 data_index = 1, domain_index = 0;
+    __u8 *octect = content;
+
+    while (1)
+    {
+        for (__u8 i = 0; i < *octect; i++)
+        {
+            if (content +  data_index > data_end)
+                return 0;
+
+            domain[domain_index++] =  *((__u8*)content + data_index++);
+        }
+
+        if (content +  data_index > data_end)
+            return 0;
+
+        octect = content + data_index++;
+
+        if(octect == END_DOMAIN) break;
+
+        domain[domain_index++] = '.';
+    }
+
+    *offset += data_index;
 
     return 1;
 }
@@ -236,9 +265,7 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    __u16 udp_size = 0;
-
-    if(isPort53(data, &offset_h, data_end, &udp_size))
+    if(isPort53(data, &offset_h, data_end))
     {
         #ifdef DEBUG
             bpf_printk("Its Port 53");
@@ -258,16 +285,8 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    if (data + offset_h > data_end)
-        return XDP_PASS;
-
-    __u8 *conteudo = data + offset_h;
-
-    #ifdef DEBUG
-        bpf_printk("Target achieved, content %s", conteudo);
-        bpf_printk("Domain size %lu", udp_size - sizeof(struct dns_header));
-    #endif
-
+    char domain[MAX_DOMAIN];
+        
     return XDP_PASS;
 }
 

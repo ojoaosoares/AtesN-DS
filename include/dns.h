@@ -9,6 +9,8 @@
 #define DNS_PORT 0x35
 
 #define DNS_QUERY_TYPE 1
+#define MAX_DOMAIN 255
+#define END_DOMAIN 0
 
 struct dns_header
 {
