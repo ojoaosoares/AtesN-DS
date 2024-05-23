@@ -10,7 +10,7 @@ OBJ_FOLDER = ./obj/
 SRC_FOLDER = ./src/
 
 # eBPF
-DEV = enp2s0
+DEV = $(shell ip route | awk '/default/ {print $$5}')
 
 # all sources, objs, and header files
 MAIN = Main
