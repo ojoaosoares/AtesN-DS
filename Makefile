@@ -1,7 +1,9 @@
 # cc and flags
 CC = clang
-CXXFLAGS = -target bpf -O2
+CXXFLAGS = -g -target bpf -O2
 #CXXFLAGS = -std=c++11 -O3 -Wall
+
+# LIBBPF = /usr/lib64/libbpf.so
 
 # folders
 INCLUDE_FOLDER = ./include/
@@ -19,7 +21,7 @@ SRC = $(wildcard $(SRC_FOLDER)*.c)
 OBJ = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
 
 $(OBJ_FOLDER)%.o: $(SRC_FOLDER)%.c
-	$(CC) $(CXXFLAGS) -c $< -o $@ -I$(INCLUDE_FOLDER)
+	$(CC) $(CXXFLAGS) -c $< -o $@ -I$(INCLUDE_FOLDER) 
 
 all: $(OBJ)
 
@@ -32,9 +34,11 @@ reload:
 stop:
 	sudo ip link set dev ${DEV} xdp off
 
-
 debug:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
+
+skeleton:
+	bpftool gen skeleton ${OBJ_FOLDER}dns.o name dns | tee ${INCLUDE_FOLDER}dns.skel.h
 
 clean:
 	@rm -rf $(OBJ_FOLDER)* $(BIN_FOLDER)*
