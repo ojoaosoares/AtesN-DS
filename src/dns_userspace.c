@@ -7,10 +7,22 @@ int main() {
 
     if(!skel)
         goto cleanup;
+    printf("Abriu\n");
 
-    int index = 0;
+    if(dns__load(skel))
+        goto cleanup;
+
+    printf("Carregou\n");
+    if(dns__attach(skel))
+        goto cleanup;
+
+    printf("Anexou\n");
+    bpf_program__attach(skel->progs.dns);
+
+    __u32 index = 0;
+    __u32 fd = bpf_program__fd(skel->progs.dns);
     
-    if(bpf_map__update_elem(skel->maps.progs, &index, sizeof(__u8), (void*) bpf_program__fd(skel->progs.dns), sizeof(__u8), 0))
+    if(bpf_map__update_elem(skel->maps.progs, &index, sizeof(__u32), &fd, sizeof(__u32), 0))
         goto cleanup;
 
     printf("Deu certo\n");

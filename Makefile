@@ -15,15 +15,28 @@ SRC_FOLDER = ./src/
 DEV = $(shell ip route | awk '/default/ {print $$5}')
 
 # all sources, objs, and header files
-MAIN = Main
-TARGET = a.out
+MAIN = ${SRC_FOLDER}dns_userspace.c
+SKELETON = ${INCLUDE_FOLDER}dns.skel.h
+TARGET = ${BIN_FOLDER}a.out
+
 SRC = $(wildcard $(SRC_FOLDER)*.c)
 OBJ = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
 
-$(OBJ_FOLDER)%.o: $(SRC_FOLDER)%.c
-	$(CC) $(CXXFLAGS) -c $< -o $@ -I$(INCLUDE_FOLDER) 
+$(shell mkdir -p $(OBJ_FOLDER))
 
-all: $(OBJ)
+$(shell mkdir -p $(BIN_FOLDER))
+
+
+all: ${TARGET}
+
+${TARGET} : ${MAIN} ${SKELETON}
+	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf
+
+${SKELETON} : ${OBJ_FOLDER}dns.o
+	bpftool gen skeleton $< name dns | tee $@
+
+${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
+	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 
 load:
 	sudo ip -force link set ${DEV} xdp obj ${OBJ_FOLDER}dns.o sec dns_filter
@@ -38,7 +51,7 @@ debug:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
 
 skeleton:
-	bpftool gen skeleton ${OBJ_FOLDER}dns.o name dns | tee ${INCLUDE_FOLDER}dns.skel.h
+	bpftool gen skeleton ${OBJ_FOLDER}dns.o name dns | tee ${SKELETON}
 
 clean:
 	@rm -rf $(OBJ_FOLDER)* $(BIN_FOLDER)*

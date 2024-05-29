@@ -246,7 +246,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
-SEC("dns_filter")
+SEC("xdp")
 int dns(struct xdp_md *ctx) {
 
     void *data_end = (void*) (long) ctx->data_end;
