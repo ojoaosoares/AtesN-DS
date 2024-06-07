@@ -22,7 +22,7 @@ int main() {
     __u32 index = 0;
     __u32 fd = bpf_program__fd(skel->progs.dns);
     
-    if(bpf_map__update_elem(skel->maps.progs, &index, sizeof(__u32), &fd, sizeof(__u32), 0))
+    if(bpf_map__update_elem(skel->maps.dns_call_tail_progs, &index, sizeof(__u32), &fd, sizeof(__u32), 0))
         goto cleanup;
 
     printf("Deu certo\n");

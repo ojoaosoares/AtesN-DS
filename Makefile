@@ -39,7 +39,7 @@ ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 
 load:
-	sudo ip -force link set ${DEV} xdp obj ${OBJ_FOLDER}dns.o sec dns_filter
+	sudo ip -force link set ${DEV} xdp obj ${OBJ_FOLDER}dns.o sec xdp
 
 reload:
 	make stop && make && make load 

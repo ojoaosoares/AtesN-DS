@@ -2,6 +2,7 @@
 #define DNS
 
 #include <stdint.h>
+#include <string.h>
 
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
@@ -9,8 +10,22 @@
 #define DNS_PORT 0x35
 
 #define DNS_QUERY_TYPE 1
-#define MAX_DOMAIN 255
-#define END_DOMAIN 0
+#define MAX_DNS_NAME_LENGTH 256
+#define MAX_DNS_LABEL_LENGTH 64
+#define END_DOMAIN 0x0
+
+#ifndef memset
+    #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
+#endif
+
+#ifndef memcpy
+    #define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
+#endif
+
+#ifndef memmove
+    #define memmove(dest, src, n) __builtin_memmove((dest), (src), (n))
+#endif
+
 
 struct dns_header
 {
@@ -33,5 +48,13 @@ struct dns_header
     uint16_t name_servers;
     uint16_t additional_records;
 };
+
+
+struct dns_query {
+    uint16_t record_type;
+    uint16_t class;
+    __u8 name[MAX_DNS_NAME_LENGTH];
+};
+
 
 #endif

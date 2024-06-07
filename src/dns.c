@@ -8,19 +8,16 @@
 #include "bpf_endian.h"
 #include "bpf_helpers.h"
 #include "dns.h"
-// #include "btf.h"
-
 
 
 #define DEBUG
-
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
         __uint(max_entries, 2);
         __uint(key_size, sizeof(__u32));
         __uint(value_size, sizeof(__u32));
-} progs SEC(".maps");
+} dns_call_tail_progs SEC(".maps");
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -176,7 +173,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) != DNS_PORT)
+    if (bpf_ntohs(udp->source) != DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
@@ -215,33 +212,40 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, char *domain)
+static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query )
 {
-    void *content = data + *offset;
-    __u8 data_index = 1, domain_index = 0;
-    __u8 *octect = content;
+    
+    __u8 *content = data + *offset, size, domain_index = 0;
+    
+    *offset += sizeof(__u8);
 
-    while (1)
+    if (data + *offset > data_end)
     {
-        for (__u8 i = 0; i < *octect; i++)
-        {
-            if (content +  data_index > data_end)
-                return 0;
-
-            domain[domain_index++] =  *((__u8*)content + data_index++);
-        }
-
-        if (content +  data_index > data_end)
-            return 0;
-
-        octect = content + data_index++;
-
-        if(octect == END_DOMAIN) break;
-
-        domain[domain_index++] = '.';
+        #ifdef DEBUG
+            bpf_printk("[DROP] No DNS name");
+        #endif
+        
+        return 0;
     }
 
-    *offset += data_index;
+    for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+    {
+        #ifdef DEBUG
+            bpf_printk("%d %d", *content, (*content == END_DOMAIN));
+        #endif  
+
+        if (*content == END_DOMAIN)
+        {
+            #ifdef DEBUG
+                bpf_printk("%d", i);
+            #endif  
+            break;
+        }
+        query->name[i] = *content;
+        content++;
+    }
+    
+        
 
     return 1;
 }
@@ -295,8 +299,32 @@ int dns(struct xdp_md *ctx) {
 
     else
         return XDP_PASS;
+
+    struct dns_query *query;
+
+    if(getDomain(data, &offset_h, data_end, query))
+    {
+        #ifdef DEBUG
+            bpf_printk("Domain requested: %d", query->name);
+        #endif
+    }
+
+    else 
+        return XDP_PASS;
+
+    #ifdef DEBUG
+        bpf_printk("Perfect");
+    #endif
+
+    // bpf_tail_call(ctx, dns_call_tail_progs, 1);
     
     return XDP_PASS;
 }
+
+// SEC("xdp")
+// int dns_question(struct xdp_md *ctx)
+// {
+
+// }
 
 char _license[] SEC("license") = "GPL";
