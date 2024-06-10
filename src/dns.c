@@ -173,7 +173,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->source) != DNS_PORT)
+    if (bpf_ntohs(udp->dest) != DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
@@ -215,38 +215,45 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
 static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query )
 {
     
-    __u8 *content = data + *offset, size, domain_index = 0;
-    
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    query->class = 0; query->record_type = 0;
+
+    __u8 *content = (data + *offset), size = 0;
+
     *offset += sizeof(__u8);
 
     if (data + *offset > data_end)
-    {
-        #ifdef DEBUG
-            bpf_printk("[DROP] No DNS name");
-        #endif
-        
         return 0;
-    }
+    
+    size = *(content);
+    
+    content++;
 
-    for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+    *offset += sizeof(__u8);
+
+    if (data + *offset > data_end)
+        return 0;
+
+    for (size_t i = 0; (i < MAX_DNS_NAME_LENGTH && *(content + i) != 0); i++)
     {
-        #ifdef DEBUG
-            bpf_printk("%d %d", *content, (*content == END_DOMAIN));
-        #endif  
-
-        if (*content == END_DOMAIN)
+        if(size == 0)
         {
-            #ifdef DEBUG
-                bpf_printk("%d", i);
-            #endif  
-            break;
+            size = *(content + i);
+            query->name[i] = '.';
         }
-        query->name[i] = *content;
-        content++;
+
+        else
+        {
+            query->name[i] = *(content + i);
+            size--;
+        }
+
+        *offset += sizeof(__u8);
+
+        if (data + *offset > data_end)
+            return 0;
     }
     
-        
-
     return 1;
 }
 
@@ -300,12 +307,12 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    struct dns_query *query;
+    struct dns_query query;
 
-    if(getDomain(data, &offset_h, data_end, query))
+    if(getDomain(data, &offset_h, data_end, &query))
     {
         #ifdef DEBUG
-            bpf_printk("Domain requested: %d", query->name);
+            bpf_printk("Domain requested: %s", query.name);
         #endif
     }
 
@@ -315,16 +322,9 @@ int dns(struct xdp_md *ctx) {
     #ifdef DEBUG
         bpf_printk("Perfect");
     #endif
-
-    // bpf_tail_call(ctx, dns_call_tail_progs, 1);
     
     return XDP_PASS;
 }
 
-// SEC("xdp")
-// int dns_question(struct xdp_md *ctx)
-// {
-
-// }
 
 char _license[] SEC("license") = "GPL";
