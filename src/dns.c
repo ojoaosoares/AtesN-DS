@@ -227,12 +227,12 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     
     size = *(content);
     
-    content++;
-
     *offset += sizeof(__u8);
 
     if (data + *offset > data_end)
         return 0;
+
+    content++;
 
     for (size_t i = 0; (i < MAX_DNS_NAME_LENGTH && *(content + i) != 0); i++)
     {
@@ -252,6 +252,37 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
 
         if (data + *offset > data_end)
             return 0;
+    }
+
+    content = data +  (*offset - 1); // 0 Octect
+
+    *offset += (sizeof(__u8) * 4);
+
+    if (data + *offset > data_end)
+        return 0;
+    
+    content++;
+
+    query->record_type = bpf_ntohs(*((uint16_t *) content));
+
+    if (query->record_type ^ 1)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] It's not a DNS query type A");
+        #endif
+        return 0;
+    }
+    
+    content += 2;
+
+    query->class = bpf_htons(*((uint16_t *) content));
+
+    if (query->class ^ 1)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] It's not a DNS query class IN");
+        #endif
+        return 0;
     }
     
     return 1;
@@ -313,6 +344,8 @@ int dns(struct xdp_md *ctx) {
     {
         #ifdef DEBUG
             bpf_printk("Domain requested: %s", query.name);
+            bpf_printk("Domain type: %s", query.record_type);
+            bpf_printk("Domain class: %s", query.class);
         #endif
     }
 
