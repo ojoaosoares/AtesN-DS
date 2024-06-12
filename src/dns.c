@@ -173,7 +173,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) != DNS_PORT)
+    if (bpf_ntohs(udp->source) != DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
@@ -226,20 +226,30 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
         return 0;
     
     size = *(content);
+
+    if (size == 0)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No Dns domain");
+        #endif
+
+        return 0;
+    }
     
     *offset += sizeof(__u8);
 
     if (data + *offset > data_end)
         return 0;
-
+    
     content++;
 
     for (size_t i = 0; (i < MAX_DNS_NAME_LENGTH && *(content + i) != 0); i++)
     {
         if(size == 0)
         {
-            size = *(content + i);
             query->name[i] = '.';
+
+            size = *(content + i);
         }
 
         else
@@ -254,14 +264,12 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
             return 0;
     }
 
-    content = data +  (*offset - 1); // 0 Octect
+    content = data + *offset; // 0 Octect
 
     *offset += (sizeof(__u8) * 4);
 
     if (data + *offset > data_end)
         return 0;
-    
-    content++;
 
     query->record_type = bpf_ntohs(*((uint16_t *) content));
 
@@ -344,8 +352,8 @@ int dns(struct xdp_md *ctx) {
     {
         #ifdef DEBUG
             bpf_printk("Domain requested: %s", query.name);
-            bpf_printk("Domain type: %s", query.record_type);
-            bpf_printk("Domain class: %s", query.class);
+            bpf_printk("Domain type: %d", query.record_type);
+            bpf_printk("Domain class: %d", query.class);
         #endif
     }
 
