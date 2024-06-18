@@ -11,6 +11,8 @@ BIN_FOLDER = ./bin/
 OBJ_FOLDER = ./obj/
 SRC_FOLDER = ./src/
 
+INSTALL = ./init.sh
+
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}')
 
@@ -37,6 +39,9 @@ ${SKELETON} : ${OBJ_FOLDER}dns.o
 
 ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
+
+install:
+	sudo chmod +x ${INSTALL} && sudo ${INSTALL}
 
 load:
 	sudo ip -force link set ${DEV} xdp obj ${OBJ_FOLDER}dns.o sec xdp
