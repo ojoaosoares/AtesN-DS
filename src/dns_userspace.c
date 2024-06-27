@@ -1,32 +1,51 @@
 #include "dns.skel.h"
+#include "dns.h"
+#include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <net/if.h>
 
-int main() {
+static const char *a_records_map_path = "/sys/fs/bpf/xdp/globals/dns_records";
+
+int main(int argc, char *argv[]) {
+
+    if (argc != 2)
+    {
+        printf("%d\n", argc);
+        printf("interface where the program will be attached is requeried \n");
+        return 0;
+    }
+
+    int index = if_nametoindex(argv[1]);
 
     struct dns *skel;
     skel = dns__open();
 
     if(!skel)
         goto cleanup;
-    printf("Abriu\n");
+    printf("opened\n");
 
     if(dns__load(skel))
         goto cleanup;
 
-    printf("Carregou\n");
-    if(dns__attach(skel))
-        goto cleanup;
+    printf("loaded\n");
 
-    printf("Anexou\n");
-    bpf_program__attach(skel->progs.dns);
-
-    __u32 index = 0;
-    __u32 fd = bpf_program__fd(skel->progs.dns);
     
-    if(bpf_map__update_elem(skel->maps.dns_call_tail_progs, &index, sizeof(__u32), &fd, sizeof(__u32), 0))
+    if(bpf_program__attach_xdp(skel->progs.dns, index) < 0)
         goto cleanup;
+    
+    printf("attached\n");
+    printf("make debug to see the progam running\n");
+    printf("CTRL + C to stop\n");
 
-    printf("Deu certo\n");
-
+    for ( ; ; )
+    {
+        sleep(1);
+    }
+    
+    
 cleanup: 
     dns__destroy(skel);
     return 0;

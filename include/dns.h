@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include "in.h"
 
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
@@ -51,10 +52,14 @@ struct dns_header
 
 
 struct dns_query {
+    char name[MAX_DNS_NAME_LENGTH];
     uint16_t record_type;
     uint16_t class;
-    __u8 name[MAX_DNS_NAME_LENGTH];
 };
 
+struct a_record {
+    struct in_addr ip_addr;
+    uint32_t ttl;
+};
 
 #endif

@@ -13,6 +13,8 @@ SRC_FOLDER = ./src/
 
 INSTALL = ./init.sh
 
+
+
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}')
 
@@ -24,10 +26,14 @@ TARGET = ${BIN_FOLDER}a.out
 SRC = $(wildcard $(SRC_FOLDER)*.c)
 OBJ = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
 
+PROG_MOUNT_PATH=/sys/fs/bpf
+
 $(shell mkdir -p $(OBJ_FOLDER))
 
 $(shell mkdir -p $(BIN_FOLDER))
 
+run: ${TARGET}
+	sudo ${TARGET} ${DEV}
 
 all: ${TARGET}
 
@@ -57,6 +63,15 @@ debug:
 
 skeleton:
 	bpftool gen skeleton ${OBJ_FOLDER}dns.o name dns | tee ${SKELETON}
+
+# init-bpffs:
+# 	sudo mount -t bpf bpf $(PROG_MOUNT_PATH)
+# 	sudo mkdir -p /sys/fs/bpf/xdp/globals
+
+# load-dns_records-map:
+# 	[ -f $(PROG_MOUNT_PATH)/xdp/globals/dns_records ] || sudo bpftool map create $(PROG_MOUNT_PATH)/xdp/globals/dns_records type hash key 8 value 260 entries 4556 name dns_records
+
+# load-map: init-bpffs load-dns_records-map
 
 clean:
 	@rm -rf $(OBJ_FOLDER)* $(BIN_FOLDER)*

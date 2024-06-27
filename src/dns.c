@@ -13,11 +13,11 @@
 #define DEBUG
 
 struct {
-        __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-        __uint(max_entries, 2);
-        __uint(key_size, sizeof(__u32));
-        __uint(value_size, sizeof(__u32));
-} dns_call_tail_progs SEC(".maps");
+        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(max_entries, 4556);
+        __uint(key_size, sizeof(struct dns_query));
+        __uint(value_size, sizeof(struct a_record));
+} dns_records SEC(".maps");
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -254,7 +254,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
 
         else
         {
-            query->name[i] = *(content + i);
+            query->name[i] =  *(char *)(content + i);
             size--;
         }
 
@@ -295,6 +295,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     
     return 1;
 }
+
 
 SEC("xdp")
 int dns(struct xdp_md *ctx) {
@@ -359,6 +360,18 @@ int dns(struct xdp_md *ctx) {
 
     else 
         return XDP_PASS;
+    
+    struct a_record *record;
+    record = bpf_map_lookup_elem(&dns_records, &query);
+
+    if (record > 0)
+    {
+        #ifdef DEBUG
+
+            bpf_printk("aqui %d", record->ip_addr);
+        #endif
+    }
+
 
     #ifdef DEBUG
         bpf_printk("Perfect");
