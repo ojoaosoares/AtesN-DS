@@ -17,6 +17,8 @@ struct {
         __uint(max_entries, 4556);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+
 } dns_records SEC(".maps");
 
 static __always_inline void print_ip(__u64 ip) {
@@ -173,7 +175,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) != DNS_PORT)
+    if (bpf_ntohs(udp->source) != DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
@@ -368,7 +370,7 @@ int dns(struct xdp_md *ctx) {
     {
         #ifdef DEBUG
 
-            bpf_printk("aqui %d", record->ip_addr);
+            print_ip(record->ip_addr.s_addr);
         #endif
     }
 
