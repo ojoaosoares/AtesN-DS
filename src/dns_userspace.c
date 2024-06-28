@@ -7,6 +7,19 @@
 #include <unistd.h>
 #include <net/if.h>
 #include <regex.h>
+#include <sys/stat.h>  
+
+int create_directory(const char *folder) {
+    struct stat st = {0};
+
+    if (stat(folder, &st) == -1) {
+        if (mkdir(folder, 0777) != 0) {
+            printf("Error: it wasn't possible to create de directory '%s'\n", folder);
+            return 0;
+        }
+    }
+    return 1;
+}
 
 int validate_ipv4(const char *ip_str) {
     regex_t regex;
@@ -74,6 +87,8 @@ int main(int argc, char *argv[]) {
         {
             sleep(1);
         }
+
+        goto retrive;
     }
 
     else if (!strcmp(argv[1], "a") && argc == 5)
@@ -101,6 +116,8 @@ int main(int argc, char *argv[]) {
             goto cleanup;
         }
         printf("Map element created/updated\n");
+
+        goto retrive;
     }
 
     else if (!strcmp(argv[1], "d") && argc == 3)
@@ -120,6 +137,71 @@ int main(int argc, char *argv[]) {
         }
 
         printf("Map element deleted\n");
+
+        goto retrive;
+    }
+
+    else if (!strcmp(argv[1], "r") && argc == 3)
+    {
+        FILE *fp;
+        fp = fopen(argv[2], "r");
+
+        char line[276];
+
+        struct dns_query dns_key;
+        memset(dns_key.name, 0, MAX_DNS_NAME_LENGTH);
+
+        dns_key.class = 1;
+        dns_key.record_type = 1;
+
+        struct a_record ip_address_value;
+
+        int item = 0, cont = 0;
+
+
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            
+            item = 0;
+            for (char *p = strtok(line ,"|"); p != NULL; p = strtok(NULL, "|"))
+            {
+                if (item == 0)
+                {
+                    strcpy(dns_key.name, p);
+                    item++;
+                }
+
+                else if (item == 1)
+                {
+                    if (!validate_ipv4(p))
+                        goto cleanup;
+
+                    inet_pton(AF_INET, p, &ip_address_value.ip_addr);
+
+                    item++;
+                }
+
+                else if (item == 2)
+                {
+                    ip_address_value.ttl = atoi(p);
+                    item++;
+                }
+            }
+
+            if(bpf_map__update_elem(skel->maps.dns_records, &dns_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
+            {
+                printf("Eror: the elemente couldn't be created/updated\n");
+                goto cleanup;
+            }
+
+            cont++;
+            
+        }
+
+        printf("File read, %d records created\n", cont);
+
+        fclose(fp);
+
+        goto retrive;
     }
 
     else if (!strcmp(argv[1], "p") && argc == 3)
@@ -155,6 +237,8 @@ int main(int argc, char *argv[]) {
             
         }
 
+        
+
         else
         {
             struct dns_query dns_key;
@@ -183,8 +267,8 @@ int main(int argc, char *argv[]) {
 
             printf("%s: %s\n", dns_key.name, ip);
         }
-
         
+        goto cleanup;
     }
 
     else
@@ -193,7 +277,44 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
     
-    
+retrive:
+
+    if(create_directory("./data/"))
+        goto cleanup;
+
+    FILE *fp;
+
+    fp = fopen("./data/database", "w");
+
+    struct dns_query dns_key, dns_next_key;
+
+    struct a_record ip_address_value;
+
+    char ip[15];
+
+    while (bpf_map__get_next_key(skel->maps.dns_records, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
+    {
+        if(bpf_map__lookup_elem(skel->maps.dns_records, &dns_next_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
+        {
+            printf("Error: the elemente doesn't exist\n");
+            goto cleanup;
+        }
+
+        if((inet_ntop(AF_INET, &ip_address_value.ip_addr, ip, INET_ADDRSTRLEN)) == NULL)
+        {
+            printf("Error: the ip couldn't be converted\n");
+            goto cleanup;
+        }
+
+        printf("%s: %s\n", dns_next_key.name, ip);
+
+        fprintf(fp, "%s|%s|%d\n", dns_next_key.name, ip, ip_address_value.ttl);
+
+        dns_key = dns_next_key;                
+    }
+
+    fclose(fp);
+
 cleanup: 
     dns__destroy(skel);
     return 0;
