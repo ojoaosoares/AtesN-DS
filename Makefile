@@ -32,10 +32,10 @@ $(shell mkdir -p $(OBJ_FOLDER))
 
 $(shell mkdir -p $(BIN_FOLDER))
 
+all: ${TARGET}
+
 run: ${TARGET}
 	sudo ${TARGET} ${DEV}
-
-all: ${TARGET}
 
 ${TARGET} : ${MAIN} ${SKELETON}
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf
