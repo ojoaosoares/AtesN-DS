@@ -17,6 +17,7 @@ apt-get install libevent-dev -y
 apt-get install build-essential -y
 apt-get install libevent -y
 apt-get install bison -y
+sudo apt install linux-tools-$(uname -r) -y
 
 #bpf lib
 cd /usr/include/linux
