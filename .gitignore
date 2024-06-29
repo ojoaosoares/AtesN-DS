@@ -1,7 +1,14 @@
-*.o
+.vscode/
 
-.vscode/*
+data/
+
+bin/
+
+obj/
+
+*.o
 
 *.out
 
-.data/*
+*.skel.h
+

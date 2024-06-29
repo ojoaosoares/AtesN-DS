@@ -279,7 +279,7 @@ int main(int argc, char *argv[]) {
     
 retrive:
 
-    if(create_directory("./data/"))
+    if(!create_directory("./data/"))
         goto cleanup;
 
     FILE *fp;
@@ -305,8 +305,6 @@ retrive:
             printf("Error: the ip couldn't be converted\n");
             goto cleanup;
         }
-
-        printf("%s: %s\n", dns_next_key.name, ip);
 
         fprintf(fp, "%s|%s|%d\n", dns_next_key.name, ip, ip_address_value.ttl);
 
