@@ -175,7 +175,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->source) != DNS_PORT)
+    if (bpf_ntohs(udp->dest) != DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
