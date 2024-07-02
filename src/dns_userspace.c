@@ -192,7 +192,7 @@ void tutorial() {
     printf("Attach to XDP\t dev_interface\n");
     printf("Add record\t a domain_name ip ttl\n");
     printf("Delete record\t d (domain_name or all)\n");
-    printf("Read from file\t d filepath\n");
+    printf("Read from file\t r filepath\n");
     printf("Print record\t p (domain_name or all) \n");
 
 }
