@@ -23,7 +23,8 @@ apt-get install -y \
     build-essential \
     libevent \
     bison \
-    linux-tools-$(uname -r)
+    linux-tools-$(uname -r) \
+    linux-tools-generic
 
 # Instale e configure a libbpf
 LIBBPF_REPO="https://github.com/libbpf/libbpf.git"

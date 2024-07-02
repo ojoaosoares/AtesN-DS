@@ -10,6 +10,7 @@ INCLUDE_FOLDER = ./include/
 BIN_FOLDER = ./bin/
 OBJ_FOLDER = ./obj/
 SRC_FOLDER = ./src/
+DATA_FOLDER = ./data/
 
 INSTALL = ./init.sh
 
@@ -32,6 +33,8 @@ $(shell mkdir -p $(OBJ_FOLDER))
 
 $(shell mkdir -p $(BIN_FOLDER))
 
+$(shell mkdir -p $(DATA_FOLDER))
+
 all: ${TARGET}
 
 run: ${TARGET}
@@ -45,6 +48,7 @@ ${SKELETON} : ${OBJ_FOLDER}dns.o
 
 ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
+
 
 install:
 	sudo chmod +x ${INSTALL} && sudo ${INSTALL}
