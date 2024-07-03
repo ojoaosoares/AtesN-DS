@@ -9,7 +9,6 @@
 #include "bpf_helpers.h"
 #include "dns.h"
 
-
 #define DEBUG
 
 struct {
@@ -112,7 +111,7 @@ static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
     __u16 ip_type; // Tipo de ip, esta contido na camada ethrenet
     ip_type = eth->h_proto;
 
-    if(ip_type != bpf_htons(IPV4))
+    if(ip_type ^ bpf_htons(IPV4))
     {
         #ifdef DEBUG
             bpf_printk("[DROP] Ethernet type isn't IPV4. IP type: %d", ip_type);
@@ -149,7 +148,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     __u8 transport_protocol;
     transport_protocol = ipv4->protocol;
 
-    if (transport_protocol != UDP_PROTOCOL)
+    if (transport_protocol ^ UDP_PROTOCOL)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] Ip protocol isn't UDP. Protocol: %d", transport_protocol);
@@ -175,7 +174,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) != DNS_PORT)
+    if (bpf_ntohs(udp->dest) ^ DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] UDP datagram isn't port 53. Port: %d ", bpf_ntohs(udp->dest));
@@ -186,9 +185,9 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
+static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end, struct dns_header *header)
 {
-    struct dns_header *header;
+    
     header = data + *offset;
     
     *offset  += sizeof(struct dns_header);
@@ -202,8 +201,9 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (!(header->query_or_response & DNS_QUERY_TYPE))
+    if (header->flags >> DNS_QR_RIGHT_SHIFT ^ DNS_QUERY_TYPE)
     {
+
         #ifdef DEBUG
             bpf_printk("[DROP] It's not a DNS query");
         #endif
@@ -275,7 +275,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
 
     query->record_type = bpf_ntohs(*((uint16_t *) content));
 
-    if (query->record_type ^ 1)
+    if (query->record_type ^ A_RECORD_TYPE)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] It's not a DNS query type A");
@@ -287,7 +287,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
 
     query->class = bpf_htons(*((uint16_t *) content));
 
-    if (query->class ^ 1)
+    if (query->class ^ INTERNT_CLASS)
     {
         #ifdef DEBUG
             bpf_printk("[DROP] It's not a DNS query class IN");
@@ -297,7 +297,6 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     
     return 1;
 }
-
 
 SEC("xdp")
 int dns(struct xdp_md *ctx) {
@@ -339,7 +338,9 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    if (isDNSQuery(data, &offset_h, data_end))
+    struct dns_header *header;
+
+    if (isDNSQuery(data, &offset_h, data_end, header))
     {
         #ifdef DEBUG
             bpf_printk("Its DNS Query");
@@ -369,15 +370,12 @@ int dns(struct xdp_md *ctx) {
     if (record > 0)
     {
         #ifdef DEBUG
-
             print_ip(record->ip_addr.s_addr);
         #endif
     }
 
-
-    #ifdef DEBUG
-        bpf_printk("Perfect");
-    #endif
+    else
+        return XDP_PASS;
     
     return XDP_PASS;
 }

@@ -10,7 +10,18 @@
 #define UDP_PROTOCOL 0x11
 #define DNS_PORT 0x35
 
-#define DNS_QUERY_TYPE 1
+#define DNS_QUERY_TYPE 0
+#define DNS_RESPONSE_TYPE 1
+
+#define DNS_RA 1
+
+#define DNS_QR_RIGHT_SHIFT 15
+#define DNS_RA_RIGHT_SHIFT 7
+
+#define A_RECORD_TYPE 1
+
+#define INTERNT_CLASS 1
+
 #define MAX_DNS_NAME_LENGTH 256
 #define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
@@ -31,19 +42,18 @@
 struct dns_header
 {
     uint16_t id;
-    
-    union
-    {
-        uint16_t query_or_response    :1;
-        uint16_t kind_of_query        :4;
-        uint16_t authoritative_answer :1;
-        uint16_t truncation           :1;
-        uint16_t recursion_desired    :1;
-        uint16_t recursion_available  :1;
-        uint16_t future_use           :3;
-        uint16_t response_code        :4;
-    };
-    
+    uint16_t flags;
+
+    // flags partition
+    // qr                     1 bit
+    // opcode                 4 bits
+    // authoritative_answer   1 bit
+    // truncation             1 bit
+    // recursion_desired      1 bit
+    // recursion_available    1 bit
+    // future_use             3 bits
+    // response_code          4 bits
+
     uint16_t questions;
     uint16_t answer_count;
     uint16_t name_servers;
