@@ -20,6 +20,15 @@ struct {
 
 } dns_records SEC(".maps");
 
+struct {
+        __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
+        __uint(max_entries, 2);
+        __uint(key_size, sizeof(__u32));
+        __uint(value_size, sizeof(__u32));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+
+} progs_tail_call SEC(".maps");
+
 static __always_inline void print_ip(__u64 ip) {
 
     __u8 fourth = ip >> 24;
@@ -185,9 +194,9 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end, struct dns_header *header)
+static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
 {
-    
+    struct dns_header *header;
     header = data + *offset;
     
     *offset  += sizeof(struct dns_header);
@@ -201,7 +210,7 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end,
         return 0;
     }
 
-    if (header->flags >> DNS_QR_RIGHT_SHIFT ^ DNS_QUERY_TYPE)
+    if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
     {
 
         #ifdef DEBUG
@@ -214,7 +223,7 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end,
     return 1;
 }
 
-static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query )
+static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query)
 {
     
     __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
@@ -298,14 +307,50 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
+static __always_inline void prepareResponse(void *data, void *data_end) {
+
+    struct ethhdr *eth;
+    eth = data;
+
+    unsigned char tmp_mac[ETH_ALEN];
+
+	__builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
+	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+	__builtin_memcpy(eth->h_dest, tmp_mac, ETH_ALEN);
+
+    struct iphdr *ipv4;
+    ipv4 = data + sizeof(struct ethhdr);
+
+    __be32 tmp_ip = ipv4->saddr;
+	ipv4->saddr = ipv4->daddr;
+	ipv4->daddr = tmp_ip;
+
+    struct udphdr *udp;
+    udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
+
+    __be16 tmp_port = udp->source;
+	udp->source = udp->dest;
+	udp->dest = tmp_port;
+
+    struct dns_header *header;
+    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    
+    header->answer_count = bpf_htons(1);
+    header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
+    header->flags |= DNS_RA << DNS_RA_SHIFT;
+    
+}
+
+
+
 SEC("xdp")
-int dns(struct xdp_md *ctx) {
+int dns_filter(struct xdp_md *ctx) {
 
     void *data_end = (void*) (long) ctx->data_end;
     void *data = (void*) (long) ctx->data;
 
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
-    int a, b, c;
 
     if(isIPV4(data, &offset_h, data_end))
     {
@@ -338,9 +383,23 @@ int dns(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    struct dns_header *header;
+    bpf_tail_call(ctx, &progs_tail_call, DNS_HASK_KEY_PROG);
+    
+    return XDP_PASS;
+}
 
-    if (isDNSQuery(data, &offset_h, data_end, header))
+
+SEC("xdp")
+int dns_hash_keys(struct xdp_md *ctx)
+{
+    void *data_end = (void*) (long) ctx->data_end;
+    void *data = (void*) (long) ctx->data;
+
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    
+
+    if (isDNSQuery(data, &offset_h, data_end))
     {
         #ifdef DEBUG
             bpf_printk("Its DNS Query");
@@ -376,8 +435,16 @@ int dns(struct xdp_md *ctx) {
 
     else
         return XDP_PASS;
-    
-    return XDP_PASS;
+
+    prepareResponse(data, data_end);
+
+    #ifdef DEBUG
+        bpf_printk("To aqui");
+    #endif
+
+    return XDP_TX;
+
+    // return XDP_PASS;
 }
 
 

@@ -15,8 +15,8 @@
 
 #define DNS_RA 1
 
-#define DNS_QR_RIGHT_SHIFT 15
-#define DNS_RA_RIGHT_SHIFT 7
+#define DNS_QR_SHIFT 15
+#define DNS_RA_SHIFT 7
 
 #define A_RECORD_TYPE 1
 
@@ -25,6 +25,9 @@
 #define MAX_DNS_NAME_LENGTH 256
 #define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
+
+#define DNS_FILTER_PROG 0
+#define DNS_HASK_KEY_PROG 1
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -41,8 +44,8 @@
 
 struct dns_header
 {
-    uint16_t id;
-    uint16_t flags;
+    __be16 id;
+    __be16 flags;
 
     // flags partition
     // qr                     1 bit
@@ -54,10 +57,10 @@ struct dns_header
     // future_use             3 bits
     // response_code          4 bits
 
-    uint16_t questions;
-    uint16_t answer_count;
-    uint16_t name_servers;
-    uint16_t additional_records;
+    __be16 questions;
+    __be16 answer_count;
+    __be16 name_servers;
+    __be16 additional_records;
 };
 
 
