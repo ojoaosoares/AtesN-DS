@@ -8,6 +8,7 @@
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
 #define UDP_PROTOCOL 0x11
+#define UDP_NO_ERROR 0x0
 #define DNS_PORT 0x35
 
 #define DNS_QUERY_TYPE 0
@@ -74,5 +75,15 @@ struct a_record {
     struct in_addr ip_addr;
     uint32_t ttl;
 };
+
+struct dns_response {
+   uint16_t query_pointer;
+   uint16_t record_type;
+   uint16_t class;
+   uint32_t ttl;
+   uint16_t data_length;
+   uint32_t ip;
+};
+
 
 #endif

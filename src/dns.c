@@ -101,6 +101,41 @@ static __always_inline __u64 ip_to_int(char *ip) {
     return final_sum;
 }
 
+static inline uint16_t calculate_ip_checksum(void *data, void *data_end)
+{
+    struct iphdr *ipv4;
+    ipv4 = data + sizeof(struct ethhdr);
+    void *pointer = data + sizeof(struct ethhdr);
+
+    uint32_t accumulator = 0;
+    for (int i = 0; i < sizeof(struct iphdr); i += 2)
+    {
+        uint16_t val;
+        //If we are currently at the checksum_location, set to zero
+        val = (&ipv4->check != (pointer + i)) ? *(uint16_t *)(pointer + i) : 0;
+
+        accumulator += val;
+    }
+
+    //Add 16 bits overflow back to accumulator (if necessary)
+    uint16_t overflow = accumulator >> 16;
+    accumulator &= 0x00FFFF;
+    accumulator += overflow;
+
+    //If this resulted in an overflow again, do the same (if necessary)
+    accumulator += (accumulator >> 16);
+    accumulator &= 0x00FFFF;
+
+    //Invert bits and set the checksum at checksum_location
+    uint16_t chk = accumulator ^ 0xFFFF;
+
+    #ifdef DEBUG
+        bpf_printk("Checksum: %u", chk);
+    #endif
+
+    return chk;
+}
+
 static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
 {
 
@@ -307,7 +342,18 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
-static __always_inline void prepareResponse(void *data, void *data_end) {
+static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end) {
+
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] Boundary exceded");
+        #endif
+
+        return 0;
+    }
+
 
     struct ethhdr *eth;
     eth = data;
@@ -325,6 +371,11 @@ static __always_inline void prepareResponse(void *data, void *data_end) {
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = tmp_ip;
 
+    uint16_t ipv4len = (data_end - data) - sizeof(struct ethhdr);
+    ipv4->tot_len = bpf_htons(ipv4len);
+
+    ipv4->check = calculate_ip_checksum(data, data_end);
+
     struct udphdr *udp;
     udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
 
@@ -332,17 +383,47 @@ static __always_inline void prepareResponse(void *data, void *data_end) {
 	udp->source = udp->dest;
 	udp->dest = tmp_port;
 
+    uint16_t udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
+    udp->len = bpf_htons(udplen);
+
+    udp->check = UDP_NO_ERROR;
+
     struct dns_header *header;
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    
     header->answer_count = bpf_htons(1);
     header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
     header->flags |= DNS_RA << DNS_RA_SHIFT;
-    
+
+    return 1;
 }
 
+static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
 
+    struct dns_response *response;
+
+    response = data + *offset;
+
+    *offset += sizeof(struct dns_response);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No DNS answer");
+        #endif
+
+        return 0;
+    }
+        
+    response->query_pointer = bpf_htons((uint16_t) (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)));
+    response->class = bpf_htons(INTERNT_CLASS);
+    response->record_type = bpf_htons(A_RECORD_TYPE);
+    response->ttl = bpf_htons(record->ttl);
+    response->data_length = bpf_htons((uint16_t) sizeof(struct in_addr));
+    response->ip = record->ip_addr.s_addr;
+
+    return 1;
+}
 
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
@@ -436,15 +517,46 @@ int dns_hash_keys(struct xdp_md *ctx)
     else
         return XDP_PASS;
 
-    prepareResponse(data, data_end);
+    int delta = sizeof(struct dns_response);
 
     #ifdef DEBUG
-        bpf_printk("To aqui");
+        bpf_printk("%d", delta);
     #endif
 
-    return XDP_TX;
+    if (bpf_xdp_adjust_tail(ctx, delta) < 0)
+    {
+        #ifdef DEBUG
+            bpf_printk("It was't possible to resize the packet");
+        #endif
+        
+        return XDP_PASS;
+    }
 
-    // return XDP_PASS;
+    data = (void*) (long) ctx->data;
+    data_end = (void*) (long) ctx->data_end;
+
+    if(prepareResponse(data, &offset_h, data_end))
+    {
+        #ifdef DEBUG
+            bpf_printk("Headers updated");
+        #endif
+    }
+
+    else 
+        return XDP_PASS;
+
+
+    if(createDnsAnswer(data, &offset_h, data_end, &record))
+    {
+        #ifdef DEBUG
+            bpf_printk("Dns answer created");
+        #endif
+    }
+
+    else
+        return XDP_PASS;
+
+    return XDP_TX;
 }
 
 
