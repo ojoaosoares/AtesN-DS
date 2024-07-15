@@ -117,17 +117,8 @@ static inline uint16_t calculate_ip_checksum(void *data, void *data_end)
         accumulator += val;
     }
 
-    //Add 16 bits overflow back to accumulator (if necessary)
-    uint16_t overflow = accumulator >> 16;
-    accumulator &= 0x00FFFF;
-    accumulator += overflow;
-
-    //If this resulted in an overflow again, do the same (if necessary)
-    accumulator += (accumulator >> 16);
-    accumulator &= 0x00FFFF;
-
-    //Invert bits and set the checksum at checksum_location
-    uint16_t chk = accumulator ^ 0xFFFF;
+    
+    uint16_t chk = ~accumulator;
 
     #ifdef DEBUG
         bpf_printk("Checksum: %u", chk);
@@ -398,7 +389,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record record) {
 
     struct dns_response *response;
 
@@ -414,13 +405,13 @@ static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data
 
         return 0;
     }
-        
-    response->query_pointer = bpf_htons((uint16_t) (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)));
+
+    response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
     response->class = bpf_htons(INTERNT_CLASS);
     response->record_type = bpf_htons(A_RECORD_TYPE);
-    response->ttl = bpf_htons(record->ttl);
-    response->data_length = bpf_htons((uint16_t) sizeof(struct in_addr));
-    response->ip = record->ip_addr.s_addr;
+    response->ttl = bpf_htonl(record.ttl);
+    response->data_length = bpf_htons(sizeof(record.ip_addr.s_addr));
+    response->ip = (record.ip_addr.s_addr);
 
     return 1;
 }
@@ -519,10 +510,6 @@ int dns_hash_keys(struct xdp_md *ctx)
 
     int delta = sizeof(struct dns_response);
 
-    #ifdef DEBUG
-        bpf_printk("%d", delta);
-    #endif
-
     if (bpf_xdp_adjust_tail(ctx, delta) < 0)
     {
         #ifdef DEBUG
@@ -546,7 +533,7 @@ int dns_hash_keys(struct xdp_md *ctx)
         return XDP_PASS;
 
 
-    if(createDnsAnswer(data, &offset_h, data_end, &record))
+    if(createDnsAnswer(data, &offset_h, data_end, *record))
     {
         #ifdef DEBUG
             bpf_printk("Dns answer created");

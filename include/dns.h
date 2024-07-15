@@ -23,6 +23,8 @@
 
 #define INTERNT_CLASS 1
 
+#define DNS_POINTER_OFFSET 0xc00c
+
 #define MAX_DNS_NAME_LENGTH 256
 #define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
@@ -62,7 +64,7 @@ struct dns_header
     __be16 answer_count;
     __be16 name_servers;
     __be16 additional_records;
-};
+} __attribute__((packed));
 
 
 struct dns_query {
@@ -83,7 +85,7 @@ struct dns_response {
    uint32_t ttl;
    uint16_t data_length;
    uint32_t ip;
-};
+} __attribute__((packed));
 
 
 #endif
