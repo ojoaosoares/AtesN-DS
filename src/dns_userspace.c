@@ -106,7 +106,7 @@ int read_file(const char *filepath, const struct bpf_map *map)
     FILE *fp;
     fp = fopen(filepath, "r");
 
-    char line[300], domain[256], ip[15];
+    char line[300], domain[256], ip[16];
 
     int cont = 0, ttl;
 
@@ -145,7 +145,7 @@ int save_records(const struct bpf_map *map)
     
     struct a_record ip_address_value;
 
-    char ip[15];
+    char ip[16];
 
     while (bpf_map__get_next_key(map, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
     {
@@ -173,7 +173,7 @@ int save_records(const struct bpf_map *map)
 
 int print_record(struct dns_query dns_key, struct a_record ip_address_value) 
 {   
-    char ip[15];
+    char ip[16];
 
     if((inet_ntop(AF_INET, &ip_address_value.ip_addr, ip, INET_ADDRSTRLEN)) == NULL)
     {
