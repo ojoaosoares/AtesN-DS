@@ -333,7 +333,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
-static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end) {
+static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end, __be16 answer_count) {
 
 
     if (data + *offset > data_end)
@@ -382,7 +382,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     struct dns_header *header;
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    header->answer_count = bpf_htons(1);
+    header->answer_count = bpf_htons(answer_count);
     header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
     header->flags |= DNS_RA << DNS_RA_SHIFT;
 
