@@ -500,50 +500,56 @@ int dns_hash_keys(struct xdp_md *ctx)
 
     if (record > 0)
     {
-        #ifdef DEBUG
-            print_ip(record->ip_addr.s_addr);
-        #endif
+        int delta = sizeof(struct dns_response);
+
+        if (bpf_xdp_adjust_tail(ctx, delta) < 0)
+        {
+            #ifdef DEBUG
+                bpf_printk("It was't possible to resize the packet");
+            #endif
+            
+            return XDP_PASS;
+        }
+
+        data = (void*) (long) ctx->data;
+        data_end = (void*) (long) ctx->data_end;
+
+
+        if(prepareResponse(data, &offset_h, data_end, 1))
+        {
+            #ifdef DEBUG
+                bpf_printk("Headers updated");
+            #endif
+        }
+
+        else 
+            return XDP_PASS;
+
+
+        if(createDnsAnswer(data, &offset_h, data_end, *record))
+        {
+            #ifdef DEBUG
+                bpf_printk("Dns answer created");
+            #endif
+        }
+
+        else
+            return XDP_PASS;
     }
 
-    else
-        return XDP_PASS;
-
-    int delta = sizeof(struct dns_response);
-
-    if (bpf_xdp_adjust_tail(ctx, delta) < 0)
-    {
-        #ifdef DEBUG
-            bpf_printk("It was't possible to resize the packet");
-        #endif
-        
-        return XDP_PASS;
-    }
-
-    data = (void*) (long) ctx->data;
-    data_end = (void*) (long) ctx->data_end;
-
-    if(prepareResponse(data, &offset_h, data_end))
-    {
-        #ifdef DEBUG
-            bpf_printk("Headers updated");
-        #endif
-    }
 
     else 
-        return XDP_PASS;
-
-
-    if(createDnsAnswer(data, &offset_h, data_end, *record))
     {
-        #ifdef DEBUG
-            bpf_printk("Dns answer created");
-        #endif
+        if(prepareResponse(data, &offset_h, data_end, 0))
+        {
+            #ifdef DEBUG
+                bpf_printk("Headers updated");
+            #endif
+        }
+
+        else 
+            return XDP_PASS;
     }
-
-    else
-        return XDP_PASS;
-
-    return XDP_TX;
 }
 
 
