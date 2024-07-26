@@ -13,9 +13,18 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 4556);
+        __uint(max_entries, 1000);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+
+} dns_records SEC(".maps");
+
+struct {
+        __uint(type, BPF_MAP_TYPE_ARRAY);
+        __uint(max_entries, 1);
+        __uint(key_size, sizeof(__u8));
+        __uint(value_size, sizeof(struct counters));
         __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } dns_records SEC(".maps");
@@ -115,6 +124,9 @@ static inline uint16_t calculate_ip_checksum(void *data, void *data_end)
         val = (&ipv4->check != (pointer + i)) ? *(uint16_t *)(pointer + i) : 0;
 
         accumulator += val;
+
+        if (accumulator > 0xFFFF)
+            accumulator = (accumulator & 0xFFFF) + (accumulator >> 16);
     }
 
     
@@ -377,7 +389,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     uint16_t udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
     udp->len = bpf_htons(udplen);
 
-    udp->check = UDP_NO_ERROR;
+    udp->check = bpf_htons(UDP_NO_ERROR);
 
     struct dns_header *header;
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -432,7 +444,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_PASS;
+        return XDP_DROP;
 
 
     if(isValidUDP(data, &offset_h, data_end))
@@ -443,7 +455,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_PASS;
+        return XDP_DROP;
 
     if(isPort53(data, &offset_h, data_end))
     {
@@ -453,16 +465,16 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_PASS;
+        return XDP_DROP;
 
     bpf_tail_call(ctx, &progs_tail_call, DNS_HASK_KEY_PROG);
     
-    return XDP_PASS;
+    return XDP_DROP;
 }
 
 
 SEC("xdp")
-int dns_hash_keys(struct xdp_md *ctx)
+int dns_response(struct xdp_md *ctx)
 {
     void *data_end = (void*) (long) ctx->data_end;
     void *data = (void*) (long) ctx->data;
@@ -479,7 +491,7 @@ int dns_hash_keys(struct xdp_md *ctx)
     }
 
     else
-        return XDP_PASS;
+        return XDP_DROP;
 
     struct dns_query query;
 
@@ -493,7 +505,7 @@ int dns_hash_keys(struct xdp_md *ctx)
     }
 
     else 
-        return XDP_PASS;
+        return XDP_DROP;
     
     struct a_record *record;
     record = bpf_map_lookup_elem(&dns_records, &query);
@@ -508,7 +520,7 @@ int dns_hash_keys(struct xdp_md *ctx)
                 bpf_printk("It was't possible to resize the packet");
             #endif
             
-            return XDP_PASS;
+            return XDP_DROP;
         }
 
         data = (void*) (long) ctx->data;
@@ -523,7 +535,7 @@ int dns_hash_keys(struct xdp_md *ctx)
         }
 
         else 
-            return XDP_PASS;
+            return XDP_DROP;
 
 
         if(createDnsAnswer(data, &offset_h, data_end, *record))
@@ -534,7 +546,7 @@ int dns_hash_keys(struct xdp_md *ctx)
         }
 
         else
-            return XDP_PASS;
+            return XDP_DROP;
     }
 
 
@@ -548,8 +560,10 @@ int dns_hash_keys(struct xdp_md *ctx)
         }
 
         else 
-            return XDP_PASS;
+            return XDP_DROP;
     }
+
+    return XDP_TX;
 }
 
 

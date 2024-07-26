@@ -87,5 +87,11 @@ struct dns_response {
    uint32_t ip;
 } __attribute__((packed));
 
+struct counters {
+    __u128 total_requests;
+    __u128 dns_requests;
+    __u128 correct_responses;
+};
+
 
 #endif
