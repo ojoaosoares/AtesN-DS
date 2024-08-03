@@ -9,106 +9,88 @@
 #include "bpf_helpers.h"
 #include "dns.h"
 
-#define DEBUG
+// #define DEBUG
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 1000);
+        __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
         __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } dns_records SEC(".maps");
 
-struct {
-        __uint(type, BPF_MAP_TYPE_ARRAY);
-        __uint(max_entries, 1);
-        __uint(key_size, sizeof(__u8));
-        __uint(value_size, sizeof(struct counters));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
+// static __always_inline void print_ip(__u64 ip) {
 
-} dns_records SEC(".maps");
+//     __u8 fourth = ip >> 24;
+//     __u8 third = (ip >> 16) & 0xFF;
+//     __u8 second = (ip >> 8) & 0xFF;
+//     __u8 first = ip & 0xFF;
 
-struct {
-        __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-        __uint(max_entries, 2);
-        __uint(key_size, sizeof(__u32));
-        __uint(value_size, sizeof(__u32));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
+//     #ifdef DEBUG
+//         bpf_printk("IP: %d.%d.%d.%d", first, second, third, fourth);
+//     #endif
 
-} progs_tail_call SEC(".maps");
+// }
 
-static __always_inline void print_ip(__u64 ip) {
+// static __always_inline __u64 ip_to_int(char *ip) {
 
-    __u8 fourth = ip >> 24;
-    __u8 third = (ip >> 16) & 0xFF;
-    __u8 second = (ip >> 8) & 0xFF;
-    __u8 first = ip & 0xFF;
+//     __u64 final_sum = 0;
+//     __u8 cont = 0;
 
-    #ifdef DEBUG
-        bpf_printk("IP: %d.%d.%d.%d", first, second, third, fourth);
-    #endif
-
-}
-
-static __always_inline __u64 ip_to_int(char *ip) {
-
-    __u64 final_sum = 0;
-    __u8 cont = 0;
-
-    __u16 octet = 256;
-    __u8 octet_cont = 0;
+//     __u16 octet = 256;
+//     __u8 octet_cont = 0;
     
-    __u8 digits[3];
+//     __u8 digits[3];
 
-    #pragma unroll
-    for (__u8 i = 0; i < 15; i++)
-    {
+//     #pragma unroll
+//     for (__u8 i = 0; i < 15; i++)
+//     {
         
-        if(ip[i] == '.' || ip[i] == '\0' || cont == 3)
-        {
-            __u16 p, sum = 0;
+//         if(ip[i] == '.' || ip[i] == '\0' || cont == 3)
+//         {
+//             __u16 p, sum = 0;
 
-            #pragma unroll
-            for (__u8 j = 0; j < 3; j++)
-            {
-                if (cont)
-                {
-                    p = digits[j];
+//             #pragma unroll
+//             for (__u8 j = 0; j < 3; j++)
+//             {
+//                 if (cont)
+//                 {
+//                     p = digits[j];
 
-                    #pragma unroll
-                    for (__u8 k = 0; k < 2; k++) 
-                    {
-                        if (cont - 1 > k)
-                            p *= 10;
-                    }
+//                     #pragma unroll
+//                     for (__u8 k = 0; k < 2; k++) 
+//                     {
+//                         if (cont - 1 > k)
+//                             p *= 10;
+//                     }
 
-                    cont--;
+//                     cont--;
 
-                    sum += p;
-                }
-            }
+//                     sum += p;
+//                 }
+//             }
                 
-            __u64 octet_p = 1;
-            for (__u8 j = 0; j < 3; j++)
-            {
-                if(octet_cont > j)
-                    octet_p *= octet;
-            }
+//             __u64 octet_p = 1;
+//             for (__u8 j = 0; j < 3; j++)
+//             {
+//                 if(octet_cont > j)
+//                     octet_p *= octet;
+//             }
 
-            octet_cont++;
-            final_sum += (sum*octet_p);
+//             octet_cont++;
+//             final_sum += (sum*octet_p);
 
-        }
+//         }
 
-        else {
-            digits[cont] = ip[i] - 48;
-            cont++;
-        }
-    }   
+//         else {
+//             digits[cont] = ip[i] - 48;
+//             cont++;
+//         }
+//     }   
 
-    return final_sum;
-}
+//     return final_sum;
+// }
 
 static inline uint16_t calculate_ip_checksum(void *data, void *data_end)
 {
@@ -198,7 +180,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     if (transport_protocol ^ UDP_PROTOCOL)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Ip protocol isn't UDP. Protocol: %d", transport_protocol);
+            bpf_printk("[DROP] Ip protocol is TCP. Protocol: %d", transport_protocol);
         #endif
 
         return 0;
@@ -444,7 +426,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_DROP;
+        return XDP_PASS;
 
 
     if(isValidUDP(data, &offset_h, data_end))
@@ -455,7 +437,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_DROP;
+        return XDP_PASS;
 
     if(isPort53(data, &offset_h, data_end))
     {
@@ -465,23 +447,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     else
-        return XDP_DROP;
-
-    bpf_tail_call(ctx, &progs_tail_call, DNS_HASK_KEY_PROG);
-    
-    return XDP_DROP;
-}
-
-
-SEC("xdp")
-int dns_response(struct xdp_md *ctx)
-{
-    void *data_end = (void*) (long) ctx->data_end;
-    void *data = (void*) (long) ctx->data;
-
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-    
+        return XDP_PASS;
 
     if (isDNSQuery(data, &offset_h, data_end))
     {
@@ -498,9 +464,10 @@ int dns_response(struct xdp_md *ctx)
     if(getDomain(data, &offset_h, data_end, &query))
     {
         #ifdef DEBUG
-            bpf_printk("Domain requested: %s", query.name);
-            bpf_printk("Domain type: %d", query.record_type);
-            bpf_printk("Domain class: %d", query.class);
+            // bpf_printk("Domain requested: %s", query.name);
+            bpf_printk("Domain requested");
+            // bpf_printk("Domain type: %d", query.record_type);
+            // bpf_printk("Domain class: %d", query.class);
         #endif
     }
 
@@ -512,6 +479,7 @@ int dns_response(struct xdp_md *ctx)
 
     if (record > 0)
     {
+
         int delta = sizeof(struct dns_response);
 
         if (bpf_xdp_adjust_tail(ctx, delta) < 0)
@@ -525,7 +493,6 @@ int dns_response(struct xdp_md *ctx)
 
         data = (void*) (long) ctx->data;
         data_end = (void*) (long) ctx->data_end;
-
 
         if(prepareResponse(data, &offset_h, data_end, 1))
         {
@@ -551,7 +518,8 @@ int dns_response(struct xdp_md *ctx)
 
 
     else 
-    {
+    {       
+
         if(prepareResponse(data, &offset_h, data_end, 0))
         {
             #ifdef DEBUG
@@ -565,6 +533,5 @@ int dns_response(struct xdp_md *ctx)
 
     return XDP_TX;
 }
-
 
 char _license[] SEC("license") = "GPL";

@@ -211,19 +211,9 @@ int main(int argc, char *argv[]) {
 
     printf("loaded\n");
 
-    
-
     if (argc == 2)
     {
         int index = if_nametoindex(argv[1]);
-        int a = 0;
-        int b = 1;
-
-        int fa = bpf_program__fd(skel->progs.dns_filter);
-        int fb = bpf_program__fd(skel->progs.dns_response);
-        
-        bpf_map__update_elem(skel->maps.progs_tail_call, &a, sizeof(__u32), &fa, sizeof(__u32), 0);
-        bpf_map__update_elem(skel->maps.progs_tail_call, &b, sizeof(__u32), &fb, sizeof(__u32), 0);
 
         if (index == 0)
         {

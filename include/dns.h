@@ -8,6 +8,7 @@
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
 #define UDP_PROTOCOL 0x11
+#define TCP_PROTOCOL 0x06
 #define UDP_NO_ERROR 0x0
 #define DNS_PORT 0x35
 
@@ -30,7 +31,7 @@
 #define END_DOMAIN 0x0
 
 #define DNS_FILTER_PROG 0
-#define DNS_HASK_KEY_PROG 1
+#define DNS_RESPONSE_PROG 1
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -86,12 +87,5 @@ struct dns_response {
    uint16_t data_length;
    uint32_t ip;
 } __attribute__((packed));
-
-struct counters {
-    __u128 total_requests;
-    __u128 dns_requests;
-    __u128 correct_responses;
-};
-
 
 #endif
