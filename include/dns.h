@@ -8,7 +8,6 @@
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
 #define UDP_PROTOCOL 0x11
-#define TCP_PROTOCOL 0x06
 #define UDP_NO_ERROR 0x0
 #define DNS_PORT 0x35
 
@@ -29,9 +28,6 @@
 #define MAX_DNS_NAME_LENGTH 256
 #define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
-
-#define DNS_FILTER_PROG 0
-#define DNS_RESPONSE_PROG 1
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
