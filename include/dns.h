@@ -76,13 +76,13 @@ struct a_record {
 };
 
 
-struct recursive_query {
-    __u16 id_query;
-    char name[MAX_DNS_NAME_LENGTH];
+struct query_id {
+    __u16 id;
+    struct dns_query dquery;
 };
 
 struct query_owner {
-    unsigned char mac_address[ETH_ALEN];
+    unsigned char mac_address[6];
     __be32 ip_address;
 };
 

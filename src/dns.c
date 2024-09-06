@@ -20,6 +20,15 @@ struct {
 
 } dns_records SEC(".maps");
 
+struct {
+        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(max_entries, 10);
+        __uint(key_size, sizeof(struct query_id));
+        __uint(value_size, sizeof(struct query_owner));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+
+} recursive_queries SEC(".maps");
+
 __be32 recursive_server_ip;
 unsigned char recursive_server_mac[ETH_ALEN];
 
@@ -217,7 +226,7 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
+static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end, struct query_id *query)
 {
     struct dns_header *header;
     header = data + *offset;
@@ -232,6 +241,8 @@ static __always_inline int isDNSQuery(void *data, __u64 *offset, void *data_end)
         
         return 0;
     }
+
+    query->id = header->id;
 
     if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
     {
@@ -422,7 +433,7 @@ static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_end) {
+static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
 
     if (data + *offset > data_end)
     {
@@ -436,9 +447,7 @@ static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_
     struct ethhdr *eth;
     eth = data;
 
-    unsigned char tmp_mac[ETH_ALEN];
-
-	__builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
+	__builtin_memcpy(owner->mac_address, eth->h_source, ETH_ALEN);
 	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
 	__builtin_memcpy(eth->h_dest, recursive_server_mac, ETH_ALEN);
 
@@ -450,7 +459,7 @@ static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_
     struct iphdr *ipv4;
     ipv4 = data + sizeof(struct ethhdr);
 
-    __be32 tmp_ip = ipv4->saddr;
+    owner->ip_address = ipv4->saddr;
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = recursive_server_ip;
 
@@ -515,7 +524,9 @@ int dns_filter(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    if (isDNSQuery(data, &offset_h, data_end))
+    struct query_id query;
+
+    if (isDNSQuery(data, &offset_h, data_end, &query))
     {
         #ifdef DEBUG
             bpf_printk("Its DNS Query");
@@ -525,15 +536,13 @@ int dns_filter(struct xdp_md *ctx) {
     else
         return XDP_DROP;
 
-    struct dns_query query;
-
-    if(getDomain(data, &offset_h, data_end, &query))
+    if(getDomain(data, &offset_h, data_end, &query.dquery))
     {
         #ifdef DEBUG
-            bpf_printk("Domain requested: %s", query.name);
+            bpf_printk("Domain requested: %s", query.dquery.name);
             bpf_printk("Domain requested");
-            bpf_printk("Domain type: %d", query.record_type);
-            bpf_printk("Domain class: %d", query.class);
+            bpf_printk("Domain type: %d", query.dquery.record_type);
+            bpf_printk("Domain class: %d", query.dquery.class);
         #endif
     }
 
@@ -541,7 +550,7 @@ int dns_filter(struct xdp_md *ctx) {
         return XDP_DROP;
     
     struct a_record *record;
-    record = bpf_map_lookup_elem(&dns_records, &query);
+    record = bpf_map_lookup_elem(&dns_records, &query.dquery);
 
     if (record > 0)
     {
@@ -585,7 +594,9 @@ int dns_filter(struct xdp_md *ctx) {
 
     else 
     {       
-        if(createDnsQuery(data, &offset_h, data_end))
+        struct query_owner owner;
+
+        if(createDnsQuery(data, &offset_h, data_end, &owner))
         {
             #ifdef DEBUG
                 bpf_printk("Dns dns query");
@@ -594,6 +605,8 @@ int dns_filter(struct xdp_md *ctx) {
 
         else
             return XDP_DROP;
+
+        bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
     }
 
     return XDP_TX;
