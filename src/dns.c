@@ -9,7 +9,7 @@
 #include "bpf_helpers.h"
 #include "dns.h"
 
-// #define DEBUG
+#define DEBUG
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
@@ -20,18 +20,21 @@ struct {
 
 } dns_records SEC(".maps");
 
-// static __always_inline void print_ip(__u64 ip) {
+__be32 recursive_server_ip;
+unsigned char recursive_server_mac[6];
 
-//     __u8 fourth = ip >> 24;
-//     __u8 third = (ip >> 16) & 0xFF;
-//     __u8 second = (ip >> 8) & 0xFF;
-//     __u8 first = ip & 0xFF;
+static __always_inline void print_ip(__u64 ip) {
 
-//     #ifdef DEBUG
-//         bpf_printk("IP: %d.%d.%d.%d", first, second, third, fourth);
-//     #endif
+    __u8 fourth = ip >> 24;
+    __u8 third = (ip >> 16) & 0xFF;
+    __u8 second = (ip >> 8) & 0xFF;
+    __u8 first = ip & 0xFF;
 
-// }
+    #ifdef DEBUG
+        bpf_printk("IP: %d.%d.%d.%d", first, second, third, fourth);
+    #endif
+
+}
 
 // static __always_inline __u64 ip_to_int(char *ip) {
 
@@ -327,7 +330,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
-static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end, __be16 answer_count) {
+static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end) {
 
 
     if (data + *offset > data_end)
@@ -373,9 +376,45 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    struct dns_header *header;
-    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    return 1;
+}
 
+static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+
+    __be16 answer_count;
+
+    if (record > 0)
+    {
+        answer_count = 1;
+
+        struct dns_response *response;
+
+        response = data + *offset;
+
+        *offset += sizeof(struct dns_response);
+
+        if (data + *offset > data_end)
+        {
+            #ifdef DEBUG
+                bpf_printk("[DROP] No DNS answer");
+            #endif
+
+            return 0;
+        }
+
+        response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
+        response->class = bpf_htons(INTERNT_CLASS);
+        response->record_type = bpf_htons(A_RECORD_TYPE);
+        response->ttl = bpf_htonl(record->ttl);
+        response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
+        response->ip = (record->ip_addr.s_addr);
+    }
+
+    else answer_count = 0;
+
+    struct dns_header *header;
+    
+    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
     header->answer_count = bpf_htons(answer_count);
     header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
     header->flags |= DNS_RA << DNS_RA_SHIFT;
@@ -383,31 +422,10 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record record) {
+static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
 
-    struct dns_response *response;
 
-    response = data + *offset;
 
-    *offset += sizeof(struct dns_response);
-
-    if (data + *offset > data_end)
-    {
-        #ifdef DEBUG
-            bpf_printk("[DROP] No DNS answer");
-        #endif
-
-        return 0;
-    }
-
-    response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
-    response->class = bpf_htons(INTERNT_CLASS);
-    response->record_type = bpf_htons(A_RECORD_TYPE);
-    response->ttl = bpf_htonl(record.ttl);
-    response->data_length = bpf_htons(sizeof(record.ip_addr.s_addr));
-    response->ip = (record.ip_addr.s_addr);
-
-    return 1;
 }
 
 SEC("xdp")
@@ -464,10 +482,10 @@ int dns_filter(struct xdp_md *ctx) {
     if(getDomain(data, &offset_h, data_end, &query))
     {
         #ifdef DEBUG
-            // bpf_printk("Domain requested: %s", query.name);
+            bpf_printk("Domain requested: %s", query.name);
             bpf_printk("Domain requested");
-            // bpf_printk("Domain type: %d", query.record_type);
-            // bpf_printk("Domain class: %d", query.class);
+            bpf_printk("Domain type: %d", query.record_type);
+            bpf_printk("Domain class: %d", query.class);
         #endif
     }
 
@@ -494,7 +512,7 @@ int dns_filter(struct xdp_md *ctx) {
         data = (void*) (long) ctx->data;
         data_end = (void*) (long) ctx->data_end;
 
-        if(prepareResponse(data, &offset_h, data_end, 1))
+        if(prepareResponse(data, &offset_h, data_end))
         {
             #ifdef DEBUG
                 bpf_printk("Headers updated");
@@ -505,7 +523,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_DROP;
 
 
-        if(createDnsAnswer(data, &offset_h, data_end, *record))
+        if(createDnsAnswer(data, &offset_h, data_end, record))
         {
             #ifdef DEBUG
                 bpf_printk("Dns answer created");
@@ -519,8 +537,32 @@ int dns_filter(struct xdp_md *ctx) {
 
     else 
     {       
+        
+        struct ethhdr *eth;
+        eth = data;
 
-        if(prepareResponse(data, &offset_h, data_end, 0))
+        __builtin_memcpy(eth->h_source, recursive_server_mac, ETH_ALEN);
+
+        #ifdef DEBUG
+            bpf_printk("%s", recursive_server_mac);
+            bpf_printk("%s", eth->h_source);
+        #endif
+        
+        struct iphdr *ipv4;
+        ipv4 = data + sizeof(struct ethhdr);
+
+        print_ip(recursive_server_ip);
+
+        ipv4->saddr = recursive_server_ip;
+
+        struct udphdr *udp;
+        udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
+
+        __be16 tmp_port = udp->source;
+        udp->source = udp->dest;
+        udp->dest = tmp_port;
+
+        if(prepareResponse(data, &offset_h, data_end))
         {
             #ifdef DEBUG
                 bpf_printk("Headers updated");
@@ -529,6 +571,16 @@ int dns_filter(struct xdp_md *ctx) {
 
         else 
             return XDP_DROP;
+
+        // if(createDnsAnswer(data, &offset_h, data_end, record))
+        // {
+        //     #ifdef DEBUG
+        //         bpf_printk("Dns answer created");
+        //     #endif
+        // }
+
+        // else
+        //     return XDP_DROP;
     }
 
     return XDP_TX;

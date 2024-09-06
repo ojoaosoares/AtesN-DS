@@ -13,6 +13,26 @@
 static const char *standard_database = "./data/database";
 static const char *data_dir = "./data";
 
+void convert_mac_to_bytes(const char *mac_str, unsigned char *mac_bytes) {
+
+    char hex[2];
+
+    hex[0] = mac_str[0];
+    hex[1] = mac_str[1];
+
+    char *end;
+
+    mac_bytes[0] = strtol(hex, &end, 16);
+
+
+    for( uint8_t i = 1; i < 6; i++ )
+    {
+        hex[0] = mac_str[2*i + i];
+        hex[1] = mac_str[2*i + i + 1];
+        mac_bytes[i] = strtol(hex, &end, 16);
+    }
+}
+
 int create_directory(const char *folder) {
     struct stat st = {0};
 
@@ -228,6 +248,13 @@ int main(int argc, char *argv[]) {
 
         printf("make debug to see the progam running\n");
         printf("CTRL + C to stop\n");
+
+        inet_pton(AF_INET, "8.8.8.8", &skel->bss->recursive_server_ip);
+        // skel->bss->recursive_server_ip = 134744072;
+
+        // memset(skel->bss->recursive_server_mac, 0, 6);
+        convert_mac_to_bytes("a0:36:9f:19:c4:cc", &skel->bss->recursive_server_mac);
+        // strcpy(&skel->bss->recursive_server_mac, "a391cc");
 
         for ( ; ; )
         {
