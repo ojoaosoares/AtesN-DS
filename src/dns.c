@@ -21,7 +21,7 @@ struct {
 } dns_records SEC(".maps");
 
 __be32 recursive_server_ip;
-unsigned char recursive_server_mac[6];
+unsigned char recursive_server_mac[ETH_ALEN];
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -422,10 +422,58 @@ static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_end) {
 
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] Boundary exceded");
+        #endif
 
+        return 0;
+    }
 
+    struct ethhdr *eth;
+    eth = data;
+
+    unsigned char tmp_mac[ETH_ALEN];
+
+	__builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
+	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+	__builtin_memcpy(eth->h_dest, recursive_server_mac, ETH_ALEN);
+
+    #ifdef DEBUG
+        bpf_printk("%s", recursive_server_mac);
+        bpf_printk("%s", eth->h_dest);
+    #endif
+
+    struct iphdr *ipv4;
+    ipv4 = data + sizeof(struct ethhdr);
+
+    __be32 tmp_ip = ipv4->saddr;
+	ipv4->saddr = ipv4->daddr;
+	ipv4->daddr = recursive_server_ip;
+
+    print_ip(ipv4->daddr);
+
+    // uint16_t ipv4len = (data_end - data) - sizeof(struct ethhdr);
+    // ipv4->tot_len = bpf_htons(ipv4len);
+
+    ipv4->check = calculate_ip_checksum(data, data_end);
+
+    struct udphdr *udp;
+    udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
+
+    // __be16 tmp_port = udp->source;
+	// udp->source = udp->dest;
+	// udp->dest = tmp_port;
+
+    // uint16_t udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
+    // udp->len = bpf_htons(udplen);
+
+    udp->check = bpf_htons(UDP_NO_ERROR);
+
+    return 1;
 }
 
 SEC("xdp")
@@ -537,50 +585,15 @@ int dns_filter(struct xdp_md *ctx) {
 
     else 
     {       
-        
-        struct ethhdr *eth;
-        eth = data;
-
-        __builtin_memcpy(eth->h_source, recursive_server_mac, ETH_ALEN);
-
-        #ifdef DEBUG
-            bpf_printk("%s", recursive_server_mac);
-            bpf_printk("%s", eth->h_source);
-        #endif
-        
-        struct iphdr *ipv4;
-        ipv4 = data + sizeof(struct ethhdr);
-
-        print_ip(recursive_server_ip);
-
-        ipv4->saddr = recursive_server_ip;
-
-        struct udphdr *udp;
-        udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
-
-        __be16 tmp_port = udp->source;
-        udp->source = udp->dest;
-        udp->dest = tmp_port;
-
-        if(prepareResponse(data, &offset_h, data_end))
+        if(createDnsQuery(data, &offset_h, data_end))
         {
             #ifdef DEBUG
-                bpf_printk("Headers updated");
+                bpf_printk("Dns dns query");
             #endif
         }
 
-        else 
+        else
             return XDP_DROP;
-
-        // if(createDnsAnswer(data, &offset_h, data_end, record))
-        // {
-        //     #ifdef DEBUG
-        //         bpf_printk("Dns answer created");
-        //     #endif
-        // }
-
-        // else
-        //     return XDP_DROP;
     }
 
     return XDP_TX;
