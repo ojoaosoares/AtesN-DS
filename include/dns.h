@@ -75,6 +75,17 @@ struct a_record {
     uint32_t ttl;
 };
 
+
+struct recursive_query {
+    __u16 id_query;
+    char name[MAX_DNS_NAME_LENGTH];
+};
+
+struct query_owner {
+    unsigned char mac_address[ETH_ALEN];
+    __be32 ip_address;
+};
+
 struct dns_response {
    uint16_t query_pointer;
    uint16_t record_type;
