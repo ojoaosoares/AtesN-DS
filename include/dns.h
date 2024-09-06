@@ -29,6 +29,9 @@
 #define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
 
+#define QUERY_RETURN 1
+#define RESPONSE_RETURN 2
+
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
 #endif
