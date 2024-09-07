@@ -21,7 +21,7 @@ MAC = $(shell ethtool -P $(DEV) | awk '/Permanent/ {print $$3}')
 # all sources, objs, and header files
 MAIN = ${SRC_FOLDER}dns_userspace.c
 SKELETON = ${INCLUDE_FOLDER}dns.skel.h
-TARGET = ${BIN_FOLDER}a.out
+TARGET = ${BIN_FOLDER}atesnds
 
 SRC = $(wildcard $(SRC_FOLDER)*.c)
 OBJ = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
@@ -37,7 +37,7 @@ $(shell mkdir -p $(DATA_FOLDER))
 all: ${TARGET}
 
 run: ${TARGET}
-	sudo ${TARGET} ${DEV}
+	sudo ${TARGET} -e -i ${DEV} -m ${MAC}
 
 ${TARGET} : ${MAIN} ${SKELETON}
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf

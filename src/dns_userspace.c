@@ -9,9 +9,12 @@
 #include <sys/stat.h>
 #include <regex.h>
 #include <stdio.h>
+#include <getopt.h>
 
 static const char *standard_database = "./data/database";
 static const char *data_dir = "./data";
+
+static const char *standard_recursive_server = "8.8.8.8";
 
 void convert_mac_to_bytes(const char *mac_str, unsigned char *mac_bytes) {
 
@@ -87,7 +90,7 @@ int add_record(const struct bpf_map *map, const char *domain, const char* ip, in
     struct a_record ip_address_value;
 
     if (!validate_ipv4(ip))
-        return -1;
+        return 0;
     
     inet_pton(AF_INET, ip, &ip_address_value.ip_addr);
 
@@ -207,13 +210,20 @@ int print_record(struct dns_query dns_key, struct a_record ip_address_value)
 }
 
 void tutorial() {
-    printf("How to use\n");
-    printf("sudo ./bin/a.out ....\n");
-    printf("Attach to XDP\t dev_interface\n");
-    printf("Add record\t a domain_name ip ttl\n");
-    printf("Delete record\t d (domain_name or all)\n");
-    printf("Read from file\t r filepath\n");
-    printf("Print record\t p (domain_name or all) \n");
+    printf("AtesN-DS\n");
+    printf("Usage: sudo ./atesnds [options]\n");
+    printf("  -h\tShow a help message\n");
+    printf("  -e [options]\tExecute the program\n");
+    printf("  \t-i\t interface where attach the dns\n");
+    printf("  \t-m\t your mac address\n");
+    printf("  \t-s\t the dns server to execute recursive queries\n");
+    printf("  -a [options]\tAdd a dns record\n");
+    printf("  \t-d\t domain to be added\n");
+    printf("  \t-i\t respective ip\n");
+    printf("  \t-t\t respective time to live\n");
+    printf("  -d [domain/all]\tDelete dns record's\n");
+    printf("  -p [domain/all]\tPrint dns record's\t\n");
+    printf("  -r [filepath]\t read a file containing dns records\n");
 
 }
 
@@ -231,44 +241,73 @@ int main(int argc, char *argv[]) {
 
     printf("loaded\n");
 
-    if (argc == 2)
+    if (argc >= 2)
     {
-        int index = if_nametoindex(argv[1]);
-
-        if (index == 0)
+    
+        if (!strcmp(argv[1], "-e") && (argc == 6 || argc == 8))
         {
-            printf("interface where the program will be attached is requeried \n");
+            int opt, index;
+
+            char mac_address[MAX_MAC_STRING_LENGTH], recursive[MAX_IP_STRING_LENGTH];
+
+            strcpy(recursive, standard_recursive_server);
+
+            optind = 2;
+
+            while ((opt = getopt(argc, argv, "i:m:s:")) != -1) {
+                switch (opt) {
+                case 'i':
+                    index = if_nametoindex(optarg);
+                    break;
+                case 'm':
+                    strcpy(mac_address, optarg);                    
+                    break;
+                case 's':
+                    strcpy(recursive, optarg);
+                    break;
+                default:
+                    tutorial();
+                    return 1;
+                }
+            }
+
+            if (index == 0)
+            {
+                printf("interface where the program will be attached is requeried \n");
+                goto cleanup;
+            }
+
+            if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
+            {
+                printf("it was not possiblle to attach the program \n");
+                goto cleanup;
+            }
+
+            if(!validate_ipv4(recursive))
+            {
+                printf("Invalid recursive server\n");
+                goto cleanup;
+            }
+
+            inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
+
+            printf("attached\n");
+
+            printf("make debug to see the progam running\n");
+            printf("CTRL + C to stop\n");
+
+
+            for ( ; ; )
+            {
+                sleep(1);
+            }
+
+            save_records(skel->maps.dns_records);
+
             goto cleanup;
         }
 
-        if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
-            goto cleanup;
-        
-        printf("attached\n");
-
-        printf("make debug to see the progam running\n");
-        printf("CTRL + C to stop\n");
-
-        inet_pton(AF_INET, "8.8.8.8", &skel->bss->recursive_server_ip);
-        // skel->bss->recursive_server_ip = 134744072;
-
-        // memset(skel->bss->recursive_server_mac, 0, 6);
-        convert_mac_to_bytes("a0:36:9f:19:c4:cc", &skel->bss->recursive_server_mac);
-        // strcpy(&skel->bss->recursive_server_mac, "a391cc");
-
-        for ( ; ; )
-        {
-            sleep(1);
-        }
-
-        save_records(skel->maps.dns_records);
-
-        goto cleanup;
-    }
-
-    else if (argc == 3)
-    {
-        if (!strcmp(argv[1], "d"))
+        else if (!strcmp(argv[1], "-d") && argc == 3)
         {
             if (!strcmp(argv[2], "all"))
             {
@@ -300,12 +339,10 @@ int main(int argc, char *argv[]) {
                 
             }
 
-            save_records(skel->maps.dns_records);
-            
+            save_records(skel->maps.dns_records); 
         }
 
-        
-        if(!strcmp(argv[1], "r"))
+        else if (!strcmp(argv[1], "-r") && argc == 3)
         {
             int answer = read_file(argv[2], skel->maps.dns_records);
 
@@ -324,8 +361,8 @@ int main(int argc, char *argv[]) {
             save_records(skel->maps.dns_records);
 
         }
-
-        if(!strcmp(argv[1], "p"))
+    
+        else if (!strcmp(argv[1], "-p") && argc == 3)
         {
             struct dns_query dns_key;
             struct a_record ip_address_value;
@@ -365,35 +402,56 @@ int main(int argc, char *argv[]) {
 
                 if(!print_record(dns_key, ip_address_value))
                     goto cleanup;
-            }
-            
-            
+            }   
         }
-        
-        goto cleanup;
-    }
-
-    else if (argc == 5 && !strcmp(argv[1], "a"))
-    {
-        if (add_record(skel->maps.dns_records, argv[2], argv[3], atoi(argv[4])) <= 0)
-        {
-            printf("Error: the elemente couldn't be created/updated\n");
-            goto cleanup;
-        }
-
-        printf("Map element created/updated\n");
-            
-        save_records(skel->maps.dns_records);
-
-        goto cleanup;
-    }
-
-    else {
-
-        tutorial();
-        goto cleanup;
     
+        else if (!strcmp(argv[1], "-a") && argc == 8)
+        {
+            int opt, ttl;
+
+            char domain[MAX_DNS_NAME_LENGTH], ip[MAX_IP_STRING_LENGTH];
+
+            optind = 2;
+
+            while ((opt = getopt(argc, argv, "d:i:t:")) != -1) {
+                switch (opt) {
+                case 'd':
+                    strcpy(domain, optarg);
+                    break;
+                case 'i':
+                    strcpy(ip, optarg);
+                    break;
+                case 't':
+                    ttl = atoi(optarg);
+                    break;
+                default:
+                    tutorial();
+                    return 1;
+                }
+            }
+
+            if (!add_record(skel->maps.dns_records, domain, ip, ttl))
+            {
+                printf("Error: the elemente couldn't be created/updated\n");
+                goto cleanup;
+            }
+
+            printf("Map element created/updated\n");
+                
+            save_records(skel->maps.dns_records);
+        }
+
+        else if (!strcmp(argv[1], "-h") && argc == 2)
+            tutorial();
+
+        else
+            tutorial();
+
+        goto cleanup;
     }
+
+    else
+        tutorial();
     
 cleanup: 
     dns__destroy(skel);
