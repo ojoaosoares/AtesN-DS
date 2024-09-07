@@ -14,10 +14,9 @@ DATA_FOLDER = ./data/
 
 INSTALL = ./init.sh
 
-
-
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}')
+MAC = $(shell ethtool -P $(DEV) | awk '/Permanent/ {print $$3}')
 
 # all sources, objs, and header files
 MAIN = ${SRC_FOLDER}dns_userspace.c
