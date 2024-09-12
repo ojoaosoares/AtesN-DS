@@ -346,7 +346,7 @@ static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *dat
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
-        return 0;
+        return DROP;
     }
 
 
@@ -383,7 +383,7 @@ static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *dat
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
@@ -407,7 +407,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
             bpf_printk("[DROP] No DNS answer");
         #endif
 
-        return 0;
+        return DROP;
     }
 
     response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
@@ -417,7 +417,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
     response->ip = (record->ip_addr.s_addr);    
 
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
@@ -428,7 +428,7 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
-        return 0;
+        return DROP;
     }
 
     struct ethhdr *eth;
@@ -437,11 +437,6 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
 	__builtin_memcpy(owner->mac_address, eth->h_source, ETH_ALEN);
 	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
 	__builtin_memcpy(eth->h_dest, recursive_server_mac, ETH_ALEN);
-
-    #ifdef DEBUG
-        bpf_printk("%s", recursive_server_mac);
-        bpf_printk("%s", eth->h_dest);
-    #endif
 
     struct iphdr *ipv4;
     ipv4 = data + sizeof(struct ethhdr);
@@ -459,7 +454,7 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
@@ -626,9 +621,7 @@ int dns_filter(struct xdp_md *ctx) {
         if (record)
         {
 
-            int delta = sizeof(struct dns_response);
-
-            if (bpf_xdp_adjust_tail(ctx, delta) < 0)
+            if (bpf_xdp_adjust_tail(ctx, sizeof(struct dns_response)) < 0)
             {
                 #ifdef DEBUG
                     bpf_printk("It was't possible to resize the packet");
@@ -640,42 +633,43 @@ int dns_filter(struct xdp_md *ctx) {
             data = (void*) (long) ctx->data;
             data_end = (void*) (long) ctx->data_end;
 
-            if(prepareResponse(data, &offset_h, data_end))
+            switch (prepareResponse(data, &offset_h, data_end))
             {
-                #ifdef DEBUG
-                    bpf_printk("Headers updated");
-                #endif
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("Headers updated");
+                    #endif  
+                    break;
             }
 
-            else 
-                return XDP_DROP;
-
-
-            if(createDnsAnswer(data, &offset_h, data_end, record))
+            switch (createDnsAnswer(data, &offset_h, data_end, record))
             {
-                #ifdef DEBUG
-                    bpf_printk("Dns answer created");
-                #endif
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("Headers updated");
+                    #endif  
+                    break;
             }
-
-            else
-                return XDP_DROP;
         }
-
 
         else 
         {       
             struct query_owner owner;
 
-            if(createDnsQuery(data, &offset_h, data_end, &owner))
+            switch (createDnsQuery(data, &offset_h, data_end, &owner))
             {
-                #ifdef DEBUG
-                    bpf_printk("Dns query created");
-                #endif
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("Dns query created");
+                    #endif  
+                    break;
             }
-
-            else
-                return XDP_DROP;
 
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
         }
