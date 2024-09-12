@@ -234,10 +234,10 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
         return DROP;
     }
 
-    if (header->questions > 1)
+    if (bpf_ntohs(header->questions) > 1)
     {
         #ifdef DEBUG
-            bpf_printk("[PASS] Multiple queries");
+            bpf_printk("[PASS] Multiple queries %d", bpf_ntohs(header->questions));
         #endif
         
         return PASS;
@@ -727,7 +727,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
     }
 
-    else XDP_DROP;
+    return XDP_DROP;
 }
 
 char _license[] SEC("license") = "GPL";
