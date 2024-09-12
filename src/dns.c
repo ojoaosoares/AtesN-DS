@@ -208,10 +208,10 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) ^ DNS_PORT)
+    if (bpf_ntohs(udp->dest) == DNS_PORT)
         return TO_DNS_PORT;
 
-    if (bpf_ntohs(udp->source) ^ DNS_PORT)
+    if (bpf_ntohs(udp->source) == DNS_PORT)
         return FROM_DNS_PORT;
 
     #ifdef DEBUG
@@ -239,7 +239,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     query->id = header->id;
 
-    if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE && header->questions == 1)
+    if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
         return RESPONSE_RETURN;
         
     return QUERY_RETURN;

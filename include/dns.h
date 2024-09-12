@@ -38,6 +38,7 @@
 
 #define QUERY_RETURN 1
 #define RESPONSE_RETURN 2
+#define MULT_QUERY_RETURN 3
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
