@@ -153,7 +153,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
         return PASS;
     }
 
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end)
@@ -188,7 +188,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         return PASS;
     }
 
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
@@ -334,7 +334,7 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
         return PASS;
     }
     
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *data_end) {
@@ -383,7 +383,7 @@ static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *dat
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
@@ -417,7 +417,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
     response->ip = (record->ip_addr.s_addr);    
 
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
@@ -454,7 +454,7 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    return ACCEPTED;
+    return ACCEPT;
 }
 
 static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
@@ -465,7 +465,7 @@ static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, 
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
-        return 0;
+        return DROP;
     }
 
     struct ethhdr *eth;
@@ -487,7 +487,7 @@ static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, 
 
     udp->check = bpf_htons(UDP_NO_ERROR);
 
-    return 1;
+    return ACCEPT;
 }
 
 static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
@@ -504,13 +504,13 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             bpf_printk("[DROP] No DNS answer");
         #endif
 
-        return 0;
+        return DROP;
     }
 
     record->ip_addr.s_addr = response->ip;
     record->ttl = response->ttl;
 
-    return 1;
+    return ACCEPT;
 }
 
 SEC("xdp")
@@ -688,37 +688,38 @@ int dns_filter(struct xdp_md *ctx) {
 
         if (owner > 0)
         {
-            if(prepareRecursiveResponse(data, &offset_h, data_end, owner))
+            switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
             {
-                #ifdef DEBUG
-                    bpf_printk("Dns recursive query response created");
-                #endif
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("Dns recursive query response created");
+                    #endif  
+                    break;
             }
-
-            else
-                return XDP_PASS;
             
             bpf_map_delete_elem(&recursive_queries, &query);
 
             struct a_record cache_record;
 
-            if (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+            switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
             {
-                #ifdef DEBUG
-                    bpf_printk("Record obtained");
-                #endif
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("Record obtained");
+                    #endif  
+                    break;
             }
-
-            else
-                return XDP_PASS;
 
             bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
 
             return XDP_TX;
         }
 
-        else
-            return XDP_PASS;
+        return XDP_PASS;
     }
 
     return XDP_DROP;

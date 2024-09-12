@@ -7,7 +7,7 @@
 
 #define DROP 0
 #define PASS 1
-#define ACCEPTED 2
+#define ACCEPT 2
 
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
