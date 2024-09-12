@@ -126,7 +126,7 @@ static inline __u16 calculate_ip_checksum(struct iphdr *ip)
     return ~((accumulator & 0xffff) + (accumulator >> 16));
 }
 
-static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
+static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 {
 
     struct ethhdr *eth = data; // Cabeçalho da camada ethrenet
@@ -156,7 +156,7 @@ static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
+static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end)
 {
     struct iphdr *ipv4;
     ipv4 = data + *offset;
@@ -194,7 +194,7 @@ static __always_inline int isValidUDP(void *data, __u64 *offset, void *data_end)
     return 1;
 }
 
-static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
+static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
 {
     struct udphdr *udp;
     udp = data + *offset;
@@ -208,18 +208,20 @@ static __always_inline int isPort53(void *data, __u64 *offset, void *data_end)
         return 0;
     }
 
-    if (bpf_ntohs(udp->dest) ^ DNS_PORT && bpf_ntohs(udp->source) ^ DNS_PORT)
-    {
-        #ifdef DEBUG
-            bpf_printk("[DROP] UDP datagram isn't port 53.");
-        #endif
-        return 0;
-    }
+    if (bpf_ntohs(udp->dest) == DNS_PORT)
+        return TO_DNS_PORT;
 
-    return 1;
+    if (bpf_ntohs(udp->source) == DNS_PORT)
+        return FROM_DNS_PORT;
+
+    #ifdef DEBUG
+        bpf_printk("[DROP] No correct Port");
+    #endif
+
+    return 0;
 }
 
-static __always_inline int isDNSQueryOrResponse(void *data, __u64 *offset, void *data_end, struct query_id *query)
+static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void *data_end, struct query_id *query)
 {
     struct dns_header *header;
     header = data + *offset;
@@ -239,11 +241,11 @@ static __always_inline int isDNSQueryOrResponse(void *data, __u64 *offset, void 
 
     if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
         return RESPONSE_RETURN;
-
+        
     return QUERY_RETURN;
 }
 
-static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query)
+static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query)
 {
     
     __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
@@ -302,7 +304,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     if (data + *offset > data_end)
         return 0;
 
-    query->record_type = bpf_ntohs(*((uint16_t *) content));
+    query->record_type = bpf_ntohs(*((__u16 *) content));
 
     if (query->record_type ^ A_RECORD_TYPE)
     {
@@ -314,7 +316,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     
     content += 2;
 
-    query->class = bpf_htons(*((uint16_t *) content));
+    query->class = bpf_htons(*((__u16 *) content));
 
     if (query->class ^ INTERNT_CLASS)
     {
@@ -327,7 +329,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     return 1;
 }
 
-static __always_inline int prepareResponse(void *data, __u64 *offset, void *data_end) {
+static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *data_end) {
 
 
     if (data + *offset > data_end)
@@ -356,7 +358,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = tmp_ip;
 
-    uint16_t ipv4len = (data_end - data) - sizeof(struct ethhdr);
+    __u16 ipv4len = (data_end - data) - sizeof(struct ethhdr);
     ipv4->tot_len = bpf_htons(ipv4len);
 
     ipv4->check = calculate_ip_checksum(ipv4);
@@ -368,7 +370,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
 	udp->source = udp->dest;
 	udp->dest = tmp_port;
 
-    uint16_t udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
+    __u16 udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
     udp->len = bpf_htons(udplen);
 
     udp->check = bpf_htons(UDP_NO_ERROR);
@@ -376,7 +378,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
 
     struct dns_header *header;
     
@@ -410,7 +412,7 @@ static __always_inline int createDnsAnswer(void *data, __u64 *offset, void *data
     return 1;
 }
 
-static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
+static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
 
     if (data + *offset > data_end)
     {
@@ -452,7 +454,7 @@ static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_
     return 1;
 }
 
-static __always_inline int prepareRecursiveResponse(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
+static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
 
     if (data + *offset > data_end)
     {
@@ -485,7 +487,7 @@ static __always_inline int prepareRecursiveResponse(void *data, __u64 *offset, v
     return 1;
 }
 
-static __always_inline int getDNSAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
 
     struct dns_response *response;
 
@@ -537,7 +539,9 @@ int dns_filter(struct xdp_md *ctx) {
     else
         return XDP_PASS;
 
-    if(isPort53(data, &offset_h, data_end))
+    __u8 port53 = isPort53(data, &offset_h, data_end);
+
+    if(port53)
     {
         #ifdef DEBUG
             bpf_printk("Its Port 53");
@@ -573,7 +577,7 @@ int dns_filter(struct xdp_md *ctx) {
     else 
         return XDP_DROP;
 
-    if (query_response == QUERY_RETURN)
+    if (query_response == QUERY_RETURN && port53 == TO_DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("It's a query");
@@ -651,16 +655,12 @@ int dns_filter(struct xdp_md *ctx) {
                 return XDP_DROP;
 
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
-
-            #ifdef DEBUG
-                bpf_printk("%d", query.id);
-            #endif
         }
 
         return XDP_TX;
     }
 
-    else
+    else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
     {
         #ifdef DEBUG
             bpf_printk("It's a response");
@@ -703,6 +703,8 @@ int dns_filter(struct xdp_md *ctx) {
         else
             return XDP_PASS;
     }
+
+    else XDP_DROP;
 }
 
 char _license[] SEC("license") = "GPL";
