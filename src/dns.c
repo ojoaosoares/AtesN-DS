@@ -113,33 +113,17 @@ static __always_inline void print_ip(__u64 ip) {
 //     return final_sum;
 // }
 
-static inline uint16_t calculate_ip_checksum(void *data, void *data_end)
+static inline __u16 calculate_ip_checksum(struct iphdr *ip)
 {
-    struct iphdr *ipv4;
-    ipv4 = data + sizeof(struct ethhdr);
-    void *pointer = data + sizeof(struct ethhdr);
+    __u16 *pointer = (__u16*) ip;
+    __u32 accumulator = 0;
 
-    uint32_t accumulator = 0;
-    for (int i = 0; i < sizeof(struct iphdr); i += 2)
-    {
-        uint16_t val;
-        //If we are currently at the checksum_location, set to zero
-        val = (&ipv4->check != (pointer + i)) ? *(uint16_t *)(pointer + i) : 0;
+    ip->check = 0;
 
-        accumulator += val;
-
-        if (accumulator > 0xFFFF)
-            accumulator = (accumulator & 0xFFFF) + (accumulator >> 16);
-    }
-
+    for (int i = 0; i < (sizeof(*ip) >> 1); i++)
+        accumulator += *pointer++;
     
-    uint16_t chk = ~accumulator;
-
-    #ifdef DEBUG
-        bpf_printk("Checksum: %u", chk);
-    #endif
-
-    return chk;
+    return ~((accumulator & 0xffff) + (accumulator >> 16));
 }
 
 static __always_inline int isIPV4(void *data, __u64 *offset, void *data_end)
@@ -375,7 +359,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
     uint16_t ipv4len = (data_end - data) - sizeof(struct ethhdr);
     ipv4->tot_len = bpf_htons(ipv4len);
 
-    ipv4->check = calculate_ip_checksum(data, data_end);
+    ipv4->check = calculate_ip_checksum(ipv4);
 
     struct udphdr *udp;
     udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
@@ -458,7 +442,7 @@ static __always_inline int createDnsQuery(void *data, __u64 *offset, void *data_
 
     print_ip(ipv4->daddr);
 
-    ipv4->check = calculate_ip_checksum(data, data_end);
+    ipv4->check = calculate_ip_checksum(ipv4);
 
     struct udphdr *udp;
     udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
@@ -491,7 +475,7 @@ static __always_inline int prepareRecursiveResponse(void *data, __u64 *offset, v
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = owner->ip_address;
 
-    ipv4->check = calculate_ip_checksum(data, data_end);
+    ipv4->check = calculate_ip_checksum(ipv4);
 
     struct udphdr *udp;
     udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
