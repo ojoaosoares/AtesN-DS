@@ -302,7 +302,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     if (data + *offset > data_end)
         return 0;
 
-    query->record_type = bpf_ntohs(*((uint16_t *) content));
+    query->record_type = bpf_ntohs(*((__u16 *) content));
 
     if (query->record_type ^ A_RECORD_TYPE)
     {
@@ -314,7 +314,7 @@ static __always_inline int getDomain(void *data, __u64 *offset, void *data_end, 
     
     content += 2;
 
-    query->class = bpf_htons(*((uint16_t *) content));
+    query->class = bpf_htons(*((__u16 *) content));
 
     if (query->class ^ INTERNT_CLASS)
     {
@@ -356,7 +356,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = tmp_ip;
 
-    uint16_t ipv4len = (data_end - data) - sizeof(struct ethhdr);
+    __u16 ipv4len = (data_end - data) - sizeof(struct ethhdr);
     ipv4->tot_len = bpf_htons(ipv4len);
 
     ipv4->check = calculate_ip_checksum(ipv4);
@@ -368,7 +368,7 @@ static __always_inline int prepareResponse(void *data, __u64 *offset, void *data
 	udp->source = udp->dest;
 	udp->dest = tmp_port;
 
-    uint16_t udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
+    __u16 udplen = (data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr);
     udp->len = bpf_htons(udplen);
 
     udp->check = bpf_htons(UDP_NO_ERROR);
@@ -651,10 +651,6 @@ int dns_filter(struct xdp_md *ctx) {
                 return XDP_DROP;
 
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
-
-            #ifdef DEBUG
-                bpf_printk("%d", query.id);
-            #endif
         }
 
         return XDP_TX;
