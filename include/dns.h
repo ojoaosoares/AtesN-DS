@@ -7,9 +7,14 @@
 
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
+
 #define UDP_PROTOCOL 0x11
 #define UDP_NO_ERROR 0x0
+
 #define DNS_PORT 0x35
+
+#define TO_DNS_PORT 1
+#define FROM_DNS_PORT 2
 
 #define DNS_QUERY_TYPE 0
 #define DNS_RESPONSE_TYPE 1
@@ -26,7 +31,6 @@
 #define DNS_POINTER_OFFSET 0xc00c
 
 #define MAX_DNS_NAME_LENGTH 256
-#define MAX_DNS_LABEL_LENGTH 64
 #define END_DOMAIN 0x0
 
 #define MAX_IP_STRING_LENGTH 16
