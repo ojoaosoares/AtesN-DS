@@ -1313,7 +1313,7 @@ enum {
 	BPF_F_RDONLY_PROG	= (1U << 7),
 	BPF_F_WRONLY_PROG	= (1U << 8),
 
-/* Clone map from listener for newly ACCEPT socket */
+/* Clone map from listener for newly accepted socket */
 	BPF_F_CLONE		= (1U << 9),
 
 /* Enable memory-mapping BPF map */
@@ -3405,7 +3405,7 @@ union bpf_attr {
  *		Adjust the size allocated to TLVs in the outermost IPv6
  *		Segment Routing Header contained in the packet associated to
  *		*skb*, at position *offset* by *delta* bytes. Only offsets
- *		after the segments are ACCEPT. *delta* can be as well
+ *		after the segments are accepted. *delta* can be as well
  *		positive (growing) as negative (shrinking).
  *
  * 		A call to this helper is susceptible to change the underlying
@@ -5497,7 +5497,7 @@ union bpf_attr {
  *		       because writing may pull the skb and change the
  *		       underlying packet buffer.
  *
- *		    *  For *flags*, please see the flags ACCEPT by
+ *		    *  For *flags*, please see the flags accepted by
  *		       **bpf_skb_store_bytes**\ ().
  *	Return
  *		0 on success, -E2BIG if *offset* + *len* exceeds the length

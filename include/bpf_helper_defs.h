@@ -1991,7 +1991,7 @@ static long (*bpf_lwt_seg6_store_bytes)(struct __sk_buff *skb, __u32 offset, con
  * 	Adjust the size allocated to TLVs in the outermost IPv6
  * 	Segment Routing Header contained in the packet associated to
  * 	*skb*, at position *offset* by *delta* bytes. Only offsets
- * 	after the segments are ACCEPT. *delta* can be as well
+ * 	after the segments are accepted. *delta* can be as well
  * 	positive (growing) as negative (shrinking).
  *
  * 	A call to this helper is susceptible to change the underlying
@@ -4541,7 +4541,7 @@ static long (*bpf_dynptr_read)(void *dst, __u32 len, const struct bpf_dynptr *sr
  * 	       because writing may pull the skb and change the
  * 	       underlying packet buffer.
  *
- * 	    *  For *flags*, please see the flags ACCEPT by
+ * 	    *  For *flags*, please see the flags accepted by
  * 	       **bpf_skb_store_bytes**\ ().
  *
  * Returns

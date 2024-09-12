@@ -703,7 +703,7 @@ int dns_filter(struct xdp_md *ctx) {
 
             struct a_record cache_record;
 
-            switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
+            switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
             {
                 case DROP:
                     return XDP_DROP;
