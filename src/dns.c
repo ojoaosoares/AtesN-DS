@@ -139,7 +139,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
             bpf_printk("[DROP] No ethernet frame");
         #endif
 
-        return 0;
+        return DROP;
     }
 
     __u16 ip_type; // Tipo de ip, esta contido na camada ethrenet
@@ -148,12 +148,12 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
     if(ip_type ^ bpf_htons(IPV4))
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Ethernet type isn't IPV4. IP type: %d", ip_type);
+            bpf_printk("[PASS] Ethernet type isn't IPV4. IP type: %d", ip_type);
         #endif
-        return 0;
+        return PASS;
     }
 
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end)
@@ -168,30 +168,27 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         #ifdef DEBUG
             bpf_printk("[DROP] No ip frame");
         #endif
-        return 0;
+        return DROP;
     }
     
     if (ipv4->frag_off & IP_FRAGMENTET)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Frame fragmented");
+            bpf_printk("[PASS] Frame fragmented");
         #endif
-        return 0;
+        return PASS;
     }
 
-    __u8 transport_protocol;
-    transport_protocol = ipv4->protocol;
-
-    if (transport_protocol ^ UDP_PROTOCOL)
+    if (ipv4->protocol ^ UDP_PROTOCOL)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] Ip protocol is TCP. Protocol: %d", transport_protocol);
+            bpf_printk("[PASS] Ip protocol is TCP. Protocol: %d", ipv4->protocol);
         #endif
 
-        return 0;
+        return PASS;
     }
 
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
@@ -205,7 +202,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
         #ifdef DEBUG
             bpf_printk("[DROP] No UDP datagram");
         #endif
-        return 0;
+        return DROP;
     }
 
     if (bpf_ntohs(udp->dest) == DNS_PORT)
@@ -215,10 +212,10 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
         return FROM_DNS_PORT;
 
     #ifdef DEBUG
-        bpf_printk("[DROP] No correct Port");
+        bpf_printk("[PASS] No correct Port");
     #endif
 
-    return 0;
+    return PASS;
 }
 
 static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void *data_end, struct query_id *query)
@@ -234,7 +231,16 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
             bpf_printk("[DROP] No DNS header");
         #endif
         
-        return 0;
+        return DROP;
+    }
+
+    if (header->questions > 1)
+    {
+        #ifdef DEBUG
+            bpf_printk("[PASS] Multiple queries");
+        #endif
+        
+        return PASS;
     }
 
     query->id = header->id;
@@ -256,7 +262,7 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     *offset += sizeof(__u8);
 
     if (data + *offset > data_end)
-        return 0;
+        return DROP;
     
     size = *(content);
 
@@ -266,13 +272,13 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
             bpf_printk("[DROP] No Dns domain");
         #endif
 
-        return 0;
+        return DROP;
     }
     
     *offset += sizeof(__u8);
 
     if (data + *offset > data_end)
-        return 0;
+        return DROP;
     
     content++;
 
@@ -294,7 +300,7 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
         *offset += sizeof(__u8);
 
         if (data + *offset > data_end)
-            return 0;
+            return DROP;
     }
 
     content = data + *offset; // 0 Octect
@@ -302,16 +308,17 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     *offset += (sizeof(__u8) * 4);
 
     if (data + *offset > data_end)
-        return 0;
+        return DROP;
 
     query->record_type = bpf_ntohs(*((__u16 *) content));
 
     if (query->record_type ^ A_RECORD_TYPE)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] It's not a DNS query type A");
+            bpf_printk("[PASS] It's not a DNS query type A");
         #endif
-        return 0;
+
+        return PASS;
     }
     
     content += 2;
@@ -321,12 +328,13 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     if (query->class ^ INTERNT_CLASS)
     {
         #ifdef DEBUG
-            bpf_printk("[DROP] It's not a DNS query class IN");
+            bpf_printk("[PASS] It's not a DNS query class IN");
         #endif
-        return 0;
+
+        return PASS;
     }
     
-    return 1;
+    return ACCEPTED;
 }
 
 static __always_inline __u8 prepareResponse(void *data, __u64 *offset, void *data_end) {
@@ -518,64 +526,79 @@ int dns_filter(struct xdp_md *ctx) {
 
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
 
-    if(isIPV4(data, &offset_h, data_end))
+
+    switch (isIPV4(data, &offset_h, data_end))
     {
-        #ifdef DEBUG
-            bpf_printk("Its IPV4");
-        #endif
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("Its IPV4");
+            #endif
+            break;
     }
 
-    else
-        return XDP_PASS;
-
-
-    if(isValidUDP(data, &offset_h, data_end))
+    switch (isValidUDP(data, &offset_h, data_end))
     {
-        #ifdef DEBUG
-            bpf_printk("Its UDP");
-        #endif
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("Its UDP");
+            #endif
+            break;
     }
-
-    else
-        return XDP_PASS;
 
     __u8 port53 = isPort53(data, &offset_h, data_end);
 
-    if(port53)
+    switch (port53)
     {
-        #ifdef DEBUG
-            bpf_printk("Its Port 53");
-        #endif
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("Its Port 53");
+            #endif  
+            break;
     }
-
-    else
-        return XDP_PASS;
 
     struct query_id query;
 
     __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &query);
 
-    if (query_response)
+    switch (query_response)
     {
-        #ifdef DEBUG
-            bpf_printk("Its DNS");
-        #endif
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("Its DNS");
+            #endif
+            break;
     }
 
-    else
-        return XDP_DROP;
-
-    if(getDomain(data, &offset_h, data_end, &query.dquery))
+    switch (getDomain(data, &offset_h, data_end, &query.dquery))
     {
-        #ifdef DEBUG
-            bpf_printk("Domain requested: %s", query.dquery.name);
-            bpf_printk("Domain type: %d", query.dquery.record_type);
-            bpf_printk("Domain class: %d", query.dquery.class);
-        #endif
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("Domain requested: %s", query.dquery.name);
+                bpf_printk("Domain type: %d", query.dquery.record_type);
+                bpf_printk("Domain class: %d", query.dquery.class);
+            #endif    
+            break;
     }
-
-    else 
-        return XDP_DROP;
 
     if (query_response == QUERY_RETURN && port53 == TO_DNS_PORT)
     {

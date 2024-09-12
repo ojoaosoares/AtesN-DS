@@ -5,6 +5,10 @@
 #include <string.h>
 #include "in.h"
 
+#define DROP 0
+#define PASS 1
+#define ACCEPTED 2
+
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343
 
@@ -13,8 +17,8 @@
 
 #define DNS_PORT 0x35
 
-#define TO_DNS_PORT 1
-#define FROM_DNS_PORT 2
+#define TO_DNS_PORT 2
+#define FROM_DNS_PORT 3
 
 #define DNS_QUERY_TYPE 0
 #define DNS_RESPONSE_TYPE 1
@@ -36,9 +40,8 @@
 #define MAX_IP_STRING_LENGTH 16
 #define MAX_MAC_STRING_LENGTH 18
 
-#define QUERY_RETURN 1
-#define RESPONSE_RETURN 2
-#define MULT_QUERY_RETURN 3
+#define QUERY_RETURN 2
+#define RESPONSE_RETURN 3
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
