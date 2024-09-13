@@ -25,7 +25,6 @@ struct {
         __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct query_id));
         __uint(value_size, sizeof(struct query_owner));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } recursive_queries SEC(".maps");
 
@@ -34,7 +33,6 @@ struct {
         __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } cache SEC(".maps");
 
@@ -616,7 +614,6 @@ int dns_filter(struct xdp_md *ctx) {
                 #endif
             }
         }
-
 
         if (record)
         {
