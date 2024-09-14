@@ -40,7 +40,6 @@ struct {
 
 __be32 recursive_server_ip;
 unsigned char recursive_server_mac[ETH_ALEN];
-int device;
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -417,6 +416,40 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     response->ttl = bpf_htonl(record->ttl);
     response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
     response->ip = (record->ip_addr.s_addr);    
+
+    return ACCEPT;
+}
+
+static __always_inline __u8 createDnsAnswerTcx(void *data, __u64 *offset, void *data_end, struct a_record *record, char *response_array) {
+
+    struct dns_header *header;
+    
+    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    header->answer_count = bpf_htons(1);
+    header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
+    header->flags |= DNS_RA << DNS_RA_SHIFT;
+
+    *offset += sizeof(struct dns_response);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No DNS answer");
+        #endif
+
+        return DROP;
+    }
+
+    struct dns_response response;
+
+    response.query_pointer = bpf_htons(DNS_POINTER_OFFSET);
+    response.class = bpf_htons(INTERNT_CLASS);
+    response.record_type = bpf_htons(A_RECORD_TYPE);
+    response.ttl = bpf_htonl(record->ttl);
+    response.data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
+    response.ip = (record->ip_addr.s_addr);    
+
+    __builtin_memcpy(response_array, &response, sizeof(response));
 
     return ACCEPT;
 }
@@ -854,7 +887,9 @@ int dns_tc(struct __sk_buff *skb)
                     break;
             }
 
-            switch (createDnsAnswer(data, &offset_h, data_end, record))
+            char response_array[sizeof(struct dns_response)];
+
+            switch (createDnsAnswerTcx(data, &offset_h, data_end, record, response_array))
             {
                 case DROP:
                     return TCX_DROP;
@@ -863,6 +898,13 @@ int dns_tc(struct __sk_buff *skb)
                         bpf_printk("Answer created");
                     #endif  
                     break;
+            }
+
+            if (bpf_skb_store_bytes(skb, skb->len, response_array, sizeof(response_array), 0) < 0) {
+                #ifdef DEBUG
+                    bpf_printk("[DROP] Erro ao inserir resposta DNS");
+                #endif
+                return TCX_DROP;
             }
         }
 
@@ -884,9 +926,7 @@ int dns_tc(struct __sk_buff *skb)
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
         }
 
-        bpf_redirect(device, 0);
-
-        return TCX_REDIRECT;
+        return bpf_redirect_neigh(skb->ifindex, NULL, 0, 0);
     }
 
     else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
@@ -928,9 +968,7 @@ int dns_tc(struct __sk_buff *skb)
 
             bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
 
-            bpf_redirect(device, 0);
-
-            return TCX_REDIRECT;
+            return bpf_redirect_neigh(skb->ifindex, NULL, 0, 0);
         }
 
         return TCX_PASS;
