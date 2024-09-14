@@ -417,39 +417,24 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
     response->ip = (record->ip_addr.s_addr);    
 
-    return ACCEPT;
-}
+    #ifdef DEBUG
+        bpf_printk("QP: %d", response->query_pointer);
+        bpf_printk("QP: %d", bpf_ntohs(response->query_pointer));
+        bpf_printk("Class: %d", response->class);
+        bpf_printk("Class: %d", bpf_ntohs(response->class));
+        bpf_printk("Type: %d", response->record_type);
+        bpf_printk("Type: %d", bpf_ntohs(response->record_type));
+        bpf_printk("Ttl: %d", response->ttl);
+        bpf_printk("Ttl: %d", bpf_ntohs(response->ttl));
+        bpf_printk("Data length: %d", response->data_length);
+        bpf_printk("Data length: %d", bpf_ntohs(response->data_length));
+        bpf_printk("Ip: %d", response->ip);
+        bpf_printk("Ip: %d", bpf_htons(response->ip));
 
-static __always_inline __u8 createDnsAnswerTcx(void *data, __u64 *offset, void *data_end, struct a_record *record, char *response_array) {
-
-    struct dns_header *header;
-    
-    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-    header->answer_count = bpf_htons(1);
-    header->flags |= DNS_RESPONSE_TYPE << DNS_QR_SHIFT;
-    header->flags |= DNS_RA << DNS_RA_SHIFT;
-
-    *offset += sizeof(struct dns_response);
-
-    if (data + *offset > data_end)
-    {
-        #ifdef DEBUG
-            bpf_printk("[DROP] No DNS answer");
-        #endif
-
-        return DROP;
-    }
-
-    struct dns_response response;
-
-    response.query_pointer = bpf_htons(DNS_POINTER_OFFSET);
-    response.class = bpf_htons(INTERNT_CLASS);
-    response.record_type = bpf_htons(A_RECORD_TYPE);
-    response.ttl = bpf_htonl(record->ttl);
-    response.data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
-    response.ip = (record->ip_addr.s_addr);    
-
-    __builtin_memcpy(response_array, &response, sizeof(response));
+        print_ip(response->ip);
+        print_ip(bpf_htons(response->ip));
+        
+    #endif
 
     return ACCEPT;
 }
@@ -887,9 +872,7 @@ int dns_tc(struct __sk_buff *skb)
                     break;
             }
 
-            char response_array[sizeof(struct dns_response)];
-
-            switch (createDnsAnswerTcx(data, &offset_h, data_end, record, response_array))
+            switch (createDnsAnswer(data, &offset_h, data_end, record))
             {
                 case DROP:
                     return TCX_DROP;
@@ -898,13 +881,6 @@ int dns_tc(struct __sk_buff *skb)
                         bpf_printk("Answer created");
                     #endif  
                     break;
-            }
-
-            if (bpf_skb_store_bytes(skb, skb->len, response_array, sizeof(response_array), 0) < 0) {
-                #ifdef DEBUG
-                    bpf_printk("[DROP] Erro ao inserir resposta DNS");
-                #endif
-                return TCX_DROP;
             }
         }
 
