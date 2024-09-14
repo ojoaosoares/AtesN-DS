@@ -40,6 +40,7 @@ struct {
 
 __be32 recursive_server_ip;
 unsigned char recursive_server_mac[ETH_ALEN];
+int device;
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -649,7 +650,7 @@ int dns_filter(struct xdp_md *ctx) {
                     return XDP_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Headers updated");
+                        bpf_printk("Answer created");
                     #endif  
                     break;
             }
@@ -859,7 +860,7 @@ int dns_tc(struct __sk_buff *skb)
                     return TCX_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Headers updated");
+                        bpf_printk("Answer created");
                     #endif  
                     break;
             }
@@ -883,7 +884,9 @@ int dns_tc(struct __sk_buff *skb)
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
         }
 
-        return XDP_TX;
+        bpf_redirect(device, 0);
+
+        return TCX_REDIRECT;
     }
 
     else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
@@ -925,7 +928,9 @@ int dns_tc(struct __sk_buff *skb)
 
             bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
 
-            return XDP_TX;
+            bpf_redirect(device, 0);
+
+            return TCX_REDIRECT;
         }
 
         return TCX_PASS;
