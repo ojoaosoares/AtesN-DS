@@ -286,11 +286,20 @@ int main(int argc, char *argv[]) {
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
             convert_mac_to_bytes(mac_address, &skel->bss->recursive_server_mac);
 
-            if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
+            // if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
+            // {
+            //     printf("it was not possiblle to attach the program \n");
+            //     goto cleanup;
+            // }
+
+            LIBBPF_OPTS(bpf_tcx_opts, optl);
+
+            if(bpf_program__attach_tcx(skel->progs.dns_tc, index, &optl) < 0)
             {
                 printf("it was not possiblle to attach the program \n");
                 goto cleanup;
             }
+            
 
             printf("attached\n");
 
