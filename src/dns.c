@@ -417,25 +417,6 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     response->data_length = bpf_htons(sizeof(record->ip_addr.s_addr));
     response->ip = (record->ip_addr.s_addr);    
 
-    #ifdef DEBUG
-        bpf_printk("QP: %d", response->query_pointer);
-        bpf_printk("QP: %d", bpf_ntohs(response->query_pointer));
-        bpf_printk("Class: %d", response->class);
-        bpf_printk("Class: %d", bpf_ntohs(response->class));
-        bpf_printk("Type: %d", response->record_type);
-        bpf_printk("Type: %d", bpf_ntohs(response->record_type));
-        bpf_printk("Ttl: %d", response->ttl);
-        bpf_printk("Ttl: %d", bpf_ntohs(response->ttl));
-        bpf_printk("Data length: %d", response->data_length);
-        bpf_printk("Data length: %d", bpf_ntohs(response->data_length));
-        bpf_printk("Ip: %d", response->ip);
-        bpf_printk("Ip: %d", bpf_htons(response->ip));
-
-        print_ip(response->ip);
-        print_ip(bpf_htons(response->ip));
-        
-    #endif
-
     return ACCEPT;
 }
 
