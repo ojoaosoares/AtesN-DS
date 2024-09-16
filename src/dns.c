@@ -849,7 +849,7 @@ int dns_tc(struct __sk_buff *skb)
         if (record)
         {
             
-            if (bpf_skb_adjust_room(skb, sizeof(struct dns_response), BPF_ADJ_ROOM_NET, 0) < 0)
+            if (bpf_skb_change_tail(skb, offset_h + sizeof(struct dns_response), 0) < 0)
             {
                 #ifdef DEBUG
                     bpf_printk("It was't possible to resize the packet");
