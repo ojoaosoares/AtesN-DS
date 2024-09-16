@@ -1,6 +1,8 @@
 #!/bin/bash
 # Este script deve ser executado com privilégios de superusuário
 
+sudo systemctl daemon-reload -y
+
 # Atualize a lista de pacotes
 apt-get update
 
@@ -9,20 +11,19 @@ apt-get install -y \
     make \
     llvm \
     git \
+    pkg-config \
     libelf-dev \
     vim \
     clang \
     net-tools \
     curl \
     gcc-multilib \
-    pkg-config \
     bpfcc-tools \
     linux-headers-$(uname -r) \
     libelf-dev \
     zlib1g-dev \
     libevent-dev \
     build-essential \
-    libevent \
     bison \
     linux-tools-$(uname -r) \
     linux-tools-generic
