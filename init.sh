@@ -9,6 +9,7 @@ apt-get install -y \
     make \
     llvm \
     git \
+    libelf-dev \
     vim \
     clang \
     net-tools \
