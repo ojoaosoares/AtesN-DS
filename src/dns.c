@@ -127,7 +127,7 @@ static inline __u16 calculate_ip_checksum(struct iphdr *ip)
 static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 {
 
-    struct ethhdr *eth = data; // Cabeçalho da camada ethrenet
+    struct ethhdr *eth = data;
 
     *offset = sizeof(struct ethhdr);
 
@@ -140,13 +140,13 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
         return DROP;
     }
 
-    __u16 ip_type; // Tipo de ip, esta contido na camada ethrenet
-    ip_type = eth->h_proto;
+    
+    
 
-    if(ip_type ^ bpf_htons(IPV4))
+    if(eth->h_proto ^ bpf_htons(IPV4))
     {
         #ifdef DEBUG
-            bpf_printk("[PASS] Ethernet type isn't IPV4. IP type: %d", ip_type);
+            bpf_printk("[PASS] Ethernet type isn't IPV4");
         #endif
         return PASS;
     }
@@ -418,16 +418,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     return ACCEPT;
 }
 
-static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
-
-    if (data + *offset > data_end)
-    {
-        #ifdef DEBUG
-            bpf_printk("[DROP] Boundary exceded");
-        #endif
-
-        return DROP;
-    }
+static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
 
     struct ethhdr *eth;
     eth = data;
@@ -443,16 +434,12 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = recursive_server_ip;
 
-    print_ip(ipv4->daddr);
-
     ipv4->check = calculate_ip_checksum(ipv4);
 
     struct udphdr *udp;
     udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
 
     udp->check = bpf_htons(UDP_NO_ERROR);
-
-    return ACCEPT;
 }
 
 static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, void *data_end, struct query_owner *owner) {
@@ -657,16 +644,7 @@ int dns_filter(struct xdp_md *ctx) {
         {       
             struct query_owner owner;
 
-            switch (createDnsQuery(data, &offset_h, data_end, &owner))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DEBUG
-                        bpf_printk("Dns query created");
-                    #endif  
-                    break;
-            }
+            createDnsQuery(data, &offset_h, data_end, &owner);
 
             bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
         }
