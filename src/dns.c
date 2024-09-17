@@ -25,6 +25,7 @@ struct {
         __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct query_id));
         __uint(value_size, sizeof(struct query_owner));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } recursive_queries SEC(".maps");
 
@@ -33,6 +34,7 @@ struct {
         __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
 
 } cache SEC(".maps");
 
@@ -506,7 +508,6 @@ int dns_filter(struct xdp_md *ctx) {
 
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
 
-
     switch (isIPV4(data, &offset_h, data_end))
     {
         case DROP:
@@ -515,7 +516,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
-                bpf_printk("Its IPV4");
+                bpf_printk("[XDP] It's IPV4");
             #endif
             break;
     }
@@ -528,7 +529,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
-                bpf_printk("Its UDP");
+                bpf_printk("[XDP] It's UDP");
             #endif
             break;
     }
@@ -543,7 +544,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
-                bpf_printk("Its Port 53");
+                bpf_printk("[XDP] It's Port 53");
             #endif  
             break;
     }
@@ -560,7 +561,7 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
-                bpf_printk("Its DNS");
+                bpf_printk("[XDP] It's DNS");
             #endif
             break;
     }
@@ -573,9 +574,9 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
-                bpf_printk("Domain requested: %s", query.dquery.name);
-                bpf_printk("Domain type: %d", query.dquery.record_type);
-                bpf_printk("Domain class: %d", query.dquery.class);
+                bpf_printk("[XDP] Domain requested: %s", query.dquery.name);
+                bpf_printk("[XDP] Domain type: %d", query.dquery.record_type);
+                bpf_printk("[XDP] Domain class: %d", query.dquery.class);
             #endif    
             break;
     }
@@ -583,7 +584,7 @@ int dns_filter(struct xdp_md *ctx) {
     if (query_response == QUERY_RETURN && port53 == TO_DNS_PORT)
     {
         #ifdef DEBUG
-            bpf_printk("It's a query");
+            bpf_printk("[XDP] It's a query");
         #endif
 
         struct a_record *record;
@@ -597,7 +598,7 @@ int dns_filter(struct xdp_md *ctx) {
             if (record)
             {
                 #ifdef DEBUG
-                    bpf_printk("Cache used");
+                    bpf_printk("[XDP] Cache used");
                 #endif
             }
         }
@@ -608,7 +609,7 @@ int dns_filter(struct xdp_md *ctx) {
             if (bpf_xdp_adjust_tail(ctx, sizeof(struct dns_response)) < 0)
             {
                 #ifdef DEBUG
-                    bpf_printk("It was't possible to resize the packet");
+                    bpf_printk("[XDP] It was't possible to resize the packet");
                 #endif
                 
                 return XDP_DROP;
@@ -623,7 +624,7 @@ int dns_filter(struct xdp_md *ctx) {
                     return XDP_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Headers updated");
+                        bpf_printk("[XDP] Headers updated");
                     #endif  
                     break;
             }
@@ -634,7 +635,7 @@ int dns_filter(struct xdp_md *ctx) {
                     return XDP_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Headers updated");
+                        bpf_printk("[XDP] Answer created");
                     #endif  
                     break;
             }
@@ -655,7 +656,7 @@ int dns_filter(struct xdp_md *ctx) {
     else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
     {
         #ifdef DEBUG
-            bpf_printk("It's a response");
+            bpf_printk("[XDP] It's a response");
         #endif
 
         struct query_owner *owner;
@@ -669,7 +670,7 @@ int dns_filter(struct xdp_md *ctx) {
                     return XDP_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Dns recursive query response created");
+                        bpf_printk("[XDP] Dns recursive response created");
                     #endif  
                     break;
             }
@@ -684,7 +685,7 @@ int dns_filter(struct xdp_md *ctx) {
                     return XDP_DROP;
                 default:
                     #ifdef DEBUG
-                        bpf_printk("Record obtained");
+                        bpf_printk("[XDP] Record obtained");
                     #endif  
                     break;
             }
@@ -698,6 +699,207 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     return XDP_DROP;
+}
+
+SEC("tcx/ingress")
+int dns_tc(struct __sk_buff *skb)
+{
+    void *data_end = (void*) (long) skb->data_end;
+    void *data = (void*) (long) skb->data;
+
+    __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
+
+    switch (isIPV4(data, &offset_h, data_end))
+    {
+        case DROP:
+            return TCX_DROP;
+        case PASS:
+            return TCX_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("[TC] It's IPV4");
+            #endif
+            break;
+    }
+
+    switch (isValidUDP(data, &offset_h, data_end))
+    {
+        case DROP:
+            return TCX_DROP;
+        case PASS:
+            return TCX_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("[TC] It's UDP");
+            #endif
+            break;
+    }
+
+    __u8 port53 = isPort53(data, &offset_h, data_end);
+
+    switch (port53)
+    {
+        case DROP:
+            return TCX_DROP;
+        case PASS:
+            return TCX_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("[TC] It's Port 53");
+            #endif  
+            break;
+    }
+
+    struct query_id query;
+
+    __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &query);
+
+    switch (query_response)
+    {
+        case DROP:
+            return TCX_DROP;
+        case PASS:
+            return TCX_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("[TC] It's DNS");
+            #endif
+            break;
+    }
+
+    switch (getDomain(data, &offset_h, data_end, &query.dquery))
+    {
+        case DROP:
+            return TCX_DROP;
+        case PASS:
+            return TCX_PASS;
+        default:
+            #ifdef DEBUG
+                bpf_printk("[TC] Domain requested: %s", query.dquery.name);
+                bpf_printk("[TC] Domain type: %d", query.dquery.record_type);
+                bpf_printk("[TC] Domain class: %d", query.dquery.class);
+            #endif    
+            break;
+    }
+
+    if (query_response == QUERY_RETURN && port53 == TO_DNS_PORT)
+    {
+        #ifdef DEBUG
+            bpf_printk("[TC] It's a query");
+        #endif
+
+        struct a_record *record;
+
+        record = bpf_map_lookup_elem(&dns_records, &query.dquery);
+
+        if (!record)
+        {
+            record = bpf_map_lookup_elem(&cache, &query.dquery);
+
+            if (record)
+            {
+                #ifdef DEBUG
+                    bpf_printk("[TC] Cache used");
+                #endif
+            }
+        }
+
+        if (record)
+        {
+            
+            if (bpf_skb_change_tail(skb, offset_h + sizeof(struct dns_response), 0) < 0)
+            {
+                #ifdef DEBUG
+                    bpf_printk("[TC] It was't possible to resize the packet");
+                #endif
+                
+                return TCX_DROP;
+            }
+
+            data = (void*) (long) skb->data;
+            data_end = (void*) (long) skb->data_end;
+
+            switch (prepareResponse(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return TCX_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[TC] Headers updated");
+                    #endif  
+                    break;
+            }
+
+            switch (createDnsAnswer(data, &offset_h, data_end, record))
+            {
+                case DROP:
+                    return TCX_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[TC] Answer created");
+                    #endif  
+                    break;
+            }
+        }
+
+        else 
+        {       
+            struct query_owner owner;
+
+            createDnsQuery(data, &offset_h, data_end, &owner);
+
+            bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
+        }
+
+        return bpf_redirect_neigh(skb->ifindex, NULL, 0, 0);
+    }
+
+    else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
+    {
+        #ifdef DEBUG
+            bpf_printk("[TC] It's a response");
+        #endif
+
+        struct query_owner *owner;
+        owner = bpf_map_lookup_elem(&recursive_queries, &query);
+
+        if (owner > 0)
+        {
+            switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
+            {
+                case DROP:
+                    return TCX_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[TC] Dns recursive response created");
+                    #endif  
+                    break;
+            }
+            
+            bpf_map_delete_elem(&recursive_queries, &query);
+
+            struct a_record cache_record;
+
+            switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+            {
+                case DROP:
+                    return TCX_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[TC] Record obtained");
+                    #endif  
+                    break;
+            }
+
+            bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
+
+            return bpf_redirect_neigh(skb->ifindex, NULL, 0, 0);
+        }
+
+        return TCX_PASS;
+    }
+
+    return TCX_DROP;
 }
 
 char _license[] SEC("license") = "GPL";
