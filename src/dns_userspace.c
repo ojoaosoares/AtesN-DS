@@ -16,7 +16,7 @@ static const char *data_dir = "./data";
 
 static const char *standard_recursive_server = "8.8.8.8";
 
-void convert_mac_to_bytes(const char *mac_str, unsigned char *mac_bytes) {
+void convert_mac_to_bytes(const char *mac_str, unsigned char mac_bytes[6]) {
 
     char hex[2];
 
@@ -284,7 +284,7 @@ int main(int argc, char *argv[]) {
             }
 
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
-            convert_mac_to_bytes(mac_address, &skel->bss->recursive_server_mac);
+            convert_mac_to_bytes(mac_address, skel->bss->recursive_server_mac);
 
             if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
             {
