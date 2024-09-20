@@ -292,14 +292,6 @@ int main(int argc, char *argv[]) {
                 goto cleanup;
             }
 
-            LIBBPF_OPTS(bpf_tcx_opts, optl);
-
-            if(bpf_program__attach_tcx(skel->progs.dns_tc, index, &optl) < 0)
-            {
-                printf("it was not possiblle to attach the program \n");
-                goto cleanup;
-            }
-
             printf("attached\n");
 
             printf("make debug to see the progam running\n");
