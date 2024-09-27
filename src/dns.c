@@ -479,6 +479,13 @@ static __always_inline __u8 prepareRecursiveResponse(void *data, __u64 *offset, 
 
 static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
 
+    struct dns_header *header;
+    
+    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    if (!header->answer_count)
+        return ACCEPT_NO_ANSWER;
+
     struct dns_response *response;
 
     response = data + *offset;
@@ -683,14 +690,18 @@ int dns_filter(struct xdp_md *ctx) {
             {
                 case DROP:
                     return XDP_DROP;
+                case ACCEPT_NO_ANSWER:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] No DNS answer");
+                    #endif 
+                    break;
                 default:
+                    bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
                     #ifdef DEBUG
                         bpf_printk("[XDP] Record obtained");
                     #endif  
                     break;
             }
-
-            bpf_map_update_elem(&cache, &query.dquery, &cache_record, 0);
 
             return XDP_TX;
         }
