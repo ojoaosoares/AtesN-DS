@@ -182,7 +182,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
     if (ipv4->protocol ^ UDP_PROTOCOL)
     {
         #ifdef DEBUG
-            bpf_printk("[PASS] Ip protocol is TCP. Protocol: %d", ipv4->protocol);
+            bpf_printk("[PASS] Ip protocol isn't UDP. Protocol: %d", ipv4->protocol);
         #endif
 
         return PASS;
