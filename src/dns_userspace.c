@@ -215,7 +215,7 @@ void tutorial() {
     printf("  -h\tShow a help message\n");
     printf("  -e [options]\tExecute the program\n");
     printf("  \t-i\t interface where attach the dns\n");
-    printf("  \t-m\t your mac address\n");
+    printf("  \t-m\t gateway mac address\n");
     printf("  \t-s\t the dns server to execute recursive queries\n");
     printf("  -a [options]\tAdd a dns record\n");
     printf("  \t-d\t domain to be added\n");
