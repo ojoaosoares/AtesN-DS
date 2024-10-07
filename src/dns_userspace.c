@@ -217,13 +217,13 @@ void tutorial() {
     printf("  \t-i\t interface where attach the dns\n");
     printf("  \t-m\t gateway mac address\n");
     printf("  \t-s\t the dns server to execute recursive queries\n");
-    printf("  -a [options]\tAdd a dns record\n");
-    printf("  \t-d\t domain to be added\n");
-    printf("  \t-i\t respective ip\n");
-    printf("  \t-t\t respective time to live\n");
-    printf("  -d [domain/all]\tDelete dns record's\n");
-    printf("  -p [domain/all]\tPrint dns record's\t\n");
-    printf("  -r [filepath]\t read a file containing dns records\n");
+    // printf("  -a [options]\tAdd a dns record\n");
+    // printf("  \t-d\t domain to be added\n");
+    // printf("  \t-i\t respective ip\n");
+    // printf("  \t-t\t respective time to live\n");
+    // printf("  -d [domain/all]\tDelete dns record's\n");
+    // printf("  -p [domain/all]\tPrint dns record's\t\n");
+    // printf("  -r [filepath]\t read a file containing dns records\n");
 
 }
 
@@ -308,139 +308,139 @@ int main(int argc, char *argv[]) {
             goto cleanup;
         }
 
-        else if (!strcmp(argv[1], "-d") && argc == 3)
-        {
-            if (!strcmp(argv[2], "all"))
-            {
-                struct dns_query dns_key;
-                struct dns_query dns_next_key;
+        // else if (!strcmp(argv[1], "-d") && argc == 3)
+        // {
+        //     if (!strcmp(argv[2], "all"))
+        //     {
+        //         struct dns_query dns_key;
+        //         struct dns_query dns_next_key;
 
-                while (bpf_map__get_next_key(skel->maps.dns_records, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
-                {
-                    if(!delete_record(skel->maps.dns_records, dns_next_key.name))
-                    {
-                        printf("Error: the elemente couldn't be removed or the element doesn't exist\n");
-                        goto cleanup;
-                    }
-                }   
+        //         while (bpf_map__get_next_key(skel->maps.dns_records, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
+        //         {
+        //             if(!delete_record(skel->maps.dns_records, dns_next_key.name))
+        //             {
+        //                 printf("Error: the elemente couldn't be removed or the element doesn't exist\n");
+        //                 goto cleanup;
+        //             }
+        //         }   
 
-                printf("All elements deleted\n");
-            }
+        //         printf("All elements deleted\n");
+        //     }
 
-            else
-            {
-                if(!delete_record(skel->maps.dns_records, argv[2]))
-                {
-                    printf("Error: the elemente couldn't be removed or the element doesn't exist\n");
-                    goto cleanup;
-                }
+        //     else
+        //     {
+        //         if(!delete_record(skel->maps.dns_records, argv[2]))
+        //         {
+        //             printf("Error: the elemente couldn't be removed or the element doesn't exist\n");
+        //             goto cleanup;
+        //         }
 
-                printf("Map element deleted\n");
+        //         printf("Map element deleted\n");
 
                 
-            }
+        //     }
 
-            save_records(skel->maps.dns_records); 
-        }
+        //     save_records(skel->maps.dns_records); 
+        // }
 
-        else if (!strcmp(argv[1], "-r") && argc == 3)
-        {
-            int answer = read_file(argv[2], skel->maps.dns_records);
+        // else if (!strcmp(argv[1], "-r") && argc == 3)
+        // {
+        //     int answer = read_file(argv[2], skel->maps.dns_records);
 
-            if (answer > 0)
-                printf("%d records were added by the file\n", answer);
+        //     if (answer > 0)
+        //         printf("%d records were added by the file\n", answer);
             
-            else if (answer == 0)
-                printf("The file was empty\n");
+        //     else if (answer == 0)
+        //         printf("The file was empty\n");
             
-            else
-            {
-                printf("Error: An error occurred");
-                goto cleanup;
-            }
+        //     else
+        //     {
+        //         printf("Error: An error occurred");
+        //         goto cleanup;
+        //     }
             
-            save_records(skel->maps.dns_records);
+        //     save_records(skel->maps.dns_records);
 
-        }
+        // }
     
-        else if (!strcmp(argv[1], "-p") && argc == 3)
-        {
-            struct dns_query dns_key;
-            struct a_record ip_address_value;
+        // else if (!strcmp(argv[1], "-p") && argc == 3)
+        // {
+        //     struct dns_query dns_key;
+        //     struct a_record ip_address_value;
 
-            if (!strcmp(argv[2], "all"))
-            {
-                struct dns_query dns_next_key;
+        //     if (!strcmp(argv[2], "all"))
+        //     {
+        //         struct dns_query dns_next_key;
 
-                while (bpf_map__get_next_key(skel->maps.dns_records, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
-                {
-                    if(bpf_map__lookup_elem(skel->maps.dns_records, &dns_next_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
-                    {
-                        printf("Error: the elemente doesn't exist\n");
-                        goto cleanup;
-                    }
+        //         while (bpf_map__get_next_key(skel->maps.dns_records, &dns_key, &dns_next_key, sizeof(struct dns_query)) == 0)
+        //         {
+        //             if(bpf_map__lookup_elem(skel->maps.dns_records, &dns_next_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
+        //             {
+        //                 printf("Error: the elemente doesn't exist\n");
+        //                 goto cleanup;
+        //             }
 
-                    if(!print_record(dns_next_key, ip_address_value))
-                        goto cleanup;
+        //             if(!print_record(dns_next_key, ip_address_value))
+        //                 goto cleanup;
 
-                    dns_key = dns_next_key;                
-                }   
-            }
+        //             dns_key = dns_next_key;                
+        //         }   
+        //     }
 
-            else
-            {            
-                memset(dns_key.name, 0, MAX_DNS_NAME_LENGTH);
+        //     else
+        //     {            
+        //         memset(dns_key.name, 0, MAX_DNS_NAME_LENGTH);
 
-                dns_key.class = 1; dns_key.record_type = 1;
+        //         dns_key.class = 1; dns_key.record_type = 1;
 
-                strcpy(dns_key.name, argv[2]);
+        //         strcpy(dns_key.name, argv[2]);
 
-                if(bpf_map__lookup_elem(skel->maps.dns_records, &dns_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
-                {
-                    printf("Error: the elemente doesn't exist\n");
-                    goto cleanup;
-                }
+        //         if(bpf_map__lookup_elem(skel->maps.dns_records, &dns_key, sizeof(struct dns_query), &ip_address_value, sizeof(struct a_record), 0))
+        //         {
+        //             printf("Error: the elemente doesn't exist\n");
+        //             goto cleanup;
+        //         }
 
-                if(!print_record(dns_key, ip_address_value))
-                    goto cleanup;
-            }   
-        }
+        //         if(!print_record(dns_key, ip_address_value))
+        //             goto cleanup;
+        //     }   
+        // }
     
-        else if (!strcmp(argv[1], "-a") && argc == 8)
-        {
-            int opt, ttl;
+        // else if (!strcmp(argv[1], "-a") && argc == 8)
+        // {
+        //     int opt, ttl;
 
-            char domain[MAX_DNS_NAME_LENGTH], ip[MAX_IP_STRING_LENGTH];
+        //     char domain[MAX_DNS_NAME_LENGTH], ip[MAX_IP_STRING_LENGTH];
 
-            optind = 2;
+        //     optind = 2;
 
-            while ((opt = getopt(argc, argv, "d:i:t:")) != -1) {
-                switch (opt) {
-                case 'd':
-                    strcpy(domain, optarg);
-                    break;
-                case 'i':
-                    strcpy(ip, optarg);
-                    break;
-                case 't':
-                    ttl = atoi(optarg);
-                    break;
-                default:
-                    tutorial();
-                    return 1;
-                }
-            }
+        //     while ((opt = getopt(argc, argv, "d:i:t:")) != -1) {
+        //         switch (opt) {
+        //         case 'd':
+        //             strcpy(domain, optarg);
+        //             break;
+        //         case 'i':
+        //             strcpy(ip, optarg);
+        //             break;
+        //         case 't':
+        //             ttl = atoi(optarg);
+        //             break;
+        //         default:
+        //             tutorial();
+        //             return 1;
+        //         }
+        //     }
 
-            if (!add_record(skel->maps.dns_records, domain, ip, ttl))
-            {
-                printf("Error: the elemente couldn't be created/updated\n");
-                goto cleanup;
-            }
+        //     if (!add_record(skel->maps.dns_records, domain, ip, ttl))
+        //     {
+        //         printf("Error: the elemente couldn't be created/updated\n");
+        //         goto cleanup;
+        //     }
 
-            printf("Map element created/updated\n");
+        //     printf("Map element created/updated\n");
                 
-            save_records(skel->maps.dns_records);
-        }
+        //     save_records(skel->maps.dns_records);
+        // }
 
         else if (!strcmp(argv[1], "-h") && argc == 2)
             tutorial();

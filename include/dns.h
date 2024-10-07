@@ -31,12 +31,14 @@
 #define DNS_RA_SHIFT 7
 
 #define A_RECORD_TYPE 1
+#define NS_RECORD_TYPE 2
 
 #define INTERNT_CLASS 1
 
 #define DNS_POINTER_OFFSET 0xc00c
 
 #define MAX_DNS_NAME_LENGTH 256
+#define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
 #define MAX_IP_STRING_LENGTH 16
@@ -82,8 +84,8 @@ struct dns_header
 
 struct dns_query {
     char name[MAX_DNS_NAME_LENGTH];
-    uint16_t record_type;
-    uint16_t class;
+    // uint16_t record_type;
+    // uint16_t class;
 };
 
 struct a_record {
@@ -91,6 +93,10 @@ struct a_record {
     uint32_t ttl;
 };
 
+struct ns_record {
+    uint32_t ttl;
+    char name[MAX_DNS_NAME_LENGTH];
+};
 
 struct query_id {
     __u16 id;

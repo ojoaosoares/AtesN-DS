@@ -11,14 +11,14 @@
 
 #define DEBUG
 
-struct {
-        __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 1500000);
-        __uint(key_size, sizeof(struct dns_query));
-        __uint(value_size, sizeof(struct a_record));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
+// struct {
+//         __uint(type, BPF_MAP_TYPE_HASH);
+//         __uint(max_entries, 1500000);
+//         __uint(key_size, sizeof(struct dns_query));
+//         __uint(value_size, sizeof(struct a_record));
+//         __uint(pinning, LIBBPF_PIN_BY_NAME);
 
-} dns_records SEC(".maps");
+// } dns_records SEC(".maps");
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
@@ -34,9 +34,16 @@ struct {
         __uint(max_entries, 1500000);
         __uint(key_size, sizeof(struct dns_query));
         __uint(value_size, sizeof(struct a_record));
-        __uint(pinning, LIBBPF_PIN_BY_NAME);
 
-} cache SEC(".maps");
+} cache_arecords SEC(".maps");
+
+struct {
+        __uint(type, BPF_MAP_TYPE_LRU_HASH);
+        __uint(max_entries, 1500000);
+        __uint(key_size, sizeof(struct dns_query));
+        __uint(value_size, sizeof(struct ns_record));
+
+} cache_nsrecords SEC(".maps");
 
 __be32 recursive_server_ip;
 unsigned char recursive_server_mac[ETH_ALEN];
@@ -251,7 +258,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
     return QUERY_RETURN;
 }
 
-static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query)
+static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end, struct dns_query *query, __u16 *type)
 {
     
     __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
@@ -310,22 +317,11 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     if (data + *offset > data_end)
         return DROP;
 
-    query->record_type = bpf_ntohs(*((__u16 *) content));
+    *type = bpf_ntohs(*((__u16 *) content));
 
-    if (query->record_type ^ A_RECORD_TYPE)
-    {
-        #ifdef DEBUG
-            bpf_printk("[PASS] It's not a DNS query type A");
-        #endif
-
-        return PASS;
-    }
-    
     content += 2;
 
-    query->class = bpf_htons(*((__u16 *) content));
-
-    if (query->class ^ INTERNT_CLASS)
+    if (bpf_htons(*((__u16 *) content)) ^ INTERNT_CLASS)
     {
         #ifdef DEBUG
             bpf_printk("[PASS] It's not a DNS query class IN");
@@ -573,7 +569,9 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    switch (getDomain(data, &offset_h, data_end, &query.dquery))
+    __u16 type;
+
+    switch (getDomain(data, &offset_h, data_end, &query.dquery, &type))
     {
         case DROP:
             return XDP_DROP;
@@ -582,8 +580,6 @@ int dns_filter(struct xdp_md *ctx) {
         default:
             #ifdef DEBUG
                 bpf_printk("[XDP] Domain requested: %s", query.dquery.name);
-                bpf_printk("[XDP] Domain type: %d", query.dquery.record_type);
-                bpf_printk("[XDP] Domain class: %d", query.dquery.class);
             #endif    
             break;
     }
@@ -596,19 +592,21 @@ int dns_filter(struct xdp_md *ctx) {
 
         struct a_record *record;
 
-        record = bpf_map_lookup_elem(&dns_records, &query.dquery);
+        // record = bpf_map_lookup_elem(&dns_records, &query.dquery);
 
-        if (!record)
-        {
-            record = bpf_map_lookup_elem(&cache, &query.dquery);
+        // if (!record)
+        // {
+        //     record = bpf_map_lookup_elem(&cache, &query.dquery);
 
-            if (record)
-            {
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Cache used");
-                #endif
-            }
-        }
+        //     if (record)
+        //     {
+        //         #ifdef DEBUG
+        //             bpf_printk("[XDP] Cache used");
+        //         #endif
+        //     }
+        // }
+
+        record = bpf_map_lookup_elem(&cache_arecords, &query.dquery);
 
         if (record)
         {
