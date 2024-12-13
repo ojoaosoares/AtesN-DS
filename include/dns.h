@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 #include <string.h>
-#include "in.h"
+#include <linux/in.h>
+
 
 #define DROP 0
 #define PASS 1
@@ -84,7 +85,7 @@ struct dns_header
 
 struct dns_query {
     char name[MAX_DNS_NAME_LENGTH];
-    // uint16_t record_type;
+    uint16_t record_type;
     // uint16_t class;
 };
 
@@ -104,7 +105,6 @@ struct query_id {
 };
 
 struct query_owner {
-    unsigned char mac_address[6];
     __be32 ip_address;
 };
 
