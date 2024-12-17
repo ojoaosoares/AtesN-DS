@@ -434,9 +434,9 @@ static __always_inline __u8 findOwnerServer(struct query_and_id *curr_query, __u
 
     // bpf_map_update_elem(&last_recursive, &curr_query->id, &curr_query->query, 0);
     
-    // for (size_t i = 0; (i  < MAX_DNS_LABELS && curr_query->query.name[0] != 0); )
+    // for (size_t i = 0; (i  < 10 && curr_query->query.name[0] != 0); i++)
     // {
-        nsrecord = bpf_map_lookup_elem(&cache_nsrecords, curr_query->query.name);
+        nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &curr_query->query.name);
 
         if (nsrecord)
         {
@@ -457,14 +457,15 @@ static __always_inline __u8 findOwnerServer(struct query_and_id *curr_query, __u
             // return NEW_QUERY;
         }
 
-        // __u8 label_size = curr_query->query.name[i] + 1;
+        __u8 label_size = curr_query->query.name[i] + 1;
         // // __builtin_memcpy(curr_query->query.name, &curr_query->query.name[label_size], MAX_DNS_NAME_LENGTH - label_size);
-        // // __builtin_memset(&curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size], 0, label_size);
+        // __builtin_memset(&curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size], 0, label_size);
 
-        // for (size_t j = 0; j < MAX_DNS_NAME_LENGTH - label_size; j++)
-        //     curr_query->query.name[i] = curr_query->query.name[i + label_size];
+        for (size_t j = 0; j < MAX_DNS_NAME_LENGTH; j++)
+            curr_query->query.name[j] = curr_query->query.name[j + label_size];
         
-        
+        // for (size_t j = 0; j < label_size; j++)
+        //     curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size + j] = 0;
     // }
 
     // bpf_map_delete_elem(&last_recursive, &curr_query->id);
