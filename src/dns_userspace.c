@@ -1,5 +1,4 @@
 #include "dns.skel.h"
-#include "dns.h"
 #include <string.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -11,15 +10,13 @@
 #include <stdio.h>
 #include <getopt.h>
 
-static const char *standard_database = "./data/database";
-static const char *data_dir = "./data";
+#define MAX_IP_STRING_LENGTH 16
 
 static const char *standard_recursive_server = "8.8.8.8";
 
 void convert_mac_to_bytes(const char *mac_str, unsigned char mac_bytes[6]) {
 
     char hex[2];
-
     hex[0] = mac_str[0];
     hex[1] = mac_str[1];
 
@@ -100,7 +97,7 @@ int main(int argc, char *argv[]) {
 
             strcpy(recursive, standard_recursive_server);
 
-            optind = 2;
+            optind = 1;
 
             while ((opt = getopt(argc, argv, "i:s:")) != -1) {
                 switch (opt) {
@@ -146,8 +143,6 @@ int main(int argc, char *argv[]) {
             {
                 sleep(1);
             }
-
-            save_records(skel->maps.dns_records);
 
             goto cleanup;
         }

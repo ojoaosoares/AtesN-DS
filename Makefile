@@ -16,8 +16,6 @@ INSTALL = ./init.sh
 
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}' | head -n 1)
-# MAC = $(shell ethtool -P $(DEV) | awk '/Permanent/ {print $$3}')
-MAC = $(shell arp -n | grep $$(ip route | grep default | awk '{print $$3}' | head -n 1) | awk '{print $$3}')
 
 # all sources, objs, and header files
 MAIN = ${SRC_FOLDER}dns_userspace.c
@@ -38,7 +36,7 @@ $(shell mkdir -p $(DATA_FOLDER))
 all: ${TARGET}
 
 run: ${TARGET}
-	sudo ${TARGET} -e -i ${DEV} -m ${MAC}
+	sudo ${TARGET} -i ${DEV}
 
 ${TARGET} : ${MAIN} ${SKELETON}
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf

@@ -38,15 +38,15 @@
 
 #define DNS_POINTER_OFFSET 0xc00c
 
-#define MAX_DNS_NAME_LENGTH 256
+#define MAX_DNS_NAME_LENGTH 257
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
-#define MAX_IP_STRING_LENGTH 16
-#define MAX_MAC_STRING_LENGTH 18
-
 #define QUERY_RETURN 2
 #define RESPONSE_RETURN 3
+
+#define NEW_QUERY 1
+#define KEEP_QUERY 0
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -99,9 +99,14 @@ struct ns_record {
     char name[MAX_DNS_NAME_LENGTH];
 };
 
-struct query_id {
+struct id {
     __u16 id;
-    struct dns_query dquery;
+    __u16 port;
+};
+
+struct query_and_id {
+    struct id id;
+    struct dns_query query;
 };
 
 struct query_owner {
