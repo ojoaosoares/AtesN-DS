@@ -11,7 +11,7 @@
 #include <bpf/strset.h>
 #include "dns.h"
 
-#define OUTPUT
+#define DOMAIN
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
@@ -581,6 +581,11 @@ int dns_filter(struct xdp_md *ctx) {
             #endif
 
             #ifdef OUTPUT
+                bpf_printk("%d", query.query.name[0]);
+                bpf_printk("[XDP] Domain requested: %s", query.query.name);
+            #endif  
+
+            #ifdef DOMAIN
                 bpf_printk("%d", query.query.name[0]);
                 bpf_printk("[XDP] Domain requested: %s", query.query.name);
             #endif    
