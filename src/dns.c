@@ -223,12 +223,20 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
         return DROP;
     }
 
-    for (size_t i = 0; (i < MAX_DNS_NAME_LENGTH && *(content + i) != 0); i++)
+    size_t size;
+
+    for (size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
     {
-        query->name[i] =  *(char *)(content + i);
+        query->name[size] =  *(char *)(content + size);
     
         if (data + ++(*offset) > data_end)
             return DROP;
+    }
+
+    for (size_t i = 0; i < size / 2; i++) {
+        char temp = query->name[i];
+        query->name[i] = query->name[size - i - 1];
+        query->name[size - i - 1] = temp;
     }
 
     content = data + *offset; // 0 Octect
@@ -429,51 +437,51 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     return ACCEPT;
 }
 
-static __always_inline __u8 findOwnerServer(struct query_and_id *curr_query, __u32 *ip) { 
-    struct ns_record *nsrecord;
+// static __always_inline __u8 findOwnerServer(struct query_and_id *curr_query, __u32 *ip) { 
+//     struct ns_record *nsrecord;
 
-    // bpf_map_update_elem(&last_recursive, &curr_query->id, &curr_query->query, 0);
+//     // bpf_map_update_elem(&last_recursive, &curr_query->id, &curr_query->query, 0);
     
-    // for (size_t i = 0; (i  < 10 && curr_query->query.name[0] != 0); i++)
-    // {
-        nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &curr_query->query.name);
+//     // for (size_t i = 0; (i  < 10 && curr_query->query.name[0] != 0); i++)
+//     // {
+//         nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &curr_query->query.name);
 
-        if (nsrecord)
-        {
-            struct a_record *arecord = bpf_map_lookup_elem(&cache_arecords, &nsrecord->name);
+//         if (nsrecord)
+//         {
+//             struct a_record *arecord = bpf_map_lookup_elem(&cache_arecords, &nsrecord->name);
 
-            if (arecord)
-            {
-                *ip = arecord->ip_addr.s_addr;
-                // bpf_map_delete_elem(&last_recursive, &curr_query->id);
-                return KEEP_QUERY;
-            }
+//             if (arecord)
+//             {
+//                 *ip = arecord->ip_addr.s_addr;
+//                 // bpf_map_delete_elem(&last_recursive, &curr_query->id);
+//                 return KEEP_QUERY;
+//             }
             
-            // __builtin_memcpy(&curr_query->query.name, &nsrecord->name, sizeof(char[MAX_DNS_NAME_LENGTH]));
-            // curr_query->query.record_type = NS_RECORD_TYPE;
+//             // __builtin_memcpy(&curr_query->query.name, &nsrecord->name, sizeof(char[MAX_DNS_NAME_LENGTH]));
+//             // curr_query->query.record_type = NS_RECORD_TYPE;
 
-            // *ip = recursive_server_ip;
+//             // *ip = recursive_server_ip;
 
-            // return NEW_QUERY;
-        }
+//             // return NEW_QUERY;
+//         }
 
-        __u8 label_size = curr_query->query.name[i] + 1;
-        // // __builtin_memcpy(curr_query->query.name, &curr_query->query.name[label_size], MAX_DNS_NAME_LENGTH - label_size);
-        // __builtin_memset(&curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size], 0, label_size);
+//         __u8 label_size = curr_query->query.name[i] + 1;
+//         // // __builtin_memcpy(curr_query->query.name, &curr_query->query.name[label_size], MAX_DNS_NAME_LENGTH - label_size);
+//         // __builtin_memset(&curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size], 0, label_size);
 
-        for (size_t j = 0; j < MAX_DNS_NAME_LENGTH; j++)
-            curr_query->query.name[j] = curr_query->query.name[j + label_size];
+//         for (size_t j = 0; j < MAX_DNS_NAME_LENGTH; j++)
+//             curr_query->query.name[j] = curr_query->query.name[j + label_size];
         
-        // for (size_t j = 0; j < label_size; j++)
-        //     curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size + j] = 0;
-    // }
+//         // for (size_t j = 0; j < label_size; j++)
+//         //     curr_query->query.name[MAX_DNS_NAME_LENGTH - label_size + j] = 0;
+//     // }
 
-    // bpf_map_delete_elem(&last_recursive, &curr_query->id);
+//     // bpf_map_delete_elem(&last_recursive, &curr_query->id);
 
-    *ip = recursive_server_ip;
+//     *ip = recursive_server_ip;
 
-    return KEEP_QUERY;
-}
+//     return KEEP_QUERY;
+// }
 
 
 SEC("xdp")
@@ -528,8 +536,6 @@ int dns_filter(struct xdp_md *ctx) {
             #endif  
             break;
     }
-
-    
 
     __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &query.id);
 
@@ -612,39 +618,26 @@ int dns_filter(struct xdp_md *ctx) {
                     }
                 }
 
-                else 
-                {       
+                // else 
+                // {       
 
-                    bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
+                //     bpf_map_update_elem(&recursive_queries, &query, &owner, 0);
 
-                    __u32 ip;
+                //     __u32 ip;
 
-                    switch (findOwnerServer(&query, &ip))
-                    {
-                        case KEEP_QUERY:
-                            createDnsQuery(data, &offset_h, data_end, &owner, ip);
-                            break;
-                        case NEW_QUERY:
-                            
-
-                            
-                            
-
-
-                            break;
-                        default:
-                            break;
-                    } 
-
-                    
-
-                    
-                }
+                //     // switch (findOwnerServer(&query, &ip))
+                //     // {
+                //     //     case KEEP_QUERY:
+                //     //         createDnsQuery(data, &offset_h, data_end, &owner, ip);
+                //     //         break;
+                //     //     case NEW_QUERY:
+                //     //         break;
+                //     //     default:
+                //     //         break;
+                //     // } 
+                // }
 
                 return XDP_TX;
-
-        case NS_RECORD_TYPE:
-
         
         default:
             break;
@@ -652,54 +645,54 @@ int dns_filter(struct xdp_md *ctx) {
 
     }
 
-    // else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
-    // {
-    //     #ifdef DEBUG
-    //         bpf_printk("[XDP] It's a response");
-    //     #endif
+    else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
+    {
+        // #ifdef DEBUG
+        //     bpf_printk("[XDP] It's a response");
+        // #endif
 
-    //     struct query_owner *owner;
-    //     owner = bpf_map_lookup_elem(&recursive_queries, &query);
+        // struct query_owner *owner;
+        // owner = bpf_map_lookup_elem(&recursive_queries, &query);
 
-    //     if (owner > 0)
-    //     {
-    //         switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
-    //         {
-    //             case DROP:
-    //                 return XDP_DROP;
-    //             default:
-    //                 #ifdef DEBUG
-    //                     bpf_printk("[XDP] Dns recursive response created");
-    //                 #endif  
-    //                 break;
-    //         }
+        // if (owner > 0)
+        // {
+        //     switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
+        //     {
+        //         case DROP:
+        //             return XDP_DROP;
+        //         default:
+        //             #ifdef DEBUG
+        //                 bpf_printk("[XDP] Dns recursive response created");
+        //             #endif  
+        //             break;
+        //     }
             
-    //         bpf_map_delete_elem(&recursive_queries, &query);
+        //     bpf_map_delete_elem(&recursive_queries, &query);
 
-    //         struct a_record cache_record;
+        //     struct a_record cache_record;
 
-    //         switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
-    //         {
-    //             case DROP:
-    //                 return XDP_DROP;
-    //             case ACCEPT_NO_ANSWER:
-    //                 #ifdef DEBUG
-    //                     bpf_printk("[XDP] No DNS answer");
-    //                 #endif 
-    //                 break;
-    //             default:
-    //                 bpf_map_update_elem(&cache_arecords, &query.query, &cache_record, 0);
-    //                 #ifdef DEBUG
-    //                     bpf_printk("[XDP] Record obtained");
-    //                 #endif  
-    //                 break;
-    //         }
+        //     switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+        //     {
+        //         case DROP:
+        //             return XDP_DROP;
+        //         case ACCEPT_NO_ANSWER:
+        //             #ifdef DEBUG
+        //                 bpf_printk("[XDP] No DNS answer");
+        //             #endif 
+        //             break;
+        //         default:
+        //             bpf_map_update_elem(&cache_arecords, &query.query, &cache_record, 0);
+        //             #ifdef DEBUG
+        //                 bpf_printk("[XDP] Record obtained");
+        //             #endif  
+        //             break;
+        //     }
 
-    //         return XDP_TX;
-    //     }
+        //     return XDP_TX;
+        // }
 
-    //     return XDP_PASS;
-    // }
+        return XDP_PASS;
+    }
 
     return XDP_DROP;
 }
