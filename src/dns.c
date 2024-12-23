@@ -11,7 +11,7 @@
 #include <bpf/strset.h>
 #include "dns.h"
 
-#define DEBUG
+#define OUTPUT
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
@@ -502,6 +502,10 @@ int dns_filter(struct xdp_md *ctx) {
             #ifdef DEBUG
                 bpf_printk("[XDP] It's IPV4");
             #endif
+
+            #ifdef OUTPUT
+                bpf_printk("[XDP] It's IPV4");
+            #endif
             break;
     }
 
@@ -515,6 +519,10 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             #ifdef DEBUG
+                bpf_printk("[XDP] It's UDP");
+            #endif
+
+            #ifdef OUTPUT
                 bpf_printk("[XDP] It's UDP");
             #endif
             break;
@@ -534,6 +542,10 @@ int dns_filter(struct xdp_md *ctx) {
             #ifdef DEBUG
                 bpf_printk("[XDP] It's Port 53");
             #endif  
+
+            #ifdef OUTPUT
+                bpf_printk("[XDP] It's Port 53");
+            #endif  
             break;
     }
 
@@ -549,6 +561,10 @@ int dns_filter(struct xdp_md *ctx) {
             #ifdef DEBUG
                 bpf_printk("[XDP] It's DNS");
             #endif
+
+            #ifdef OUTPUT
+                bpf_printk("[XDP] It's DNS");
+            #endif
             break;
     }
 
@@ -562,6 +578,11 @@ int dns_filter(struct xdp_md *ctx) {
             #ifdef DEBUG
                 bpf_printk("%d", query.query.name[0]);
                 bpf_printk("[XDP] Domain requested: %s", query.query.name);
+            #endif
+
+            #ifdef OUTPUT
+                bpf_printk("%d", query.query.name[0]);
+                bpf_printk("[XDP] Domain requested: %s", query.query.name);
             #endif    
             break;
     }
@@ -569,6 +590,10 @@ int dns_filter(struct xdp_md *ctx) {
     if ((query_response == QUERY_RETURN) && (port53 == TO_DNS_PORT))
     {
         #ifdef DEBUG
+            bpf_printk("[XDP] It's a query");
+        #endif
+
+        #ifdef OUTPUT
             bpf_printk("[XDP] It's a query");
         #endif
 
