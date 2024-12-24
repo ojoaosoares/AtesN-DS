@@ -42,6 +42,9 @@
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
+
+#define DNS_KEY_DOMAIN_LENGTH 400
+
 #define QUERY_RETURN 2
 #define RESPONSE_RETURN 3
 
@@ -84,7 +87,7 @@ struct dns_header
 
 
 struct dns_query {
-    char name[MAX_DNS_NAME_LENGTH];
+    char name[DNS_KEY_DOMAIN_LENGTH];
     uint16_t record_type;
     // uint16_t class;
 };
