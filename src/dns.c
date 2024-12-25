@@ -154,7 +154,10 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end, 
         return DROP;
     }
 
-    id->port = udp->source;
+    if (udp->source == DNS_PORT)
+        id->port = udp->dest;
+    else
+        id->port = udp->source;
 
     if (bpf_ntohs(udp->dest) == DNS_PORT)
         return TO_DNS_PORT;
@@ -338,7 +341,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     return ACCEPT;
 }
 
-static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data_end, struct query_owner *owner, __be32 ip_dest) {
+static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data_end, __be32 ip_dest) {
 
     struct ethhdr *eth;
     eth = data;
@@ -352,7 +355,6 @@ static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data
     struct iphdr *ipv4;
     ipv4 = data + sizeof(struct ethhdr);
 
-    owner->ip_address = ipv4->saddr;
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = ip_dest;
 
@@ -645,11 +647,6 @@ int dns_filter(struct xdp_md *ctx) {
 
                 else 
                 {       
-
-                    // __u32 ip = findOwnerServer(&query.query);
-
-                    __u32 ip = recursive_server_ip;
-
                     if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &query, &owner, 0) < 0)
                     {
                         #ifdef DOMAIN
@@ -658,8 +655,12 @@ int dns_filter(struct xdp_md *ctx) {
 
                         return DROP;
                     }
+
+                    __u32 ip = recursive_server_ip;
+
+                    // __u32 ip = findOwnerServer(&query.query);    
                     
-                    createDnsQuery(data, &offset_h, data_end, &owner, ip);
+                    createDnsQuery(data, &offset_h, data_end, ip);
                 }
 
                 return XDP_TX;
