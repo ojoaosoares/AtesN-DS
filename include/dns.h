@@ -43,13 +43,19 @@
 #define END_DOMAIN 0x0
 
 
-#define DNS_KEY_DOMAIN_LENGTH 400
+#define DNS_KEY_DOMAIN_LENGTH 380
 
 #define QUERY_RETURN 2
 #define RESPONSE_RETURN 3
 
 #define NEW_QUERY 1
 #define KEEP_QUERY 0
+
+
+#define ANSWER 1
+#define ADDITIONAL 2
+#define NAMESERVERS 3
+#define NOTHING 0
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -85,37 +91,6 @@ struct dns_header
     __be16 additional_records;
 } __attribute__((packed));
 
-
-struct dns_query {
-    char name[DNS_KEY_DOMAIN_LENGTH];
-    uint16_t record_type;
-    // uint16_t class;
-};
-
-struct a_record {
-    struct in_addr ip_addr;
-    uint32_t ttl;
-};
-
-struct ns_record {
-    uint32_t ttl;
-    char name[MAX_DNS_NAME_LENGTH];
-};
-
-struct id {
-    __u16 id;
-    __u16 port;
-};
-
-struct query_and_id {
-    struct id id;
-    struct dns_query query;
-};
-
-struct query_owner {
-    __be32 ip_address;
-};
-
 struct dns_response {
    uint16_t query_pointer;
    uint16_t record_type;
@@ -124,5 +99,52 @@ struct dns_response {
    uint16_t data_length;
    uint32_t ip;
 } __attribute__((packed));
+
+
+struct a_record {
+    struct in_addr ip_addr;
+    uint32_t ttl;
+};
+
+// struct ns_record {
+//     uint32_t ttl;
+//     char name[MAX_DNS_NAME_LENGTH];
+// };
+
+struct hop_query_value {
+    uint16_t record_type;
+    char name[MAX_DNS_NAME_LENGTH];
+    // uint16_t class;
+};
+
+struct dns_domain {
+    __u16 record_type;
+    char name[DNS_KEY_DOMAIN_LENGTH];
+    // uint16_t class;
+};
+
+struct id {
+    __u16 id;
+    __u16 port;
+};
+
+struct dns_query {
+    struct id id;
+    struct dns_domain query;
+};
+
+struct rec_query_domain {
+    __u16 record_type;
+    char name[4];
+};
+
+struct rec_query_key {
+    struct id id;
+    struct rec_query_domain query;
+};
+
+struct query_owner {
+    __be32 ip_address;
+};
 
 #endif
