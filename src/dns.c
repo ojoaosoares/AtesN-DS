@@ -665,7 +665,7 @@ int dns_filter(struct xdp_md *ctx) {
 
     else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[XDP] It's a response");
         #endif
 
@@ -682,6 +682,10 @@ int dns_filter(struct xdp_md *ctx) {
 
         if (owner > 0)
         {
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It's a recursive query");
+            #endif
 
             switch (typeOfResponse(data, data_end))
             {
