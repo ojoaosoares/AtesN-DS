@@ -154,16 +154,19 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end, 
         return DROP;
     }
 
-    if (udp->source == DNS_PORT)
-        id->port = udp->dest;
-    else
-        id->port = udp->source;
-
     if (bpf_ntohs(udp->dest) == DNS_PORT)
+    {
+        id->port = bpf_ntohs(udp->source);
+
         return TO_DNS_PORT;
+    }
 
     if (bpf_ntohs(udp->source) == DNS_PORT)
+    {
+        id->port = bpf_ntohs(udp->dest);
+        
         return FROM_DNS_PORT;
+    }
 
     #ifdef DEBUG
         bpf_printk("[PASS] No correct Port");
