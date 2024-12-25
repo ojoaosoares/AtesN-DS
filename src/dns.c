@@ -650,7 +650,7 @@ int dns_filter(struct xdp_md *ctx) {
 
                     __u32 ip = recursive_server_ip;
 
-                    bpf_map_update_elem(&recursive_queries, (struct rec_query_domain *) &query, &owner, 0);
+                    bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &query, &owner, 0);
                     
                     createDnsQuery(data, &offset_h, data_end, &owner, ip);
                 }
@@ -678,7 +678,7 @@ int dns_filter(struct xdp_md *ctx) {
         // }
 
         struct query_owner *owner;
-        owner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_domain *) &query);
+        owner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &query);
 
         if (owner > 0)
         {
