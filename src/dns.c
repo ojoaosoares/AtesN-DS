@@ -684,10 +684,10 @@ int dns_filter(struct xdp_md *ctx) {
         //     return XDP_TX;
         // }
 
-        struct query_owner *owner;
-        owner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &query);
+        struct query_owner *powner;
+        powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &query);
 
-        if (owner > 0)
+        if (powner > 0)
         {
 
             #ifdef DOMAIN
@@ -697,7 +697,7 @@ int dns_filter(struct xdp_md *ctx) {
             switch (typeOfResponse(data, data_end))
             {
                 case ANSWER:
-                    switch (prepareRecursiveResponse(data, &offset_h, data_end, owner))
+                    switch (prepareRecursiveResponse(data, &offset_h, data_end, powner))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -744,9 +744,6 @@ int dns_filter(struct xdp_md *ctx) {
                     
                     // createDnsQuery(data, &offset_h, data_end, &owner, ip);
 
-
-
-                
                 default:
                     break;
             }
