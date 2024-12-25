@@ -650,7 +650,14 @@ int dns_filter(struct xdp_md *ctx) {
 
                     __u32 ip = recursive_server_ip;
 
-                    bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &query, &owner, 0);
+                    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &query, &owner, 0) < 0)
+                    {
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Recursive queries map error");
+                        #endif  
+
+                        return DROP;
+                    }
                     
                     createDnsQuery(data, &offset_h, data_end, &owner, ip);
                 }
