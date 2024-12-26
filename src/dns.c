@@ -43,7 +43,7 @@ struct {
 // struct {
 //         __uint(type, BPF_MAP_TYPE_LRU_HASH);
 //         __uint(max_entries, 1500000);
-//         __uint(key_size, sizeof(char[DNS_KEY_DOMAIN_LENGTH - MAX_DNS_NAME_LENGTH]));
+//         __uint(key_size, sizeof(char[DNS_KEY_DOMAIN_LENGTH - (MAX_DNS_NAME_LENGTH - 2)]));
 //         __uint(value_size, sizeof(struct ns_record));
 
 // } cache_nsrecords SEC(".maps");
@@ -496,6 +496,19 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
     #ifdef DOMAIN
         bpf_printk("Subdomain: %s", query->query.name[pointer - sizeof(struct dns_header)]);
     #endif
+
+    *offset += 10;
+
+    if (data + *offset > data_end)
+        return DROP;
+
+    *content += 8;
+
+    #ifdef DOMAIN
+        bpf_printk("Size authoritative: %u", content);
+    #endif
+    
+
 }
 
 SEC("xdp")
