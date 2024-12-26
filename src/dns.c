@@ -164,7 +164,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end, 
     if (bpf_ntohs(udp->source) == DNS_PORT)
     {
         id->port = bpf_ntohs(udp->dest);
-        
+
         return FROM_DNS_PORT;
     }
 
@@ -478,40 +478,38 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
     return ANSWER;
 }
 
-// static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end) {
+static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end) {
 
-//     struct dns_header *header;    
-//     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    struct dns_header *header;    
+    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-//     __u8 *content = data + *offset;
+    __u8 *content = data + *offset;
  
-//     for (size_t i = 0; i < header->name_servers; i++)
-//     {
-//         *offset += 12;
+    // for (size_t i = 0; i < header->name_servers; i++)
+    {
+        *offset += 12;
 
-//         if (data + *offset > data_end)
-//             return DROP;
+        if (data + *offset > data_end)
+            return DROP;
 
-//         content += 10;
+        #ifdef DOMAIN
+            bpf_printk("%s", (((__u8 *) header) +  (*((__u16 *) content) - 11)));
+        #endif
+        
 
-//         *offset +=  *((__u16 *) content);
+        content += 10;
 
-//         if (data + *offset > data_end)
-//             return DROP;
+        *offset +=  *((__u16 *) content);
 
-//         content = data + *offset;
-//     }
+        if (data + *offset > data_end)
+            return DROP;
 
-//     *offset += 16;
+        content = data + *offset;
+    }
 
-//     if (data + *offset > data_end)
-//         return DROP;
-
-//     content += 12;
-
-//     return *((__u32 *) content);
+    return 0;
     
-// }
+}
 
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
@@ -737,12 +735,7 @@ int dns_filter(struct xdp_md *ctx) {
 
                 case ADDITIONAL:
 
-                    #ifdef DOMAIN
-                        bpf_printk("%s", data + offset_h);
-                    #endif  
-                    
-
-                    // __u32 ip = getAuthoritative(data, &offset_h, data_end);
+                    __u32 ip = getAuthoritative(data, &offset_h, data_end);
 
                     // bpf_map_update_elem(&recursive_queries, (struct rec_query_domain *) &query, &owner, 0);
                     
