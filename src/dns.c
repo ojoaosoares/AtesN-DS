@@ -494,7 +494,7 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
         return DROP;
 
     #ifdef DOMAIN
-        bpf_printk("Subdomain: %s", query->query.name[pointer - sizeof(struct dns_header)]);
+        bpf_printk("Subdomain: %s", &query->query.name[pointer - sizeof(struct dns_header)]);
     #endif
 
     *offset += 10;
