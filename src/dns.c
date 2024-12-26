@@ -482,54 +482,47 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
 static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_query *query) {
 
     __u8 *content = data + *offset;
-    
-
-    for (size_t i = 0; i < 10; i++)
-    {    
         
-        *offset += 2;
+    *offset += 2;
 
-        if (data + *offset > data_end)
-            return DROP;
+    if (data + *offset > data_end)
+        return DROP;
 
-        __u16 pointer = ((bpf_ntohs(*(__u16 *) content)) & 0x3FFF);
+    __u16 pointer = (bpf_ntohs(*(__u16 *) content) & 0x3FFF);
 
-        if (pointer - sizeof(struct dns_header) >= DNS_KEY_DOMAIN_LENGTH)
-            return DROP;
+    if (pointer - sizeof(struct dns_header) >= DNS_KEY_DOMAIN_LENGTH)
+        return DROP;
 
-        #ifdef DOMAIN
-            bpf_printk("Subdomain: %s", &query->query.name[pointer - sizeof(struct dns_header)]);
-        #endif
+    if (pointer - sizeof(struct dns_header) < 0)
+        return DROP;
 
-        *offset += 10;
+    #ifdef DOMAIN
+        bpf_printk("Subdomain: %s", &query->query.name[pointer - sizeof(struct dns_header)]);
+    #endif
 
-        if (data + *offset > data_end)
-            return DROP;
+    *offset += 10;
 
-        content += 10;
+    if (data + *offset > data_end)
+        return DROP;
 
-        __u16 domain_size = bpf_ntohs(*((__u16 *) content));
+    content += 10;
 
-        if (domain_size < 2)
-            return DROP;
+    __u16 domain_size = bpf_ntohs(*((__u16 *) content));
 
-        if (domain_size > MAX_DNS_NAME_LENGTH)
-            return DROP;
+    if (domain_size < 2)
+        return DROP;
 
-        #ifdef DOMAIN
-            bpf_printk("Size authoritative: %u", domain_size);
-        #endif
+    if (domain_size > MAX_DNS_NAME_LENGTH)
+        return DROP;
 
-        *offset += domain_size;
+    #ifdef DOMAIN
+        bpf_printk("Size authoritative: %u", domain_size);
+    #endif
 
-        if (data + *offset > data_end)
-            return DROP;    
+    *offset += domain_size;
 
-        else
-            return DROP;
-
-            
-    }
+    if (data + *offset > data_end)
+        return DROP;    
 }
 
 SEC("xdp")
@@ -770,6 +763,11 @@ int dns_filter(struct xdp_md *ctx) {
                     #endif
 
                     __u32 ip = getAuthoritative(data, &offset_h, data_end, &query);
+
+                    ip = getAuthoritative(data, &offset_h, data_end, &query);
+                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
+                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
+                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
 
                     // bpf_map_update_elem(&recursive_queries, (struct rec_query_domain *) &query, &owner, 0);
                     
