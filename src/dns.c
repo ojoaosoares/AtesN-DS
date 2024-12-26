@@ -479,7 +479,7 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
     return ANSWER;
 }
 
-static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end) {
+static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_query *query) {
 
     __u8 *content = data + *offset; 
     
@@ -488,8 +488,13 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
     if (data + *offset > data_end)
         return DROP;
 
+    __u16 pointer = ((bpf_ntohs(*(__u16 *) content)) & 0x3FFF);
+
+    if (pointer - sizeof(struct dns_header) >= DNS_KEY_DOMAIN_LENGTH)
+        return DROP;
+
     #ifdef DOMAIN
-        bpf_printk("%d", ((*(__u16 *) content) - 11) - sizeof(struct dns_header));
+        bpf_printk("Subdomain: %s", query->query.name[pointer - sizeof(struct dns_header)]);
     #endif
 }
 
@@ -730,7 +735,7 @@ int dns_filter(struct xdp_md *ctx) {
                         bpf_printk("[XDP] Additional Reference");
                     #endif
 
-                    __u32 ip = getAuthoritative(data, &offset_h, data_end);
+                    __u32 ip = getAuthoritative(data, &offset_h, data_end, &query);
 
                     // bpf_map_update_elem(&recursive_queries, (struct rec_query_domain *) &query, &owner, 0);
                     
