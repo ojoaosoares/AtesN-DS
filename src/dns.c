@@ -481,33 +481,16 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
 
 static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end) {
 
+    __u8 *content = data + *offset; 
     
-    __u8 *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-    __u8 *content = data + *offset;
- 
-    
-    *offset += 12;
+    *offset += 2;
 
     if (data + *offset > data_end)
         return DROP;
 
     #ifdef DOMAIN
-        bpf_printk("%s", (void *) ( header +  (*((__u16 *) content) - 11)));
+        bpf_printk("%d", ((*(__u16 *) content) - 11) - sizeof(struct dns_header));
     #endif
-
-    content += 10;
-
-    *offset +=  *((__u16 *) content);
-
-    if (data + *offset > data_end)
-        return DROP;
-
-    content = data + *offset;
-    
-
-    return 0;
-    
 }
 
 SEC("xdp")
