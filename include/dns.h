@@ -144,7 +144,7 @@ struct rec_query_key {
 };
 
 struct query_owner {
-    __be32 ip_address;
+    __u32 ip_address;
 };
 
 #endif

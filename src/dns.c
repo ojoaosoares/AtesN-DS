@@ -513,7 +513,6 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
         #ifdef DOMAIN
             bpf_printk("%s", (((__u8 *) header) +  (*((__u16 *) content) - 11)));
         #endif
-        
 
         content += 10;
 
@@ -544,7 +543,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef defined(DEBUG) || defined(OUTPUT)
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's IPV4");
             #endif
             break;
@@ -559,7 +558,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef defined(DEBUG) || defined(OUTPUT)
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's UDP");
             #endif
             break;
@@ -576,7 +575,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef defined(DEBUG) || defined(OUTPUT)
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's Port 53");
             #endif  
             break;
@@ -591,7 +590,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef defined(DEBUG) || defined(OUTPUT)
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's DNS");
             #endif
             break;
@@ -606,7 +605,7 @@ int dns_filter(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain requested: %s", query.query.name);
-		bpf_printk("[XDP] Owner IP: %u", owner.ip_address);
+		        bpf_printk("[XDP] Owner IP: %u", owner.ip_address);
             #endif
 
             break;
@@ -630,7 +629,7 @@ int dns_filter(struct xdp_md *ctx) {
                 { 
                     if (bpf_xdp_adjust_tail(ctx, sizeof(struct dns_response)) < 0)
                     {
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] It was't possible to resize the packet");
                         #endif
                         
@@ -676,9 +675,10 @@ int dns_filter(struct xdp_md *ctx) {
 
                     __u32 ip = recursive_server_ip;
 
-			#ifdef DOMAIN
-		    		bpf_printk("[XDP] Recursive IP: %u", ip);
-		    	#endif
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Recursive IP: %u", ip);
+                        bpf_printk("[XDP] Recursive Query Created");
+                    #endif
 
                     // __u32 ip = findOwnerServer(&query.query);    
                     
@@ -720,13 +720,18 @@ int dns_filter(struct xdp_md *ctx) {
             switch (typeOfResponse(data, data_end))
             {
                 case ANSWER:
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Answer Found");
+                    #endif
+
                     switch (prepareRecursiveResponse(data, &offset_h, data_end, powner))
                     {
                         case DROP:
                             return XDP_DROP;
                         default:
-                            #ifdef DEBUG
-                                bpf_printk("[XDP] Dns recursive response created");
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Recursive response created");
                             #endif  
                             break;
                     }
@@ -755,6 +760,10 @@ int dns_filter(struct xdp_md *ctx) {
                     break;
 
                 case ADDITIONAL:
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Additional Reference");
+                    #endif
 
                     __u32 ip = getAuthoritative(data, &offset_h, data_end);
 
