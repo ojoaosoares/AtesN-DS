@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
 
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
-	    printf("%s\n%u\n", recursive, skel->bss->recursive_server_ip);
+	        printf("%s\n", recursive);
 
             if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
             {

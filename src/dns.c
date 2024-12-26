@@ -158,21 +158,12 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end, 
     {
         id->port = bpf_ntohs(udp->source);
 
-	#ifdef DOMAIN
-	   bpf_printk("TO %d", DNS_PORT);
-	#endif
-
         return TO_DNS_PORT;
     }
 
     if (bpf_ntohs(udp->source) == DNS_PORT)
     {
         id->port = bpf_ntohs(udp->dest);
-
-	#ifdef DOMAIN
-	   bpf_printk("FROM %d", DNS_PORT);
-	#endif
-
 
         return FROM_DNS_PORT;
     }
@@ -212,17 +203,9 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
     id->id = header->id;
 
     if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
-	{	   
-	#ifdef DOMAIN
-		bpf_printk("RESPONSE");
-	#endif
         return RESPONSE_RETURN;
-	}
+	
 
-    	#ifdef DOMAIN
-    		bpf_printk("QUERY");
-    	#endif
-        
     return QUERY_RETURN;
 }
 
@@ -498,31 +481,30 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
 
 static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end) {
 
-    struct dns_header *header;    
-    header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    
+    __u8 *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
     __u8 *content = data + *offset;
  
-    // for (size_t i = 0; i < header->name_servers; i++)
-    {
-        *offset += 12;
+    
+    *offset += 12;
 
-        if (data + *offset > data_end)
-            return DROP;
+    if (data + *offset > data_end)
+        return DROP;
 
-        #ifdef DOMAIN
-            bpf_printk("%s", (((__u8 *) header) +  (*((__u16 *) content) - 11)));
-        #endif
+    #ifdef DOMAIN
+        bpf_printk("%s", (void *) ( header +  (*((__u16 *) content) - 11)));
+    #endif
 
-        content += 10;
+    content += 10;
 
-        *offset +=  *((__u16 *) content);
+    *offset +=  *((__u16 *) content);
 
-        if (data + *offset > data_end)
-            return DROP;
+    if (data + *offset > data_end)
+        return DROP;
 
-        content = data + *offset;
-    }
+    content = data + *offset;
+    
 
     return 0;
     
@@ -543,7 +525,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DOMAIN
+            #ifdef DEBUG
                 bpf_printk("[XDP] It's IPV4");
             #endif
             break;
@@ -558,7 +540,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DOMAIN
+            #ifdef DEBUG
                 bpf_printk("[XDP] It's UDP");
             #endif
             break;
