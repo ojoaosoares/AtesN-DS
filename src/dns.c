@@ -48,7 +48,7 @@ struct {
 
 // } cache_nsrecords SEC(".maps");
 
-__be32 recursive_server_ip;
+__u32 recursive_server_ip;
 
 static __always_inline void print_ip(__u64 ip) {
 
@@ -158,12 +158,21 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end, 
     {
         id->port = bpf_ntohs(udp->source);
 
+	#ifdef DOMAIN
+	   bpf_printk("TO %d", DNS_PORT);
+	#endif
+
         return TO_DNS_PORT;
     }
 
     if (bpf_ntohs(udp->source) == DNS_PORT)
     {
         id->port = bpf_ntohs(udp->dest);
+
+	#ifdef DOMAIN
+	   bpf_printk("FROM %d", DNS_PORT);
+	#endif
+
 
         return FROM_DNS_PORT;
     }
@@ -203,7 +212,16 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
     id->id = header->id;
 
     if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
+	{	   
+	#ifdef DOMAIN
+		bpf_printk("RESPONSE");
+	#endif
         return RESPONSE_RETURN;
+	}
+
+    	#ifdef DOMAIN
+    		bpf_printk("QUERY");
+    	#endif
         
     return QUERY_RETURN;
 }
@@ -344,7 +362,7 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
     return ACCEPT;
 }
 
-static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data_end, __be32 ip_dest) {
+static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data_end, __u32 ip_dest) {
 
     struct ethhdr *eth;
     eth = data;
@@ -359,7 +377,7 @@ static __always_inline void createDnsQuery(void *data, __u64 *offset, void *data
     ipv4 = data + sizeof(struct ethhdr);
 
 	ipv4->saddr = ipv4->daddr;
-	ipv4->daddr = ip_dest;
+ipv4->daddr = ip_dest;
 
     ipv4->check = calculate_ip_checksum(ipv4);
 
@@ -586,9 +604,9 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #if defined(DEBUG) || defined(OUTPUT) || defined(DOMAIN)
-                bpf_printk("%d", query.query.name[0]);
+            #ifdef DOMAIN
                 bpf_printk("[XDP] Domain requested: %s", query.query.name);
+		bpf_printk("[XDP] Owner IP: %u", owner.ip_address);
             #endif
 
             break;
@@ -596,7 +614,7 @@ int dns_filter(struct xdp_md *ctx) {
 
     if ((query_response == QUERY_RETURN) && (port53 == TO_DNS_PORT))
     {
-        #ifdef defined(DEBUG) || defined(OUTPUT)
+        #ifdef DOMAIN
             bpf_printk("[XDP] It's a query");
         #endif
 
@@ -609,8 +627,7 @@ int dns_filter(struct xdp_md *ctx) {
                 arecord = bpf_map_lookup_elem(&cache_arecords, &query.query.name);
 
                 if (arecord)
-                {
-
+                { 
                     if (bpf_xdp_adjust_tail(ctx, sizeof(struct dns_response)) < 0)
                     {
                         #ifdef DEBUG
@@ -659,6 +676,10 @@ int dns_filter(struct xdp_md *ctx) {
 
                     __u32 ip = recursive_server_ip;
 
+			#ifdef DOMAIN
+		    		bpf_printk("[XDP] Recursive IP: %u", ip);
+		    	#endif
+
                     // __u32 ip = findOwnerServer(&query.query);    
                     
                     createDnsQuery(data, &offset_h, data_end, ip);
@@ -672,7 +693,7 @@ int dns_filter(struct xdp_md *ctx) {
 
     }
 
-    else if (query_response == RESPONSE_RETURN && port53 == FROM_DNS_PORT)
+    else if (port53 == FROM_DNS_PORT)
     {
         #ifdef DOMAIN
             bpf_printk("[XDP] It's a response");
