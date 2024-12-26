@@ -502,10 +502,10 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
     if (data + *offset > data_end)
         return DROP;
 
-    *content += 8;
+    content += 10;
 
     #ifdef DOMAIN
-        bpf_printk("Size authoritative: %u", content);
+        bpf_printk("Size authoritative: %u", bpf_ntohs(*((__u16 *) content)));
     #endif
     
 
