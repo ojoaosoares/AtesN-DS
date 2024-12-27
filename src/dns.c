@@ -479,62 +479,63 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
     return ANSWER;
 }
 
-static __always_inline __u16 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_query *query) {
+// static __always_inline __u16 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_query *query) {
+
+//     __u8 *content = data + *offset;
 
 
-    __u16 pointer;
-    
-    for (size_t i = 0; i < 10; i++)
-    {
-        if (data + *offset > data_end)
-            return DROP;  
+//     __u8 count = 0, zero = 0;
 
-        __u8 *content = data + *offset;
+//     for (size_t i = 0; i < 250; )
+//     {
+//         if (i == 0 || zero)
+//         {
+//             zero = 0;
+
+//             *offset += 2;
+
+//             if (data + *offset > data_end)
+//                 return DROP;
+
+//             __u16 pointer = (bpf_ntohs(*(__u16 *) (content + i)) & 0x3FFF) - sizeof(struct dns_header);
+
+//             if (pointer >= DNS_KEY_DOMAIN_LENGTH)
+//                 return DROP;
+
+//             if (pointer < 0)
+//                 return DROP;
+
+//             // #ifdef DOMAIN
+//             //     bpf_printk("Subdomain: %s", &query->query.name[pointer]);
+//             // #endif
+
+//             i += 12;
+
+//             *offset += 10;
+
+//             if (data + *offset > data_end)
+//                 return DROP;
+//         }
+
+//         else
+//         {
+//             (*offset)++;
+
+//             if (data + *offset > data_end)
+//                 return DROP;
+
+//             if (*(content + i) == 0)
+//             {
+//                 count++;
+//                 zero = 1;
+//             }
             
-        *offset += 2;
+//             i++;
+//         }
+//     }
 
-        if (data + *offset > data_end)
-            return DROP;
-
-        pointer = (bpf_ntohs(*(__u16 *) content) & 0x3FFF) - sizeof(struct dns_header);
-
-        if (pointer >= DNS_KEY_DOMAIN_LENGTH)
-            return DROP;
-
-        if (pointer < 0)
-            return DROP;
-
-        #ifdef DOMAIN
-            bpf_printk("Subdomain: %s", &query->query.name[pointer]);
-        #endif
-
-        *offset += 10;
-
-        if (data + *offset > data_end)
-            return DROP;
-
-        content += 10;
-
-        __u16 domain_size = bpf_ntohs(*((__u16 *) content));
-
-        if (domain_size < 0)
-            return DROP;
-
-        if (domain_size > MAX_DNS_NAME_LENGTH)
-            return DROP;
-
-        #ifdef DOMAIN
-            bpf_printk("Size authoritative: %u", domain_size);
-        #endif
-
-        if (*offset + domain_size > 65.535)
-            return DROP;
-
-        *offset += domain_size;  
-    }
-
-    return pointer;
-}
+//     return 1;
+// }
 
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
@@ -604,23 +605,24 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    switch (getDomain(data, &offset_h, data_end, &query.query))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        default:
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Domain requested: %s", query.query.name);
-		        bpf_printk("[XDP] Owner IP: %u", owner.ip_address);
-            #endif
-
-            break;
-    }
-
     if ((query_response == QUERY_RETURN) && (port53 == TO_DNS_PORT))
     {
+
+        switch (getDomain(data, &offset_h, data_end, &query.query))
+        {
+            case DROP:
+                return XDP_DROP;
+            case PASS:
+                return XDP_PASS;
+            default:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Domain requested: %s", query.query.name);
+                    bpf_printk("[XDP] Owner IP: %u", owner.ip_address);
+                #endif
+
+                break;
+        }
+        
         #ifdef DOMAIN
             bpf_printk("[XDP] It's a query");
         #endif
@@ -774,23 +776,16 @@ int dns_filter(struct xdp_md *ctx) {
                     #endif
 
                     
-                    __u16 domain_offset = getAuthoritative(data, &offset_h, data_end, &query);
+                    // __u16 domain_offset = getAuthoritative(data, &offset_h, data_end, &query);
 
-                    if (!domain_offset)
-                        return XDP_DROP;
+                    // if (!domain_offset)
+                    //     return XDP_DROP;
 
-                    if (data + offset_h > data_end)
-                        break;
-                
+                    // if (data + offset_h > data_end)
+                    //     break;
 
-                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
-                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
-                    // ip = getAuthoritative(data, &offset_h, data_end, &query);
 
-                    // bpf_map_update_elem(&recursive_queries, (struct rec_query_domain *) &query, &owner, 0);
-                    
-                    // createDnsQuery(data, &offset_h, data_end, &owner, ip);
-
+    
                 default:
                     break;
             }
