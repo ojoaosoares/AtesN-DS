@@ -30,6 +30,7 @@
 
 #define DNS_QR_SHIFT 15
 #define DNS_RA_SHIFT 7
+#define DNS_RD_SHIFT 8
 
 #define A_RECORD_TYPE 1
 #define NS_RECORD_TYPE 2
@@ -42,15 +43,10 @@
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
-
-#define DNS_KEY_DOMAIN_LENGTH 350
-
 #define QUERY_RETURN 2
 #define RESPONSE_RETURN 3
-
-#define NEW_QUERY 1
-#define KEEP_QUERY 0
-
+#define QUERY_ADDITIONAL_RETURN 4
+#define QUERY_NAMESERVERS_RETURN 5
 
 #define ANSWER 1
 #define ADDITIONAL 2
@@ -101,6 +97,16 @@ struct dns_response {
 } __attribute__((packed));
 
 
+struct dns_authoritative {
+   uint16_t query_pointer;
+   uint16_t record_type;
+   uint16_t class;
+   uint32_t ttl;
+   uint16_t data_length;
+
+} __attribute__((packed));
+
+
 struct a_record {
     struct in_addr ip_addr;
     uint32_t ttl;
@@ -111,15 +117,11 @@ struct a_record {
 //     char name[MAX_DNS_NAME_LENGTH];
 // };
 
-struct hop_query_value {
-    uint16_t record_type;
-    char name[MAX_DNS_NAME_LENGTH];
-    // uint16_t class;
-};
 
 struct dns_domain {
     __u16 record_type;
-    char name[DNS_KEY_DOMAIN_LENGTH];
+    __u8 domain_size;
+    char name[MAX_DNS_NAME_LENGTH];
     // uint16_t class;
 };
 
@@ -135,7 +137,8 @@ struct dns_query {
 
 struct rec_query_domain {
     __u16 record_type;
-    char name[4];
+    __u8 domain_size;
+    char name;
 };
 
 struct rec_query_key {
@@ -145,6 +148,12 @@ struct rec_query_key {
 
 struct query_owner {
     __u32 ip_address;
+};
+
+struct curr_query
+{
+    struct id id;
+    struct query_owner owner;
 };
 
 #endif

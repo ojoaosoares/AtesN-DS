@@ -127,6 +127,21 @@ int main(int argc, char *argv[]) {
 
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
+            int key = 0;
+            int fd = bpf_program__fd(skel->progs.dns_query);
+
+            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
+
+            key = 1;
+            fd = bpf_program__fd(skel->progs.dns_response);
+
+            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
+
+            key = 2;
+            fd = bpf_program__fd(skel->progs.dns_hop);
+
+            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
+
 	        printf("%s\n", recursive);
 
             if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
