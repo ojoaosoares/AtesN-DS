@@ -14,7 +14,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 3);                
+        __uint(max_entries, 4);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -547,7 +547,7 @@ static __always_inline __u8 typeOfResponse(void *data, void *data_end) {
     return ANSWER;
 }
 
-static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_domain *query) {
+static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data_end, struct dns_domain *query) {
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -597,6 +597,57 @@ static __always_inline __u32 getAuthoritative(void *data, __u64 *offset, void *d
     }
     
     return DROP;
+}
+
+static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_query *query) {
+
+    __builtin_memset(query->query.name, 0, MAX_DNS_NAME_LENGTH);
+
+    __u8 *content = data + *offset, 
+    *domain_asked = data + *offset;
+
+    for (size_t size = 0; size < MAX_DNS_NAME_LENGTH + 6; size++)
+    {
+        if (data + ++(*offset) > data_end)
+            return DROP;
+
+        if (((*(content + size) & 0xC0) == 0xC0))
+        {
+            (*offset) += 11;
+
+            if (data + (*offset)> data_end)
+                return DROP;
+
+            content += size + 10;
+            query->query.domain_size = (__u8) bpf_ntohs(*((__u16 *) (content)));
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] %d", query->query.domain_size);
+            #endif
+
+            if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
+                return DROP;
+
+            content += 2;
+
+            break;
+        }
+    }
+
+
+    for (size_t i = 0; i < query->query.domain_size; i++)
+    {
+        if (data + ++*(offset) > data_end)
+            return DROP;
+
+        query->query.name[i] = *(content + i);
+    }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Final");
+    #endif
+
+    return ACCEPT;
 }
 
 SEC("xdp")
@@ -920,7 +971,7 @@ int dns_response(struct xdp_md *ctx) {
         return XDP_TX;
     }
 
-    else if (query_response != RESPONSE_RETURN && powner || lastdomain)
+    else if (query_response != RESPONSE_RETURN || lastdomain)
     {
         getOwnerInfo(data, &curr.owner);
 
@@ -934,11 +985,11 @@ int dns_response(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        if (query_response == QUERY_ADDITIONAL_RETURN)
-            bpf_tail_call(ctx, &tail_programs, 2);
+        // if (query_response == QUERY_ADDITIONAL_RETURN)
+        //     bpf_tail_call(ctx, &tail_programs, 2);
 
         // if (query_response == QUERY_NAMESERVERS_RETURN)
-        //     bpf_tail_call(ctx, &tail_programs, 3);
+            bpf_tail_call(ctx, &tail_programs, 3);
 
         // if (lastdomain)
         //     bpf_tail_call(ctx, &tail_programs, 4);
@@ -980,7 +1031,7 @@ int dns_hop(struct xdp_md *ctx) {
         if (data + offset_h > data_end)
             return XDP_DROP;
     
-        __u32 ip = getAuthoritative(data, &offset_h, data_end, domain);
+        __u32 ip = getAdditional(data, &offset_h, data_end, domain);
         
         switch (ip)
         {
@@ -1055,6 +1106,62 @@ int dns_hop(struct xdp_md *ctx) {
     }
 
     return XDP_PASS;
+}
+
+
+SEC("xdp")
+int dns_new_query(struct xdp_md *ctx) {
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Dns new query");
+    #endif
+
+    void *data = (void*) (long) ctx->data;
+    void *data_end = (void*) (long) ctx->data_end;
+    
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
+    struct curr_query curr;
+    
+    getOwnerInfo(data, &curr.owner);
+
+    getResponserInfo(data, &curr.id);
+
+    getQueryInfo(data, &curr.id);
+
+    struct dns_domain *domain = bpf_map_lookup_elem(&curr_queries, &curr);
+
+    if (domain) {
+
+        bpf_map_delete_elem(&curr_queries, &curr);
+
+        struct dns_query dnsquery; 
+        
+        dnsquery.id = curr.id;
+
+        switch(getAuthoritative(data, &offset_h, data_end, &dnsquery))
+        {
+            case DROP:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Deu ruim");
+                #endif
+                return XDP_DROP;
+            default:
+                break;
+        }
+
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
+        #endif
+
+    }
+
+    return XDP_PASS;
+
 }
 
 

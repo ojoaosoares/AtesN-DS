@@ -47,7 +47,6 @@ ${SKELETON} : ${OBJ_FOLDER}dns.o
 ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 
-
 install:
 	sudo chmod +x ${INSTALL} && sudo ${INSTALL}
 
