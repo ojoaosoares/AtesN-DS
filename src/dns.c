@@ -204,13 +204,17 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     id->id = header->id;
 
-    if (header->flags >> DNS_QR_SHIFT ^ DNS_QUERY_TYPE)
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Flags %d", header->flags);
+    #endif
+
+    if (header->flags % 2)
         return RESPONSE_RETURN;
 
-    if (header->additional_records)
+    if (bpf_ntohs(header->additional_records))
         return QUERY_ADDITIONAL_RETURN;
 
-    if (header->name_servers)
+    if (bpf_ntohs(header->name_servers))
         return QUERY_NAMESERVERS_RETURN;
 	
     return QUERY_RETURN;
@@ -724,6 +728,7 @@ int dns_query(struct xdp_md *ctx) {
             return XDP_DROP;
         case PASS:
             return XDP_PASS;
+        case QUERY_ADDITIONAL_RETURN:
         case QUERY_RETURN:
             #ifdef DOMAIN
                 bpf_printk("[XDP] It's a query");
@@ -985,10 +990,10 @@ int dns_response(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        // if (query_response == QUERY_ADDITIONAL_RETURN)
-        //     bpf_tail_call(ctx, &tail_programs, 2);
+        if (query_response == QUERY_ADDITIONAL_RETURN)
+            bpf_tail_call(ctx, &tail_programs, 2);
 
-        // if (query_response == QUERY_NAMESERVERS_RETURN)
+        if (query_response == QUERY_NAMESERVERS_RETURN)
             bpf_tail_call(ctx, &tail_programs, 3);
 
         // if (lastdomain)
@@ -1102,7 +1107,6 @@ int dns_hop(struct xdp_md *ctx) {
         #endif
 
         return XDP_TX;
-
     }
 
     return XDP_PASS;
@@ -1214,7 +1218,7 @@ int dns_new_query(struct xdp_md *ctx) {
         }
 
         #ifdef DOMAIN
-            bpf_printk("[XDP] Hop query created");
+            bpf_printk("[XDP] New query created");
         #endif
 
         return XDP_TX;
