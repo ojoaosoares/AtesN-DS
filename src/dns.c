@@ -311,11 +311,11 @@ static __always_inline void getResponserInfo(void *data, struct id *id)
     id->port = bpf_ntohs(udp->dest);
 }
 
-static __always_inline void getOwnerMac(void *data, struct query_owner *owner)
+static __always_inline void getOwnerMac(void *data, char mac[ETH_ALEN])
 {
     struct ethhdr *eth = data;
 
-    __builtin_memcpy(owner->mac_address, eth->h_source, ETH_ALEN);
+    __builtin_memcpy(mac, eth->h_source, ETH_ALEN);
 }
 
 static __always_inline void getOwnerInfo(void *data, __u32 *ip)
@@ -325,7 +325,7 @@ static __always_inline void getOwnerInfo(void *data, __u32 *ip)
     *ip = ipv4->saddr;
 }
 
-static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, void *data_end, char mac[6])
+static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, void *data_end, char mac[ETH_ALEN])
 {
     struct ethhdr *eth = data;
 
@@ -932,7 +932,7 @@ int dns_query(struct xdp_md *ctx) {
 
                 getOwnerMac(data, &owner);
 
-                getOwnerInfo(data, &owner);
+                getOwnerInfo(data, &owner.ip_address);
 
                 getRequesterInfo(data, &dnsquery.id);
 
