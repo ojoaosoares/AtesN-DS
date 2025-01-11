@@ -89,20 +89,23 @@ int main(int argc, char *argv[]) {
     if (argc >= 2)
     {
     
-        if (argc == 3 || argc == 5)
+        if (argc == 5 || argc == 7)
         {
             int opt, index;
 
-            char recursive[MAX_IP_STRING_LENGTH];
+            char mac_address[18], recursive[MAX_IP_STRING_LENGTH];
 
             strcpy(recursive, standard_recursive_server);
 
             optind = 1;
 
-            while ((opt = getopt(argc, argv, "i:s:")) != -1) {
+            while ((opt = getopt(argc, argv, "i:m:s:")) != -1) {
                 switch (opt) {
                 case 'i':
                     index = if_nametoindex(optarg);
+                    break;
+                case 'm':
+                    strcpy(mac_address, optarg);                    
                     break;
                 case 's':
                     strcpy(recursive, optarg);
@@ -127,6 +130,8 @@ int main(int argc, char *argv[]) {
 
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
+            convert_mac_to_bytes(mac_address, skel->bss->proxy_mac);
+            
             int key = 0;
             int fd = bpf_program__fd(skel->progs.dns_query);
 

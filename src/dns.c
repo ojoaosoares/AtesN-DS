@@ -61,6 +61,8 @@ struct {
 
 __u32 recursive_server_ip;
 
+unsigned char proxy_mac[ETH_ALEN];
+
 static __always_inline void print_ip(__u64 ip) {
 
     __u8 fourth = ip >> 24;
@@ -309,14 +311,21 @@ static __always_inline void getResponserInfo(void *data, struct id *id)
     id->port = bpf_ntohs(udp->dest);
 }
 
-static __always_inline void getOwnerInfo(void *data, struct query_owner *owner)
+static __always_inline void getOwnerMac(void *data, struct query_owner *owner)
+{
+    struct ethhdr *eth = data;
+
+    __builtin_memcpy(owner->mac_address, eth->h_source, ETH_ALEN);
+}
+
+static __always_inline void getOwnerInfo(void *data, __u32 *ip)
 {
     struct iphdr *ipv4 = (data + sizeof(struct ethhdr));
 
-    owner->ip_address = ipv4->saddr;
+    *ip = ipv4->saddr;
 }
 
-static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, void *data_end)
+static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, void *data_end, char mac[6])
 {
     struct ethhdr *eth = data;
 
@@ -331,11 +340,8 @@ static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, v
         return DROP;
     }
 
-    unsigned char tmp_mac[ETH_ALEN];
-
-	__builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
 	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-	__builtin_memcpy(eth->h_dest, tmp_mac, ETH_ALEN);
+	__builtin_memcpy(eth->h_dest, mac, ETH_ALEN);
 
     return ACCEPT;
 }
@@ -855,7 +861,7 @@ int dns_query(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -904,9 +910,11 @@ int dns_query(struct xdp_md *ctx) {
             {    
                 struct query_owner owner;
 
-                getRequesterInfo(data, &dnsquery.id);
+                getOwnerMac(data, &owner);
 
                 getOwnerInfo(data, &owner);
+
+                getRequesterInfo(data, &dnsquery.id);
 
                 if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
                 {
@@ -921,7 +929,7 @@ int dns_query(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -1012,7 +1020,7 @@ int dns_response(struct xdp_md *ctx) {
 
         offset_h = 0;
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+        switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
         {
             case DROP:
                 return XDP_DROP;
@@ -1057,7 +1065,7 @@ int dns_response(struct xdp_md *ctx) {
 
     else if (query_response != RESPONSE_RETURN || lastdomain)
     {
-        getOwnerInfo(data, &curr.owner);
+        getOwnerInfo(data, &curr.ip);
 
         curr.id = dnsquery.id;
 
@@ -1100,7 +1108,7 @@ int dns_hop(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.owner);
+    getOwnerInfo(data, &curr.ip);
 
     getResponserInfo(data, &curr.id);
 
@@ -1146,7 +1154,7 @@ int dns_hop(struct xdp_md *ctx) {
 
         offset_h = 0;
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+        switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
         {
             case DROP:
                 return XDP_DROP;
@@ -1209,7 +1217,7 @@ int dns_new_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.owner);
+    getOwnerInfo(data, &curr.ip);
 
     getResponserInfo(data, &curr.id);
 
@@ -1259,7 +1267,7 @@ int dns_new_query(struct xdp_md *ctx) {
 
         offset_h = 0;      
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+        switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
         {
             case DROP:
                 return XDP_DROP;
@@ -1324,7 +1332,7 @@ int dns_backto_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.owner);
+    getOwnerInfo(data, &curr.ip);
 
     getResponserInfo(data, &curr.id);
 
@@ -1384,7 +1392,7 @@ int dns_backto_query(struct xdp_md *ctx) {
 
             offset_h = 0;      
 
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
             {
                 case DROP:
                     return XDP_DROP;

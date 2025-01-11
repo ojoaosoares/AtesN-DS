@@ -147,13 +147,14 @@ struct rec_query_key {
 };
 
 struct query_owner {
-    __u32 ip_address;
+    unsigned char mac_address[6];
+    __be32 ip_address;
 };
 
 struct curr_query
 {
     struct id id;
-    struct query_owner owner;
+    __u32 ip;
 };
 
 #endif
