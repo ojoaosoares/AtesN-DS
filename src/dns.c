@@ -373,6 +373,27 @@ static __always_inline __u8 formatInternetLayer(void *data, __u64 *offset, void 
     return ACCEPT;
 }
 
+static __always_inline __u8 updateTransportChecksum(void *data, __u64 *offset, void *data_end)
+{
+    struct udphdr *udp = data + *offset;
+
+    *offset += sizeof(struct udphdr);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] Boundary exceded");
+        #endif
+
+        return DROP;
+    }
+
+    udp->check = bpf_htons(UDP_NO_ERROR);
+
+    return ACCEPT;
+}
+
+
 static __always_inline __u8 formatTransportLayer(void *data, __u64 *offset, void *data_end)
 {
     struct udphdr *udp = data + *offset;
@@ -946,6 +967,19 @@ int dns_query(struct xdp_md *ctx) {
                     default:
                         break;
                 }
+
+
+                switch(updateTransportChecksum(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Recursive Query created");
+                #endif  
             }
 
             return XDP_TX;
@@ -1034,7 +1068,15 @@ int dns_response(struct xdp_md *ctx) {
                 break;
         }
 
-        offset_h += sizeof(struct udphdr) + sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
+        switch(updateTransportChecksum(data, &offset_h, data_end))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                break;
+        }
+
+        offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
         
         struct a_record cache_record;
 
