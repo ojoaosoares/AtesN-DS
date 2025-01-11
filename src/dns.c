@@ -963,7 +963,7 @@ int dns_query(struct xdp_md *ctx) {
                 }
             }
 
-            return XDP_PASS;
+            return XDP_TX;
     
     default:
         break;
