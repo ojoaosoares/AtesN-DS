@@ -1100,9 +1100,13 @@ int dns_response(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Record obtained");
                 #endif  
                 break;
-        }        
+        }   
 
-        return XDP_TX;
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Recursive response returned");
+        #endif
+
+        return XDP_PASS;
     }
 
     else if (query_response != RESPONSE_RETURN || lastdomain)
