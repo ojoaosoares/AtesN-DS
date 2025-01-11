@@ -394,7 +394,6 @@ static __always_inline __u8 formatTransportLayer(void *data, __u64 *offset, void
 
     udp->len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr));
 
-
     udp->check = bpf_htons(UDP_NO_ERROR);
 
     return ACCEPT;    
@@ -945,20 +944,6 @@ int dns_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        break;
-                }
-
-                offset_h += sizeof(struct udphdr);
-
-                switch (createDnsQuery(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Recursive Query Created");
-                    #endif
                         break;
                 }
             }
