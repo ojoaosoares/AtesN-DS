@@ -1045,6 +1045,11 @@ int dns_response(struct xdp_md *ctx) {
 
     if (powner && query_response == RESPONSE_RETURN)
     {
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Recursive response");
+        #endif
+
         bpf_map_delete_elem(&recursive_queries, &dnsquery);
 
         offset_h = 0;
