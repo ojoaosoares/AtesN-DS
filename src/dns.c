@@ -948,12 +948,22 @@ int dns_query(struct xdp_md *ctx) {
                         break;
                 }
 
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Recursive Query Created");
-                #endif
+                offset_h += sizeof(struct udphdr);
+
+                switch (createDnsQuery(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Recursive Query Created");
+                    #endif
+                        break;
+                }
             }
 
-            return XDP_TX;
+            return XDP_PASS;
     
     default:
         break;
