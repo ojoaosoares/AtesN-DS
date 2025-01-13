@@ -870,8 +870,8 @@ int dns_query(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
-                bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
+		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+                bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
@@ -1058,8 +1058,8 @@ int dns_response(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		        bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
-                bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
+		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+                bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
@@ -1208,9 +1208,9 @@ int dns_hop(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Additional IP: %u", ip);
-		    bpf_printk("[XDP] Domain %s", query->query.name);
-                    bpf_printk("[XDP] Size: %d Type %d", query->query.domain_size, query->query.record_type);
-                    bpf_printk("[XDP] Id: %d Port %d", query->id.id, query->id.port);
+		            bpf_printk("[XDP] Domain %s", query->query.name);
+                    bpf_printk("[XDP] Size: %u Type %u", query->query.domain_size, query->query.record_type);
+                    bpf_printk("[XDP] Id: %u Port %u", query->id.id, query->id.port);
                 #endif
                 break;
         }   
@@ -1322,8 +1322,8 @@ int dns_new_query(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
-		    bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
-                    bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
+		            bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+                    bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
                 #endif
                 break;
         }
