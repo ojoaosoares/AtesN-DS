@@ -14,7 +14,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 4);                
+        __uint(max_entries, 5);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -887,9 +887,11 @@ int dns_query(struct xdp_md *ctx) {
 
             if (arecord)
             { 
-                __s16 newsize = sizeof(struct dns_response);
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache hit");
+                #endif
 
-                // alterHeaderSize(data, data_end, newsize);
+                __s16 newsize = sizeof(struct dns_response);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -1047,7 +1049,7 @@ int dns_response(struct xdp_md *ctx) {
             break;
     }
 
-    getDestPort(data, &dnsquery.id);
+    getSourceIp(data, &curr.ip); getDestPort(data, &dnsquery.id); curr.id = dnsquery.id;
 
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
@@ -1067,79 +1069,68 @@ int dns_response(struct xdp_md *ctx) {
 
     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &dnsquery);
 
-    struct dns_domain *lastdomain = bpf_map_lookup_elem(&hop_queries, (struct rec_query_key *) &dnsquery);
-
-    if (powner && query_response == RESPONSE_RETURN)
+    if (powner)
     {
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Recursive response");
-        #endif
-
-        bpf_map_delete_elem(&recursive_queries, &dnsquery);
-
-        offset_h = 0;
-
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+        if (query_response == RESPONSE_RETURN)
         {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
-                break;
+            bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
+            offset_h = 0;
+
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
+                    break;
+            }
+            
+            switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            switch(updateTransportChecksum(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
+            
+            struct a_record cache_record;
+
+            switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+            {
+                case DROP:
+                    return XDP_DROP;
+                case ACCEPT_NO_ANSWER:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] No DNS answer");
+                    #endif 
+                    break;
+                default:
+                    bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] Record obtained");
+                    #endif  
+                    break;
+            }   
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Recursive response returned");
+            #endif
+
+            return XDP_TX;
         }
-        
-        switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch(updateTransportChecksum(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
-        
-        struct a_record cache_record;
-
-        switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
-        {
-            case DROP:
-                return XDP_DROP;
-            case ACCEPT_NO_ANSWER:
-                #ifdef DEBUG
-                    bpf_printk("[XDP] No DNS answer");
-                #endif 
-                break;
-            default:
-                bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Record obtained");
-                #endif  
-                break;
-        }   
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Recursive response returned");
-        #endif
-
-        return XDP_TX;
-    }
-
-    else if (powner && query_response != RESPONSE_RETURN || lastdomain)
-    {
-        getSourceIp(data, &curr.ip);
-
-        curr.id = dnsquery.id;
 
         if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
         {
@@ -1152,17 +1143,36 @@ int dns_response(struct xdp_md *ctx) {
         if (query_response == QUERY_ADDITIONAL_RETURN)
             bpf_tail_call(ctx, &tail_programs, 2);
         
-        if (query_response == QUERY_NAMESERVERS_RETURN)
+        else if (query_response == QUERY_NAMESERVERS_RETURN)
             bpf_tail_call(ctx, &tail_programs, 3);
 
-        if (lastdomain)
-            bpf_tail_call(ctx, &tail_programs, 4);
+        return XDP_PASS;
     }
 
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Nada");
-    #endif
-    
+    struct dns_domain *lastdomain = bpf_map_lookup_elem(&hop_queries, (struct rec_query_key *) &dnsquery);
+
+    if (lastdomain > 0)
+    {   
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Curr queries map error");
+            #endif  
+            return XDP_PASS;
+        }
+
+        if (query_response == RESPONSE_RETURN)
+            bpf_tail_call(ctx, &tail_programs, 4);
+
+        else if (query_response == QUERY_ADDITIONAL_RETURN)
+            bpf_tail_call(ctx, &tail_programs, 2);
+        
+        else if (query_response == QUERY_NAMESERVERS_RETURN)
+            bpf_tail_call(ctx, &tail_programs, 3);
+        
+        return XDP_PASS;
+    }
+
     return XDP_PASS;
 }
 
