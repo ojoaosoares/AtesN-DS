@@ -590,10 +590,6 @@ static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data
                 if (pointer >= query->domain_size)    
                     continue;
 
-                // #ifdef DOMAIN
-                //     bpf_printk("[XDP] Subdomain: %s", &query->name[pointer]);
-                // #endif
-
                 count++;
             }
 
@@ -609,6 +605,28 @@ static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data
                     return DROP;
                 
                 __u32 ip = *((__u32 *) (content + size + 12));
+
+		if (data + (*offset) + 1 > data_end)
+                    return DROP;
+    
+                __u16 pointer_autho = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF);
+
+                if (pointer_autho > 500)
+                    return DROP;
+
+                __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
+
+                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
+                   return DROP;
+
+                __u16 pointer = (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
+
+		if (pointer >= query->domain_size)
+                   return DROP;
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Subdomain: %s", &query->name[pointer]);
+                #endif
 
                 return ip;
             }
@@ -694,6 +712,8 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
 
+	    autho->record_type = A_RECORD_TYPE;
+
             return ACCEPT;
         }
 
@@ -717,6 +737,8 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     domain += 2;
 
     *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
+
+    autho->record_type = A_RECORD_TYPE;
 
     return ACCEPT;
 }
@@ -848,6 +870,8 @@ int dns_query(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+		bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
+                bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
@@ -1032,6 +1056,8 @@ int dns_response(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+		bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
+                bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
@@ -1041,7 +1067,7 @@ int dns_response(struct xdp_md *ctx) {
 
     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &dnsquery);
 
-    struct dns_domain *lastdomain = bpf_map_lookup_elem(&hop_queries, &dnsquery);
+    struct dns_domain *lastdomain = bpf_map_lookup_elem(&hop_queries, (struct rec_query_key *) &dnsquery);
 
     if (powner && query_response == RESPONSE_RETURN)
     {
@@ -1106,10 +1132,10 @@ int dns_response(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive response returned");
         #endif
 
-        return XDP_PASS;
+        return XDP_TX;
     }
 
-    else if (query_response != RESPONSE_RETURN || lastdomain)
+    else if (powner && query_response != RESPONSE_RETURN || lastdomain)
     {
         getOwnerInfo(data, &curr.ip);
 
@@ -1132,6 +1158,10 @@ int dns_response(struct xdp_md *ctx) {
         if (lastdomain)
             bpf_tail_call(ctx, &tail_programs, 4);
     }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Nada");
+    #endif
     
     return XDP_PASS;
 }
@@ -1178,6 +1208,9 @@ int dns_hop(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Additional IP: %u", ip);
+		    bpf_printk("[XDP] Domain %s", query->query.name);
+                    bpf_printk("[XDP] Size: %d Type %d", query->query.domain_size, query->query.record_type);
+                    bpf_printk("[XDP] Id: %d Port %d", query->id.id, query->id.port);
                 #endif
                 break;
         }   
@@ -1289,11 +1322,21 @@ int dns_new_query(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
+		    bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
+                    bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
                 #endif
                 break;
         }
 
-        bpf_map_update_elem(&hop_queries, &dnsquery, &query->query, 0);
+        
+	if (bpf_map_update_elem(&hop_queries, (struct rec_query_key *) &dnsquery, &query->query, 0) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Hop queries map error");
+            #endif
+
+            return XDP_PASS;
+        }
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
 
