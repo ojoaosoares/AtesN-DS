@@ -297,28 +297,28 @@ static __always_inline void getQueryInfo(void *data, struct id *id)
     id->id = header->id;
 }
 
-static __always_inline void getRequesterInfo(void *data, struct id *id)
+static __always_inline void getSourcePort(void *data, struct id *id)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
     id->port = bpf_ntohs(udp->source);
 }
 
-static __always_inline void getResponserInfo(void *data, struct id *id)
+static __always_inline void getDestPort(void *data, struct id *id)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
     id->port = bpf_ntohs(udp->dest);
 }
 
-static __always_inline void getOwnerMac(void *data, char mac[ETH_ALEN])
+static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
 {
     struct ethhdr *eth = data;
 
     __builtin_memcpy(mac, eth->h_source, ETH_ALEN);
 }
 
-static __always_inline void getOwnerInfo(void *data, __u32 *ip)
+static __always_inline void getSourceIp(void *data, __u32 *ip)
 {
     struct iphdr *ipv4 = (data + sizeof(struct ethhdr));
 
@@ -606,9 +606,9 @@ static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data
                 
                 __u32 ip = *((__u32 *) (content + size + 12));
 
-		if (data + (*offset) + 1 > data_end)
-                    return DROP;
-    
+                if (data + (*offset) + 1 > data_end)
+                            return DROP;
+            
                 __u16 pointer_autho = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF);
 
                 if (pointer_autho > 500)
@@ -621,8 +621,8 @@ static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data
 
                 __u16 pointer = (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
 
-		if (pointer >= query->domain_size)
-                   return DROP;
+                if (pointer >= query->domain_size)
+                        return DROP;
 
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subdomain: %s", &query->name[pointer]);
@@ -954,11 +954,11 @@ int dns_query(struct xdp_md *ctx) {
             {    
                 struct query_owner owner;
 
-                getOwnerMac(data, &owner);
+                getSourceMac(data, &owner);
 
-                getOwnerInfo(data, &owner.ip_address);
+                getSourceIp(data, &owner.ip_address);
 
-                getRequesterInfo(data, &dnsquery.id);
+                getSourcePort(data, &dnsquery.id);
 
                 if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
                 {
@@ -1047,6 +1047,8 @@ int dns_response(struct xdp_md *ctx) {
             break;
     }
 
+    getDestPort(data, &dnsquery.id);
+
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
         case DROP:
@@ -1056,14 +1058,12 @@ int dns_response(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
+		        bpf_printk("[XDP] Size: %d Type %d", dnsquery.query.domain_size, dnsquery.query.record_type);
                 bpf_printk("[XDP] Id: %d Port %d", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
     }
-
-    getResponserInfo(data, &dnsquery.id);
 
     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &dnsquery);
 
@@ -1137,7 +1137,7 @@ int dns_response(struct xdp_md *ctx) {
 
     else if (powner && query_response != RESPONSE_RETURN || lastdomain)
     {
-        getOwnerInfo(data, &curr.ip);
+        getSourceIp(data, &curr.ip);
 
         curr.id = dnsquery.id;
 
@@ -1184,9 +1184,9 @@ int dns_hop(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.ip);
+    getSourceIp(data, &curr.ip);
 
-    getResponserInfo(data, &curr.id);
+    getDestPort(data, &curr.id);
 
     getQueryInfo(data, &curr.id);
 
@@ -1296,9 +1296,9 @@ int dns_new_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.ip);
+    getSourceIp(data, &curr.ip);
 
-    getResponserInfo(data, &curr.id);
+    getDestPort(data, &curr.id);
 
     getQueryInfo(data, &curr.id);
 
@@ -1421,9 +1421,9 @@ int dns_backto_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getOwnerInfo(data, &curr.ip);
+    getSourceIp(data, &curr.ip);
 
-    getResponserInfo(data, &curr.id);
+    getDestPort(data, &curr.id);
 
     getQueryInfo(data, &curr.id);
 
