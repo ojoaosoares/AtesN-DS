@@ -569,7 +569,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 //     return recursive_server_ip;
 // }
 
-static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data_end, struct dns_domain *query) {
+static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data_end, struct dns_domain *query, __u8 *subpointer) {
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -622,14 +622,10 @@ static __always_inline __u32 getAdditional(void *data, __u64 *offset, void *data
                 if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
                    return DROP;
 
-                __u16 pointer = (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
+                *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
 
-                if (pointer >= query->domain_size)
-                        return DROP;
-
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Subdomain: %s", &query->name[pointer]);
-                #endif
+                if (*subpointer >= query->domain_size)
+                    return DROP;
 
                 return ip;
             }
@@ -1231,8 +1227,10 @@ int dns_hop(struct xdp_md *ctx) {
 
         if (data + offset_h > data_end)
             return XDP_DROP;
+
+        __u8 pointer;    
     
-        __u32 ip = getAdditional(data, &offset_h, data_end, &query->query);
+        __u32 ip = getAdditional(data, &offset_h, data_end, &query->query, &pointer);
         
         switch (ip)
         {
@@ -1240,10 +1238,8 @@ int dns_hop(struct xdp_md *ctx) {
                 return XDP_DROP;
             default:
                 #ifdef DOMAIN
+                    bpf_printk("[XDP] Subdomain %s", &query->query.name[pointer]);
                     bpf_printk("[XDP] Additional IP: %u", ip);
-		            bpf_printk("[XDP] Domain %s", query->query.name);
-                    bpf_printk("[XDP] Size: %u Type %u", query->query.domain_size, query->query.record_type);
-                    bpf_printk("[XDP] Id: %u Port %u", query->id.id, query->id.port);
                 #endif
                 break;
         }   
