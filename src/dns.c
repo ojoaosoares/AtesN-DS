@@ -505,7 +505,7 @@ static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *dat
         return DROP;
     }
 
-	ipv4->saddr = serverip;
+	ipv4->saddr = ipv4->daddr;
     ipv4->daddr = ip_dest;
 
     ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
