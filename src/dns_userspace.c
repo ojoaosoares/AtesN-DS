@@ -68,8 +68,10 @@ void tutorial() {
     printf("AtesN-DS\n");
     printf("Usage: sudo ./atesnds [options]\n");
     printf("  -h\tShow a help message\n");
+    printf("  \t-a\t your ip address\n");
     printf("  \t-i\t interface where attach the dns\n");
     printf("  \t-s\t the root dns server\n");
+    printf("  \t-m\t mac of the proxy\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -89,7 +91,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 2)
     {
     
-        if (argc == 5 || argc == 7)
+        if (argc == 7 || argc == 9)
         {
             int opt, index;
 
@@ -97,10 +99,15 @@ int main(int argc, char *argv[]) {
 
             strcpy(recursive, standard_recursive_server);
 
+            __u32 myip;
+
             optind = 1;
 
-            while ((opt = getopt(argc, argv, "i:m:s:")) != -1) {
+            while ((opt = getopt(argc, argv, "a:i:m:s:")) != -1) {
                 switch (opt) {
+                case 'a':
+                    inet_pton(AF_INET, optarg, &skel->bss->serverip);
+                    break;
                 case 'i':
                     index = if_nametoindex(optarg);
                     break;
