@@ -111,8 +111,8 @@ struct dns_authoritative {
 
 
 struct a_record {
-    struct in_addr ip_addr;
-    uint32_t ttl;
+    __u32 ip;
+    __u32 ttl;
     __u64 timestamp;
 };
 
