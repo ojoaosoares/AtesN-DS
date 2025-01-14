@@ -893,7 +893,7 @@ int dns_query(struct xdp_md *ctx) {
                 __u64 diff, now = bpf_ktime_get_ns() / 1000000000;
 
                 if (now > arecord->timestamp)
-                    diff = now = arecord->timestamp;
+                    diff = now - arecord->timestamp;
 
                 else
                     diff = (UINT64_MAX - arecord->timestamp) + now;
