@@ -290,25 +290,25 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     return ACCEPT;
 }
 
-static __always_inline void getQueryInfo(void *data, struct id *id)
+static __always_inline __u16 getQueryId(void *data)
 {
     struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
 
-    id->id = header->id;
+    return header->id;
 }
 
-static __always_inline void getSourcePort(void *data, struct id *id)
+static __always_inline __u16 getSourcePort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    id->port = bpf_ntohs(udp->source);
+    return bpf_ntohs(udp->source);
 }
 
-static __always_inline void getDestPort(void *data, struct id *id)
+static __always_inline __u16 getDestPort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    id->port = bpf_ntohs(udp->dest);
+    return bpf_ntohs(udp->dest);
 }
 
 static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
@@ -318,11 +318,11 @@ static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
     __builtin_memcpy(mac, eth->h_source, ETH_ALEN);
 }
 
-static __always_inline void getSourceIp(void *data, __u32 *ip)
+static __always_inline __u32 getSourceIp(void *data)
 {
     struct iphdr *ipv4 = (data + sizeof(struct ethhdr));
 
-    *ip = ipv4->saddr;
+    return ipv4->saddr;
 }
 
 static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, void *data_end, char mac[ETH_ALEN])
@@ -437,6 +437,8 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
 
     header->answer_count = bpf_htons(1);
     header->flags = bpf_htons(0x8180);
+    header->name_servers = bpf_htons(0);
+    header->additional_records = bpf_htons(0);
 
     struct dns_response *response = data + *offset + domain_size + 5;
 
@@ -537,7 +539,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     }
 
     record->ip_addr.s_addr = response->ip;
-    record->ttl = response->ttl;
+    record->ttl = bpf_ntohl(response->ttl);
 
     return ACCEPT;
 }
@@ -891,7 +893,7 @@ int dns_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Cache hit");
                 #endif
 
-                __s16 newsize = sizeof(struct dns_response);
+                __s16 newsize = (data + offset_h - data_end) + sizeof(struct dns_response);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -956,11 +958,7 @@ int dns_query(struct xdp_md *ctx) {
             {    
                 struct query_owner owner;
 
-                getSourceMac(data, &owner);
-
-                getSourceIp(data, &owner.ip_address);
-
-                getSourcePort(data, &dnsquery.id);
+                getSourceMac(data, &owner); owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data);
 
                 if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
                 {
@@ -1049,7 +1047,7 @@ int dns_response(struct xdp_md *ctx) {
             break;
     }
 
-    getSourceIp(data, &curr.ip); getDestPort(data, &dnsquery.id); curr.id = dnsquery.id;
+    curr.ip = getSourceIp(data); dnsquery.id.port = getDestPort(data); curr.id = dnsquery.id;
 
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
@@ -1194,11 +1192,7 @@ int dns_hop(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getSourceIp(data, &curr.ip);
-
-    getDestPort(data, &curr.id);
-
-    getQueryInfo(data, &curr.id);
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -1306,11 +1300,7 @@ int dns_new_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getSourceIp(data, &curr.ip);
-
-    getDestPort(data, &curr.id);
-
-    getQueryInfo(data, &curr.id);
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -1431,11 +1421,7 @@ int dns_backto_query(struct xdp_md *ctx) {
 
     struct curr_query curr;
     
-    getSourceIp(data, &curr.ip);
-
-    getDestPort(data, &curr.id);
-
-    getQueryInfo(data, &curr.id);
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
