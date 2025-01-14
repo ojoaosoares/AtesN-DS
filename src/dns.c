@@ -633,6 +633,9 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                 if (*subpointer >= querysize)
                     return DROP;
 
+                bpf_printk("[XDP] Additional IP: %u", record->ip);
+                bpf_printk("[XDP] Additional TTL: %u", record->ttl);
+
                 return ACCEPT;
             }
         }
