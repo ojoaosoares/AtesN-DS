@@ -781,14 +781,14 @@ static __always_inline __u8 writeQuery(void *data, __u64 *offset, void *data_end
     return ACCEPT;
 }
 
-static __always_inline __u64 getTTl(__u32 ttl) {
+static __always_inline __u64 getTTl(__u64 timestamp) {
 
     __u64 now = bpf_ktime_get_ns() / 1000000000;
 
-    if (now > ttl)
-        return now - ttl;
+    if (now > timestamp)
+        return now - timestamp;
 
-    return (UINT64_MAX - ttl) + now;
+    return (UINT64_MAX - timestamp) + now;
 }
 
 
@@ -905,7 +905,7 @@ int dns_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Cache try");
                 #endif
                 
-                __u64 diff = getTTl(arecord->ttl);
+                __u64 diff = getTTl(arecord->timestamp);
 
                 #ifdef DOMAIN
                     bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
