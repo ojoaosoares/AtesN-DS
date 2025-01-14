@@ -292,6 +292,41 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     return ACCEPT;
 }
 
+
+static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_end, struct dns_domain *query, __u8 pointer)
+{
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    query->record_type = 0;
+
+    __u8 *content = (data + *offset);
+
+    *offset += sizeof(__u8);
+
+    if (data + *offset > data_end)
+        return DROP;
+
+    if (*(content) == 0)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No Dns domain");
+        #endif
+
+        return DROP;
+    }
+    __u8 index = 0;
+
+    for (size_t size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
+    {
+        if (size >= pointer)
+            query->name[index++] =  *(char *)(content + size);
+    
+        if (data + ++(*offset) > data_end)
+            return DROP;
+    }
+    
+    return ACCEPT;
+}
+
 static __always_inline __u16 getQueryId(void *data)
 {
     struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
@@ -543,6 +578,9 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     record->ttl = bpf_ntohl(response->ttl);
     record->timestamp = bpf_ktime_get_ns() / 1000000000;
 
+    bpf_printk("[XDP] Answer IP: %u", record->ip);
+    bpf_printk("[XDP] Answer TTL: %u", record->ttl);
+
     return ACCEPT;
 }
 
@@ -611,7 +649,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                 if (data + (*offset) + 15 > data_end)
                     return DROP;
 
-                record->ttl = bpf_ntohs(*((__u32 *) (content + size + 6)));
+                record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
                 
                 record->ip = *((__u32 *) (content + size + 12));
 
@@ -632,9 +670,6 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
                 if (*subpointer >= querysize)
                     return DROP;
-
-                bpf_printk("[XDP] Additional IP: %u", record->ip);
-                bpf_printk("[XDP] Additional TTL: %u", record->ttl);
 
                 return ACCEPT;
             }
@@ -807,14 +842,14 @@ static __always_inline void hideInDestIp(void *data, __u32 hidden)
 {   
     struct iphdr *ipv4 = data + sizeof(struct ethhdr);
 
-    ipv4->saddr = hidden;
+    ipv4->daddr = hidden;
 }
 
 static __always_inline __u32 getDestIp(void *data)
 {   
     struct iphdr *ipv4 = data + sizeof(struct ethhdr);
 
-    return ipv4->saddr;
+    return ipv4->daddr;
 }
 
 static __always_inline void hideInDestPort(void *data, __u16 hidden)
@@ -1285,6 +1320,7 @@ int dns_hop(struct xdp_md *ctx) {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
                 bpf_printk("[XDP] Additional TTL: %u", record.ttl);
+                bpf_printk("[XDP] Additional Pointer: %u", pointer);
             #endif
             break;
     }   
@@ -1330,7 +1366,7 @@ int dns_hop(struct xdp_md *ctx) {
         case DROP:
             return XDP_DROP;
         default:
-            hideInDestPort(data, pointer);
+            hideInDestPort(data, bpf_htons(pointer));
             break;
     }
 
@@ -1393,8 +1429,6 @@ int dns_new_query(struct xdp_md *ctx) {
         }
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
-
-        // alterHeaderSize(data, data_end, newsize);
 
         if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
         {
@@ -1600,9 +1634,6 @@ int dns_nscache(struct xdp_md *ctx) {
 
     record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data);
 
-    bpf_printk("[XDP] Additional IP: %u", record.ip);
-    bpf_printk("[XDP] Additional TTL: %u", record.ttl);
-
     record.timestamp = bpf_ktime_get_ns() / 1000000000;
 
     offset_h = sizeof(struct ethhdr);
@@ -1645,7 +1676,7 @@ int dns_nscache(struct xdp_md *ctx) {
 
     struct dns_domain query;
 
-    switch (getDomain(data, &offset_h, data_end, &query))
+    switch (getSubDomain(data, &offset_h, data_end, &query, pointer))
     {
         case DROP:
             return XDP_DROP;
@@ -1659,18 +1690,18 @@ int dns_nscache(struct xdp_md *ctx) {
             break;
     }
 
-    // if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
-    // {
-    //     #ifdef DOMAIN
-    //         bpf_printk("[XDP] NS Cache map error");
-    //     #endif
+    if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[XDP] NS Cache map error");
+        #endif
 
-    //     return XDP_PASS;
-    // }
+        return XDP_PASS;
+    }
 
-    // #ifdef DOMAIN
-    //     bpf_printk("[XDP] NS Cache Updated");
-    // #endif
+    #ifdef DOMAIN
+        bpf_printk("[XDP] NS Cache Updated");
+    #endif
 
     return XDP_TX;
 }
