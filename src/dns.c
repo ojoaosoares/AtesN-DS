@@ -827,6 +827,10 @@ int dns_filter(struct xdp_md *ctx) {
     void *data_end = (void*) (long) ctx->data_end;
     void *data = (void*) (long) ctx->data;
 
+    #ifdef DOMAIN
+        bpf_printk("[XDP] %d", serverip);
+    #endif
+
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
 
     switch (isIPV4(data, &offset_h, data_end))
@@ -1281,6 +1285,7 @@ int dns_hop(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
+                bpf_printk("[XDP] Additional TTL: %u", record.ttl);
             #endif
             break;
     }   
@@ -1595,6 +1600,9 @@ int dns_nscache(struct xdp_md *ctx) {
     struct a_record record; __u8 pointer;
 
     record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data);
+
+    bpf_printk("[XDP] Additional IP: %u", record.ip);
+    bpf_printk("[XDP] Additional TTL: %u", record.ttl);
 
     record.timestamp = bpf_ktime_get_ns() / 1000000000;
 
