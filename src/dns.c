@@ -539,7 +539,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     }
 
     record->ip_addr.s_addr = response->ip;
-    record->ttl = response->ttl;
+    record->ttl = bpf_ntohl(response->ttl);
 
     return ACCEPT;
 }
