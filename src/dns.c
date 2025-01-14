@@ -911,7 +911,7 @@ int dns_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
                 #endif
 
-                if (diff < arecord->ttl && diff > MINIMUM_TTL)
+                if (arecord->ttl - diff > MINIMUM_TTL)
                 {
                     #ifdef DOMAIN
                         bpf_printk("[XDP] Cache hit");
@@ -966,7 +966,7 @@ int dns_query(struct xdp_md *ctx) {
                             break;
                     }
 
-                    switch (createDnsAnswer(data, &offset_h, data_end, arecord->ip_addr.s_addr, diff, dnsquery.query.domain_size))
+                    switch (createDnsAnswer(data, &offset_h, data_end, arecord->ip_addr.s_addr, arecord->ttl - diff, dnsquery.query.domain_size))
                     {
                         case DROP:
                             return XDP_DROP;
