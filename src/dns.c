@@ -505,7 +505,7 @@ static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *dat
         return DROP;
     }
 
-	ipv4->saddr = ipv4->daddr;
+	ipv4->saddr = serverip;
     ipv4->daddr = ip_dest;
 
     ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
@@ -940,7 +940,7 @@ int dns_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
                 #endif
 
-                if (arecord->ttl >  MINIMUM_TTL + diff)
+                if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
                 {
                     #ifdef DOMAIN
                         bpf_printk("[XDP] Cache hit");
@@ -1665,7 +1665,7 @@ int dns_nscache(struct xdp_md *ctx) {
     //     bpf_printk("[XDP] NS Cache Updated");
     // #endif
 
-    // return XDP_TX;
+    return XDP_TX;
 }
 
 
