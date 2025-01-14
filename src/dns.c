@@ -14,7 +14,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 5);                
+        __uint(max_entries, 6);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -1330,7 +1330,7 @@ int dns_hop(struct xdp_md *ctx) {
             break;
     }
 
-    return XDP_TX;
+    bpf_tail_call(ctx, &tail_programs, 5);
 }
 
 SEC("xdp")
