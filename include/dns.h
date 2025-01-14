@@ -53,6 +53,9 @@
 #define NAMESERVERS 3
 #define NOTHING 0
 
+
+#define MINIMUM_TTL 30
+
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
 #endif
@@ -110,6 +113,7 @@ struct dns_authoritative {
 struct a_record {
     struct in_addr ip_addr;
     uint32_t ttl;
+    __u64 timestamp;
 };
 
 // struct ns_record {
