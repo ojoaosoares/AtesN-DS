@@ -940,7 +940,7 @@ int dns_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
                 #endif
 
-                if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
+                if (arecord->ttl >  MINIMUM_TTL + diff)
                 {
                     #ifdef DOMAIN
                         bpf_printk("[XDP] Cache hit");
