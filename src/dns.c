@@ -303,14 +303,14 @@ static __always_inline __u16 getSourcePort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    return udp->source;
+    return bpf_ntohs(udp->source);
 }
 
 static __always_inline __u16 getDestPort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    return udp->dest;
+    return bpf_ntohs(udp->dest);
 }
 
 static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
