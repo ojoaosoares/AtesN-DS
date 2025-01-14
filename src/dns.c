@@ -544,7 +544,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
     record->ip_addr.s_addr = response->ip;
     record->ttl = bpf_ntohl(response->ttl);
-    record->timestamp = bpf_ktime_get_ns() * 1000000000;
+    record->timestamp = bpf_ktime_get_ns() / 1000000000;
 
     return ACCEPT;
 }
@@ -894,7 +894,7 @@ int dns_query(struct xdp_md *ctx) {
 
             if (arecord)
             { 
-                __u64 diff = abs_diff((bpf_ktime_get_ns() * 1000000000), arecord->timestamp);
+                __u64 diff = abs_diff((bpf_ktime_get_ns() / 1000000000), arecord->timestamp);
 
                 if (diff < arecord->ttl)
                 {
