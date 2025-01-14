@@ -290,11 +290,11 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     return ACCEPT;
 }
 
-static __always_inline void getQueryInfo(void *data, struct id *id)
+static __always_inline __u16 getQueryId(void *data)
 {
     struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
 
-    id->id = header->id;
+    return header->id;
 }
 
 static __always_inline void getSourcePort(void *data, struct id *id)
@@ -1198,7 +1198,7 @@ int dns_hop(struct xdp_md *ctx) {
 
     getDestPort(data, &curr.id);
 
-    getQueryInfo(data, &curr.id);
+    curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -1310,7 +1310,7 @@ int dns_new_query(struct xdp_md *ctx) {
 
     getDestPort(data, &curr.id);
 
-    getQueryInfo(data, &curr.id);
+    curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -1435,7 +1435,7 @@ int dns_backto_query(struct xdp_md *ctx) {
 
     getDestPort(data, &curr.id);
 
-    getQueryInfo(data, &curr.id);
+    curr.id.id = getQueryId(data);
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
