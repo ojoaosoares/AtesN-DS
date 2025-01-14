@@ -297,18 +297,18 @@ static __always_inline __u16 getQueryId(void *data)
     return header->id;
 }
 
-static __always_inline void getSourcePort(void *data, struct id *id)
+static __always_inline __u16 getSourcePort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    id->port = bpf_ntohs(udp->source);
+    return bpf_ntohs(udp->source);
 }
 
-static __always_inline void getDestPort(void *data, struct id *id)
+static __always_inline __u16 getDestPort(void *data)
 {
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
-    id->port = bpf_ntohs(udp->dest);
+    return bpf_ntohs(udp->dest);
 }
 
 static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
@@ -962,7 +962,7 @@ int dns_query(struct xdp_md *ctx) {
 
                 getSourceIp(data, &owner.ip_address);
 
-                getSourcePort(data, &dnsquery.id);
+                dnsquery.id.port = getSourcePort(data);
 
                 if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
                 {
@@ -1051,7 +1051,7 @@ int dns_response(struct xdp_md *ctx) {
             break;
     }
 
-    getSourceIp(data, &curr.ip); getDestPort(data, &dnsquery.id); curr.id = dnsquery.id;
+    getSourceIp(data, &curr.ip); dnsquery.id.port = getDestPort(data); curr.id = dnsquery.id;
 
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
@@ -1198,7 +1198,7 @@ int dns_hop(struct xdp_md *ctx) {
     
     getSourceIp(data, &curr.ip);
 
-    getDestPort(data, &curr.id);
+    curr.id.port = getDestPort(data);
 
     curr.id.id = getQueryId(data);
 
@@ -1310,7 +1310,7 @@ int dns_new_query(struct xdp_md *ctx) {
     
     getSourceIp(data, &curr.ip);
 
-    getDestPort(data, &curr.id);
+    curr.id.port = getDestPort(data);
 
     curr.id.id = getQueryId(data);
 
@@ -1435,7 +1435,7 @@ int dns_backto_query(struct xdp_md *ctx) {
     
     getSourceIp(data, &curr.ip);
 
-    getDestPort(data, &curr.id);
+    curr.id.port = getDestPort(data);
 
     curr.id.id = getQueryId(data);
 
