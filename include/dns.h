@@ -53,6 +53,9 @@
 #define NAMESERVERS 3
 #define NOTHING 0
 
+
+#define MINIMUM_TTL 30
+
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
 #endif

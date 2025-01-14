@@ -63,10 +63,6 @@ __u32 recursive_server_ip;
 
 unsigned char proxy_mac[ETH_ALEN];
 
-static __always_inline __u64 abs_diff(__u64 a, __u64 b) {
-    return (a > b) ? (a - b) : (b - a);
-}
-
 static __always_inline void print_ip(__u64 ip) {
 
     __u8 fourth = ip >> 24;
@@ -893,10 +889,16 @@ int dns_query(struct xdp_md *ctx) {
             arecord = bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
 
             if (arecord)
-            { 
-                __u64 diff = abs_diff((bpf_ktime_get_ns() / 1000000000), arecord->timestamp);
+            {   
+                __u64 diff, now = bpf_ktime_get_ns() / 1000000000;
 
-                if (diff < arecord->ttl)
+                if (now > arecord->timestamp)
+                    diff = now = arecord->timestamp;
+
+                else
+                    diff = (UINT64_MAX - arecord->timestamp) + now;
+
+                if (diff < arecord->ttl && diff > MINIMUM_TTL)
                 {
                     #ifdef DOMAIN
                         bpf_printk("[XDP] Cache hit");
