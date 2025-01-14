@@ -827,10 +827,6 @@ int dns_filter(struct xdp_md *ctx) {
     void *data_end = (void*) (long) ctx->data_end;
     void *data = (void*) (long) ctx->data;
 
-    #ifdef DOMAIN
-        bpf_printk("[XDP] %d", serverip);
-    #endif
-
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
 
     switch (isIPV4(data, &offset_h, data_end))
