@@ -662,9 +662,9 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
             bpf_map_delete_elem(&cache_nsrecords, subdomain);
     }
 
-    content += counter;
+    content += counter + 1;
 
-    *offset += counter;
+    *offset += counter + 1;
 
     for (size_t i = 0; i < MAX_DNS_LABELS; i++)
     {
@@ -711,8 +711,8 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
                 bpf_map_delete_elem(&cache_nsrecords, subdomain);
         }
 
-        content += counter;
-        *offset += counter;
+        content += counter + 1;
+        *offset += counter + 1;
     }
 
     return ACCEPT;
