@@ -298,6 +298,11 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
     __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
     query->record_type = 0;
 
+    if (pointer > MAX_DNS_NAME_LENGTH)
+        return XDP_DROP;
+
+    *offset += pointer;
+
     __u8 *content = (data + *offset);
 
     *offset += sizeof(__u8);
@@ -612,6 +617,8 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    *offset += querysize;
 
     __u8 *content = data + *offset, count = 0;
 
@@ -1663,15 +1670,6 @@ int dns_nscache(struct xdp_md *ctx) {
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Hop query created");
-    #endif
-
-    if (pointer > MAX_DNS_NAME_LENGTH)
-        return XDP_DROP;
-
-    // offset_h += pointer;
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Pointer: %d", pointer);
     #endif
 
     struct dns_domain query;
