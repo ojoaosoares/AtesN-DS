@@ -169,6 +169,12 @@ int main(int argc, char *argv[]) {
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
+
+            key = 6;
+            fd = bpf_program__fd(skel->progs.dns_findserver);
+
+            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
+
 	        printf("%s\n", recursive);
 
             if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
