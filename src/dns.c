@@ -301,8 +301,6 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
     if (pointer > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
 
-//    *offset += pointer;
-
     __u8 *content = (data + *offset);
 
     *offset += sizeof(__u8);
@@ -976,7 +974,7 @@ int dns_query(struct xdp_md *ctx) {
             if (arecord)
             {   
                 #ifdef DOMAIN
-                    bpf_printk("[XDP] Cache try");
+                    bpf_printk("[XDP] Cache A record try");
                 #endif
                 
                 __u64 diff = getTTl(arecord->timestamp);
@@ -988,7 +986,7 @@ int dns_query(struct xdp_md *ctx) {
                 if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
                 {
                     #ifdef DOMAIN
-                        bpf_printk("[XDP] Cache hit");
+                        bpf_printk("[XDP] Cache A record  hit");
                     #endif
 
                     __s16 newsize = (data + offset_h - data_end) + sizeof(struct dns_response);
@@ -1073,6 +1071,33 @@ int dns_query(struct xdp_md *ctx) {
             }
 
             __u32 ip = recursive_server_ip;
+
+            struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &dnsquery.query.name);
+
+            if (nsrecord)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache NS record try");
+                #endif
+                
+                __u64 diff = getTTl(nsrecord->timestamp);
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
+                #endif
+
+                if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+                {
+                    ip =  nsrecord->ip;
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Cache NS record try");
+                    #endif
+                }
+                
+                else
+                    bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
+            }
 
             offset_h = 0;
 

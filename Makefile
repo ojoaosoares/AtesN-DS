@@ -17,7 +17,7 @@ INSTALL = ./init.sh
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}' | head -n 1)
 
-MAC = $(shell arp -n | grep $$(ip route | grep default | awk '{print $$3}' | head -n 1) | awk '{print $$3}')
+MAC = $(shell arp -n | grep -m 1 $$(ip route | grep default | awk '{print $$3}') | awk '{print $$3}')
 
 IP = $(shell ip -4 addr show $(shell ip route | awk '/default/ {print $$5}' | head -n 1) | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 
