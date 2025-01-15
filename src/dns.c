@@ -665,6 +665,8 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record hit");
             #endif
+
+            return ACCEPT;
         }
         
         else
@@ -1202,7 +1204,7 @@ int dns_query(struct xdp_md *ctx) {
                 if (content + i + 1 > data_end)
                     return XDP_DROP;
 
-                *(content +i) = 0;
+                *(content + i) = 0;
             }
             
         
