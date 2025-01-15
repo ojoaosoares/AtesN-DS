@@ -632,6 +632,9 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
 
     __u8 counter = *content;
 
+    if (counter == 0)
+        return ACCEPT;
+
     if (content + MAX_DNS_NAME_LENGTH > data_end)
         return DROP;
 
@@ -677,6 +680,9 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
 
         if (content + MAX_DNS_NAME_LENGTH > data_end)
             return DROP;
+
+        if(subdomain[0] == 0)
+            return ACCEPT;
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Subdomain: %s", subdomain);
