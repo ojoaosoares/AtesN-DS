@@ -442,6 +442,8 @@ static __always_inline __u8 updateTransportChecksum(void *data, __u64 *offset, v
         return DROP;
     }
 
+    udp->len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr) - sizeof(struct iphdr));
+
     udp->check = bpf_htons(UDP_NO_ERROR);
 
     return ACCEPT;
@@ -1900,6 +1902,8 @@ int dns_findserver(struct xdp_md *ctx) {
             #endif
             break;
     }
+
+    offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + domainsize + 5;
 
     __s16 newsize = (data + offset_h - data_end);
 
