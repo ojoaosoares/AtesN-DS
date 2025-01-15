@@ -632,8 +632,12 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
 
     __u8 counter = *content;
 
-    if (counter == 0)
+    if(subdomain[0] == 0)
         return ACCEPT;
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Subdomain: %s", subdomain);
+    #endif    return ACCEPT;
 
     if (content + MAX_DNS_NAME_LENGTH > data_end)
         return DROP;
@@ -1897,6 +1901,20 @@ int dns_findserver(struct xdp_md *ctx) {
             break;
     }
 
+    __s16 newsize = (data + offset_h - data_end);
+
+    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[XDP] It was't possible to resize the packet");
+        #endif
+        
+        return XDP_DROP;
+    }
+
+    data = (void*) ctx->data;
+    data_end = (void*) ctx->data_end;
+
     offset_h = 0;
 
     switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
@@ -1942,17 +1960,6 @@ int dns_findserver(struct xdp_md *ctx) {
             return XDP_DROP;
         default:
             break;
-    }
-
-    __s16 newsize = (data + offset_h - data_end);
-
-    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] It was't possible to resize the packet");
-        #endif
-        
-        return XDP_DROP;
     }
 
     #ifdef DOMAIN
