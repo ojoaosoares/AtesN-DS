@@ -301,7 +301,7 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
     if (pointer > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
 
-    *offset += pointer;
+//    *offset += pointer;
 
     __u8 *content = (data + *offset);
 
@@ -618,7 +618,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    *offset += querysize;
+//    *offset += querysize;
 
     __u8 *content = data + *offset, count = 0;
 
@@ -1640,6 +1640,8 @@ int dns_nscache(struct xdp_md *ctx) {
     struct a_record record; __u8 pointer;
 
     record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data);
+
+    bpf_printk("[XDP] Additional Pointer: %u", pointer);
 
     record.timestamp = bpf_ktime_get_ns() / 1000000000;
 
