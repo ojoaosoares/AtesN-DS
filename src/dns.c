@@ -611,6 +611,12 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         return DROP;
     }
 
+    if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
+        return ACCEPT_NO_ANSWER;
+
+    if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+        return ACCEPT_NO_ANSWER;
+
     record->ip = response->ip;
     record->ttl = bpf_ntohl(response->ttl);
     record->timestamp = bpf_ktime_get_ns() / 1000000000;
@@ -754,7 +760,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                     return DROP;
 
                 __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
-
+                
                 if (pointer >= querysize)    
                     continue;
 
@@ -784,19 +790,32 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
             
                 __u16 pointer_autho = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF);
 
-                if (pointer_autho > 500)
-                    return DROP;
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Subpointer: %u", pointer_autho);
+                    bpf_printk("[XDP] Header + query: %u", (sizeof(struct dns_header) + querysize + 5));
+                    bpf_printk("[XDP] Size: %u", querysize);
+                #endif
 
-                __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
+                if (pointer_autho >= sizeof(struct dns_header) + querysize + 5)
+                {
+                    __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
 
-                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
-                   return DROP;
+                    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
+                        return DROP;
 
-                *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
+                    *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
 
-                if (*subpointer >= querysize)
-                    return DROP;
+                    if (*subpointer >= querysize)
+                        return DROP;
 
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Subpointer: %u", *subpointer);
+                    #endif
+                }
+
+                else 
+                    *subpointer = pointer_autho - sizeof(struct dns_header);
+            
                 return ACCEPT;
             }
         }
@@ -843,10 +862,6 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             if (pointer >= query->domain_size)
                 return DROP;
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] AQUII");
-            #endif
 
             autho->domain_size += (query->domain_size - pointer) - 2;
 
@@ -1206,74 +1221,6 @@ int dns_query(struct xdp_md *ctx) {
 
                 *(content + i) = 0;
             }
-            
-        
-
-            // __u32 ip = recursive_server_ip; __u8 hit = 0;
-
-            // char *name = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-            // if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + MAX_DNS_NAME_LENGTH > data_end)
-            //     return XDP_DROP;
-
-            // struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, name);
-
-            // if (nsrecord)
-            // {
-            //     #ifdef DOMAIN
-            //         bpf_printk("[XDP] Cache NS record try");
-            //     #endif
-                
-            //     __u64 diff = getTTl(nsrecord->timestamp);
-
-            //     #ifdef DOMAIN
-            //         bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
-            //     #endif
-
-            //     if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
-            //     {
-            //         ip = nsrecord->ip;
-
-            //         #ifdef DOMAIN
-            //             bpf_printk("[XDP] Cache NS record hit");
-            //         #endif
-
-            //         hit = 1;
-            //     }
-                
-            //     else
-            //         bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
-            // }
-
-            // offset_h = 0;
-
-            // switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
-            // {
-            //     case DROP:
-            //         return XDP_DROP;
-            //     default:
-            //         #ifdef DEBUG
-            //             bpf_printk("[XDP] Headers updated");
-            //         #endif  
-            //         break;
-            // }
-            
-            // switch(returnToNetwork(data, &offset_h, data_end, ip))
-            // {
-            //     case DROP:
-            //         return XDP_DROP;
-            //     default:
-            //         break;
-            // }
-
-
-            // switch(updateTransportChecksum(data, &offset_h, data_end))
-            // {
-            //     case DROP:
-            //         return XDP_DROP;
-            //     default:
-            //         break;
-            // }
 
             #ifdef DOMAIN
                 bpf_printk("[XDP] Searching Authorative Server");
@@ -1405,7 +1352,7 @@ int dns_response(struct xdp_md *ctx) {
 
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
-            hideInSourceIp (data, dnsquery.query.domain_size);
+            hideInDestIp (data, dnsquery.query.domain_size);
 
             bpf_tail_call(ctx, &tail_programs, 2);
         }
@@ -1605,7 +1552,9 @@ int dns_new_query(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
+        hideInDestIp(data, dnsquery.query.domain_size);
+
+        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end) + MAX_DNS_NAME_LENGTH;
 
         if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
         {
@@ -1619,28 +1568,7 @@ int dns_new_query(struct xdp_md *ctx) {
         data = (void*) (long) ctx->data;
         data_end = (void*) (long) ctx->data_end;
 
-        offset_h = 0;      
-
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
-                break;
-        }
-
-        __u32 ip = recursive_server_ip;
-        
-        switch(returnToNetwork(data, &offset_h, data_end, ip))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+        offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr);
 
         switch (formatTransportLayer(data, &offset_h, data_end))
         {
@@ -1649,20 +1577,21 @@ int dns_new_query(struct xdp_md *ctx) {
             default:
                 break;
         }
+        __u8 *content = data + offset_h + sizeof(struct dns_header) + dnsquery.query.domain_size;
 
-        switch(createDnsQuery(data, &offset_h, data_end))
+        for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
         {
-            case DROP:
+            if (content + i + 1 > data_end)
                 return XDP_DROP;
-            default:
-                break;
+
+            *(content + i) = 0;
         }
 
         #ifdef DOMAIN
-            bpf_printk("[XDP] New query created");
-        #endif
+            bpf_printk("[XDP] Searching Authorative Server");
+        #endif  
 
-        return XDP_TX;
+        bpf_tail_call(ctx, &tail_programs, 6);
     }
 
     return XDP_PASS;
