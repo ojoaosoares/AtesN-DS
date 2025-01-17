@@ -54,8 +54,15 @@
 #define NAMESERVERS 3
 #define NOTHING 0
 
-
 #define MINIMUM_TTL 30
+
+#define DNS_CHECK_CACHE_PROG 0
+#define DNS_PROCESS_RESPONSE_PROG 1
+#define DNS_JUMP_QUERY_PROG 2
+#define DNS_CREATE_NEW_QUERY_PROG 3
+#define DNS_BACK_TO_LAST_QUERY 4
+#define DNS_SAVE_NS_CACHE_PROG 5
+#define DNS_SELECT_SERVER_PROG 6
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -127,7 +134,12 @@ struct dns_domain {
     __u16 record_type;
     __u8 domain_size;
     char name[MAX_DNS_NAME_LENGTH];
-    // uint16_t class;
+};
+
+struct hop_query
+{
+    __u16 pointer;
+    struct dns_domain query;
 };
 
 struct id {

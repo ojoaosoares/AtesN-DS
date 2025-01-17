@@ -140,38 +140,38 @@ int main(int argc, char *argv[]) {
             convert_mac_to_bytes(mac_address, skel->bss->proxy_mac);
             
             int key = 0;
-            int fd = bpf_program__fd(skel->progs.dns_query);
+            int fd = bpf_program__fd(skel->progs.dns_check_cache);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 1;
-            fd = bpf_program__fd(skel->progs.dns_response);
+            fd = bpf_program__fd(skel->progs.dns_process_response);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 2;
-            fd = bpf_program__fd(skel->progs.dns_hop);
+            fd = bpf_program__fd(skel->progs.dns_jump_query);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 3;
-            fd = bpf_program__fd(skel->progs.dns_new_query);
+            fd = bpf_program__fd(skel->progs.dns_create_new_query);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 4;
-            fd = bpf_program__fd(skel->progs.dns_backto_query);
+            fd = bpf_program__fd(skel->progs.dns_back_to_last_query);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 5;
-            fd = bpf_program__fd(skel->progs.dns_nscache);
+            fd = bpf_program__fd(skel->progs.dns_save_ns_cache);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
 
             key = 6;
-            fd = bpf_program__fd(skel->progs.dns_findserver);
+            fd = bpf_program__fd(skel->progs.dns_select_server);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
