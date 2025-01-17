@@ -611,10 +611,35 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         return DROP;
     }
 
-    if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
-        return ACCEPT_NO_ANSWER;
+    if(bpf_ntohs(response->record_type) == CNAME_RECORD_TYPE && bpf_ntohs(header->answer_count) > 1)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[DROP] CNAME record");
+        #endif
+
+        if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
+            return ACCEPT_NO_ANSWER;
+
+        *offset += bpf_ntohs(response->data_length) - 4;
+
+        response = data + *offset;
+
+        *offset += sizeof(struct dns_response);
+
+        if (data + *offset > data_end)
+        {
+            #ifdef DEBUG
+                bpf_printk("[DROP] No DNS answer");
+            #endif
+
+            return DROP;
+        }
+    }
 
     if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+        return ACCEPT_NO_ANSWER;
+
+    if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
     record->ip = response->ip;
@@ -629,59 +654,8 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
 static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *data_end, __u32 *ip) { 
 
-    __u8 *content = (data + *offset);
+    __u8 *content = (data + (*offset)++);
 
-    (*offset)++;
-
-    if (data + *offset > data_end)
-        return DROP;
-
-    char *subdomain = content;
-
-    __u8 counter = *content;
-
-    if(subdomain[0] == 0)
-        return ACCEPT;
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Subdomain: %s", subdomain);
-    #endif
-
-    if (content + MAX_DNS_NAME_LENGTH > data_end)
-        return DROP;
-
-    struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain);
-
-    if (nsrecord)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Cache NS record try");
-        #endif
-        
-        __u64 diff = getTTl(nsrecord->timestamp);
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
-        #endif
-
-        if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
-        {
-            *ip = nsrecord->ip;
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Cache NS record hit");
-            #endif
-
-            return ACCEPT;
-        }
-        
-        else
-            bpf_map_delete_elem(&cache_nsrecords, subdomain);
-    }
-
-    content += counter + 1;
-
-    *offset += counter + 1;
 
     for (size_t i = 0; i < MAX_DNS_LABELS; i++)
     {
@@ -742,8 +716,6 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-//    *offset += querysize;
 
     __u8 *content = data + *offset, count = 0;
 
@@ -1337,8 +1309,8 @@ int dns_response(struct xdp_md *ctx) {
                     break;
                 default:
                     bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
-                    #ifdef DEBUG
-                        bpf_printk("[XDP] Record obtained");
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] A cache updated");
                     #endif  
                     break;
             }   
@@ -1650,9 +1622,9 @@ int dns_backto_query(struct xdp_md *ctx) {
                     break;
                 default:
                     bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
-                    #ifdef DEBUG
-                        bpf_printk("[XDP] Record obtained");
-                    #endif  
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] A cache updated");
+                    #endif   
                     break;
             }        
 
