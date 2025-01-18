@@ -475,10 +475,21 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
         return DROP;
     }
 
-    header->answer_count = bpf_htons(1);
-    header->flags = bpf_htons(0x8180);
     header->name_servers = bpf_htons(0);
     header->additional_records = bpf_htons(0);
+
+    if (ip == 0)
+    {
+        header->answer_count = bpf_htons(0);
+        header->flags = bpf_htons(0x8183);
+
+        return ACCEPT;
+    }
+
+
+    header->answer_count = bpf_htons(1);
+    header->flags = bpf_htons(0x8180);
+    
 
     struct dns_response *response = data + *offset + domain_size + 5;
 
@@ -577,37 +588,12 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    if (!bpf_ntohs(header->answer_count))
-        return ACCEPT_NO_ANSWER;
-
     struct dns_response *response;
 
     response = data + *offset;
 
-    *offset += sizeof(struct dns_response);
-
-    if (data + *offset > data_end)
+    if (bpf_ntohs(header->answer_count))
     {
-        #ifdef DEBUG
-            bpf_printk("[DROP] No DNS answer");
-        #endif
-
-        return DROP;
-    }
-
-    if(bpf_ntohs(response->record_type) == CNAME_RECORD_TYPE && bpf_ntohs(header->answer_count) > 1)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[DROP] CNAME record");
-        #endif
-
-        if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
-            return ACCEPT_NO_ANSWER;
-
-        *offset += bpf_ntohs(response->data_length) - 4;
-
-        response = data + *offset;
-
         *offset += sizeof(struct dns_response);
 
         if (data + *offset > data_end)
@@ -618,22 +604,72 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
             return DROP;
         }
+
+        if(bpf_ntohs(response->record_type) == CNAME_RECORD_TYPE && bpf_ntohs(header->answer_count) > 1)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[DROP] CNAME record");
+            #endif
+
+            if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
+                return ACCEPT_NO_ANSWER;
+
+            *offset += bpf_ntohs(response->data_length) - 4;
+
+            response = data + *offset;
+
+            *offset += sizeof(struct dns_response);
+
+            if (data + *offset > data_end)
+            {
+                #ifdef DEBUG
+                    bpf_printk("[DROP] No DNS answer");
+                #endif
+
+                return DROP;
+            }
+        }
+
+        if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+            return ACCEPT_NO_ANSWER;
+
+        if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
+            return ACCEPT_NO_ANSWER;
+
+        record->ip = response->ip;
+        record->ttl = bpf_ntohl(response->ttl);
+        record->timestamp = bpf_ktime_get_ns() / 1000000000;
+
+        bpf_printk("[XDP] Answer IP: %u", record->ip);
+        bpf_printk("[XDP] Answer TTL: %u", record->ttl);
+
+        return ACCEPT;
     }
 
-    if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
-        return ACCEPT_NO_ANSWER;
+    if (bpf_ntohs(header->name_servers))
+    {
+        *offset += sizeof(struct dns_response);
 
-    if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
-        return ACCEPT_NO_ANSWER;
+        if (data + *offset > data_end)
+        {
+            #ifdef DEBUG
+                bpf_printk("[DROP] No DNS answer");
+            #endif
 
-    record->ip = response->ip;
-    record->ttl = bpf_ntohl(response->ttl);
-    record->timestamp = bpf_ktime_get_ns() / 1000000000;
+            return DROP;
+        }
 
-    bpf_printk("[XDP] Answer IP: %u", record->ip);
-    bpf_printk("[XDP] Answer TTL: %u", record->ttl);
+        if(bpf_ntohs(response->record_type) ^ SOA_RECORD_TYPE)
+            return ACCEPT_NO_ANSWER;
 
-    return ACCEPT;
+        record->ip = 0;
+        record->ttl = bpf_ntohl(response->ttl);
+        record->timestamp = bpf_ktime_get_ns() / 1000000000;
+
+        return ACCEPT;  
+    }
+    
+    return ACCEPT_NO_ANSWER;
 }
 
 static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *data_end, __u32 *ip) { 
@@ -1086,7 +1122,10 @@ int dns_check_cache(struct xdp_md *ctx) {
                         bpf_printk("[XDP] Cache A record  hit");
                     #endif
 
-                    __s16 newsize = (data + offset_h - data_end) + sizeof(struct dns_response);
+                    __s16 newsize = (data + offset_h - data_end);
+
+                    if (arecord->ip ^ 0)
+                        newsize += sizeof(struct dns_response);
 
                     if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                     {

@@ -35,6 +35,7 @@
 #define A_RECORD_TYPE 1
 #define NS_RECORD_TYPE 2
 #define CNAME_RECORD_TYPE 5
+#define SOA_RECORD_TYPE 6 
 
 #define INTERNT_CLASS 1
 
