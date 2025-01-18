@@ -17,9 +17,9 @@ INSTALL = ./init.sh
 # eBPF
 DEV = $(shell ip route | awk '/default/ {print $$5}' | head -n 1)
 
-MAC = $(shell arp -n | grep -m 1 $$(ip route | grep default | awk '{print $$3}') | awk '{print $$3}')
-
 IP = $(shell ip -4 addr show $(shell ip route | awk '/default/ {print $$5}' | head -n 1) | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+
+MAC = $(shell ip addr show ${DEV} | grep -oP 'link/ether \K([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}')
 
 # all sources, objs, and header files
 MAIN = ${SRC_FOLDER}dns_userspace.c
