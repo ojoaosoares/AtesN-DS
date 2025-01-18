@@ -211,7 +211,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     if (bpf_ntohs(header->flags) & (1 << 15))
     {
-        if (bpf_ntohs(header->answer_count) || (bpf_ntohs(header->flags) & 0x000F) ^ 0)
+        if (bpf_ntohs(header->answer_count) || (bpf_ntohs(header->flags) & 0x000F) ^ 0 || bpf_ntohs(header->flags) & (1 << 10))
             return RESPONSE_RETURN;
 
         if (bpf_ntohs(header->additional_records) && bpf_ntohs(header->name_servers))
