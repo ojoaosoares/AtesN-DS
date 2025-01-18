@@ -659,6 +659,9 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             return DROP;
         }
 
+        if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+            return ACCEPT_NO_ANSWER;
+
         if(bpf_ntohs(response->record_type) ^ SOA_RECORD_TYPE)
             return ACCEPT_NO_ANSWER;
 
