@@ -77,7 +77,6 @@
     #define memmove(dest, src, n) __builtin_memmove((dest), (src), (n))
 #endif
 
-
 struct dns_header
 {
     __be16 id;
@@ -123,6 +122,7 @@ struct a_record {
     __u32 ip;
     __u32 ttl;
     __u64 timestamp;
+    __u8 status;
 };
 
 // struct ns_record {

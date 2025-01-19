@@ -221,8 +221,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
             return QUERY_NAMESERVERS_RETURN;
 
         return RESPONSE_RETURN;
-    }
-        
+    }   
 
     if (bpf_ntohs(header->additional_records) && bpf_ntohs(header->name_servers))
         return QUERY_ADDITIONAL_RETURN;
@@ -460,7 +459,7 @@ static __always_inline __u8 swapTransportLayer(void *data, __u64 *offset, void *
     return ACCEPT;    
 }
 
-static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *data_end, __u32 ip, __u32 ttl, __u16 domain_size) {
+static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *data_end, __u32 ip, __u32 ttl, __u8 status, __u16 domain_size) {
 
     struct dns_header *header = data + *offset;
 
@@ -475,22 +474,21 @@ static __always_inline __u8 createDnsAnswer(void *data, __u64 *offset, void *dat
         return DROP;
     }
 
+    __u16 flags = 0x8180 + status;
+
     header->name_servers = bpf_htons(0);
     header->additional_records = bpf_htons(0);
+    header->flags = bpf_htons(flags);
 
     if (ip == 0)
     {
         header->answer_count = bpf_htons(0);
-        header->flags = bpf_htons(0x8183);
 
         return ACCEPT;
     }
 
-
     header->answer_count = bpf_htons(1);
-    header->flags = bpf_htons(0x8180);
     
-
     struct dns_response *response = data + *offset + domain_size + 5;
 
     *offset += sizeof(struct dns_response) + domain_size + 5;
@@ -639,6 +637,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         record->ip = response->ip;
         record->ttl = bpf_ntohl(response->ttl);
         record->timestamp = bpf_ktime_get_ns() / 1000000000;
+        record->status = (bpf_ntohs(header->flags) & 0x000F);
 
         bpf_printk("[XDP] Answer IP: %u", record->ip);
         bpf_printk("[XDP] Answer TTL: %u", record->ttl);
@@ -668,6 +667,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         record->ip = 0;
         record->ttl = bpf_ntohl(response->ttl);
         record->timestamp = bpf_ktime_get_ns() / 1000000000;
+        record->status = (bpf_ntohs(header->flags) & 0x000F);
 
         return ACCEPT;  
     }
@@ -739,6 +739,8 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    record->status = (bpf_ntohs(header->flags) & 0x000F);;
 
     __u8 *content = data + *offset, count = 0;
 
@@ -994,6 +996,13 @@ static __always_inline __u32 getDestIp(void *data)
     return ipv4->daddr;
 }
 
+static __always_inline __u8 getDNSStatus(void *data)
+{   
+    struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
+
+    return (bpf_ntohs(header->flags) & 0x000F);
+}
+
 static __always_inline void hideInDestPort(void *data, __u16 hidden)
 {   
     struct udphdr *udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
@@ -1177,7 +1186,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                             break;
                     }
 
-                    switch (createDnsAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, dnsquery.query.domain_size))
+                    switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, arecord->status, dnsquery.query.domain_size))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -1740,14 +1749,14 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     void *data = (void*) (long) ctx->data;
     void *data_end = (void*) (long) ctx->data_end;
     
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
 
     if (data + offset_h > data_end)
         return XDP_DROP;
 
     struct a_record record; __u8 pointer;
 
-    record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data);
+    record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data); record.status = getDNSStatus(data);
 
     bpf_printk("[XDP] Additional Pointer: %u", pointer);
 
