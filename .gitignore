@@ -8,6 +8,8 @@ obj/
 
 test/
 
+nohup*
+
 *.o
 
 *.out
