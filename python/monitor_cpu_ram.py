@@ -4,18 +4,6 @@ import csv
 import argparse
 import os
 from datetime import datetime
-import ntplib
-
-# Função para obter o timestamp NTP
-def get_ntp_time():
-    try:
-        # Criando o cliente NTP
-        c = ntplib.NTPClient()
-        response = c.request('pool.ntp.org')  # Pode usar outros servidores NTP se necessário
-        return datetime.fromtimestamp(response.tx_time).strftime('%Y-%m-%d %H:%M:%S.%f')
-    except Exception as e:
-        print(f"Erro ao obter tempo NTP: {e}")
-        return None  # Caso haja erro, retorna None
 
 def monitor_cpu_memory(output_file):
     try:
@@ -38,12 +26,11 @@ def monitor_cpu_memory(output_file):
                 memory_used = memory.used / (1024 ** 3)  # Convertendo de bytes para GB
                 memory_percentage = memory.percent  # Percentual de uso da memória
 
-                # Obtendo o timestamp atual via NTP
-                timestamp = get_ntp_time()
+                # Obtendo o timestamp atual no formato preciso
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
 
-                if timestamp is not None:
-                    # Escrevendo os dados no arquivo CSV
-                    writer.writerow([timestamp, cpu_usage, memory_used, memory_percentage])
+                # Escrevendo os dados no arquivo CSV
+                writer.writerow([timestamp, cpu_usage, memory_used, memory_percentage])
 
                 # Pausa de 1 segundo antes de mostrar novamente
                 time.sleep(1)
@@ -69,4 +56,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
