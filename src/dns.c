@@ -823,29 +823,52 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
 static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 domainsize, __u16 *pointer)
 {
-    __u8 *content = data + *offset + domainsize + 5;
-
-    if (data + *offset + domainsize + 7 > data_end)
+    if (domainsize > MAX_DNS_NAME_LENGTH)
         return DROP;
 
-    *pointer = (__u16) (bpf_ntohs(*(__u16 *) content) & 0x3FFF) - sizeof(struct dns_header);
+    *offset += domainsize + 5;
 
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Pointer: %u", *pointer);
-    #endif
+    __u8 *content = data + *offset;
 
-    return ACCEPT;
+    if (data + *offset + 2 > data_end)
+        return DROP;
+
+    if ((*(content) & 0xC0) == 0xC0)
+    {
+        *offset += 2;
+
+        *pointer = (__u16) (bpf_ntohs(*(__u16 *) content) & 0x3FFF) - sizeof(struct dns_header);
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Pointer: %u", *pointer);
+        #endif
+
+        return ACCEPT;
+    }
+
+    *pointer = domainsize;
+
+    for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+    {
+        if (data + ++(*offset) > data_end)
+            return DROP;
+        
+        if (*(content + i) == 0)
+            return DROP;
+    }
+
+    return DROP;
 }
 
 static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_domain *autho, struct dns_domain *query) {
 
     __builtin_memset(autho->name, 0, MAX_DNS_NAME_LENGTH);
 
-    __u64 newoff = *offset;
+    __u64 newoff = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
 
-    __u8 *domain = data + *offset;
+    __u8 *domain = data + newoff;
 
-    *offset += query->domain_size + 15;
+    *offset += 8;
 
     __u8 *content = data + *offset;
 
@@ -1803,13 +1826,16 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
             break;
     }
 
-    if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+    if (query.name[0] != 0)
     {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] NS Cache map error");
-        #endif
+        if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] NS Cache map error");
+            #endif
 
-        return XDP_PASS;
+            return XDP_PASS;
+        }
     }
 
     #ifdef DOMAIN
