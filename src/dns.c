@@ -873,7 +873,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
     __u8 *domain = data + *offset;
 
-    *offset += query->domain_size + 5 + off + 8;
+    *offset += query->domain_size + 5 + off + 9;
 
     __u8 *content = data + *offset;
 
@@ -1602,7 +1602,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     }
 
     #ifdef DOMAIN
-        bpf_printk("[XDP] off %d", off);
+        bpf_printk("[XDP] off %d pointer %d", off, pointer);
     #endif 
 
     hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
