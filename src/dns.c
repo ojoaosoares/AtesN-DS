@@ -1418,7 +1418,12 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
-            __u16 pointer, off = 0;
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Aqui");
+            #endif  
+
+            __u16 pointer = dnsquery.query.domain_size, off = 0;
+
             switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off))
             {
                 case DROP:
@@ -1473,7 +1478,11 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
-            __u16 pointer, off = 0;
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Aqui");
+            #endif  
+
+            __u16 pointer = dnsquery.query.domain_size, off = 0;
 
             switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off))
             {
