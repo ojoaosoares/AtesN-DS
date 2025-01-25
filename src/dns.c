@@ -234,9 +234,6 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
 static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end, struct dns_domain *query)
 {
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
-    query->record_type = 0;
-
     __u8 *content = (data + *offset);
 
     *offset += sizeof(__u8);
@@ -252,6 +249,9 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
 
         return DROP;
     }
+
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    query->record_type = 0;
 
     size_t size;
 
@@ -821,13 +821,8 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     return DROP;
 }
 
-static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 domainsize, __u16 *pointer)
+static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u16 *pointer, __u16 *off)
 {
-    if (domainsize > MAX_DNS_NAME_LENGTH)
-        return DROP;
-
-    *offset += domainsize + 5;
-
     __u8 *content = data + *offset;
 
     if (data + *offset + 2 > data_end)
@@ -843,32 +838,36 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
             bpf_printk("[XDP] Pointer: %u", *pointer);
         #endif
 
+        *off += 2;
+
         return ACCEPT;
     }
 
-    *pointer = domainsize;
+    if (data + ++(*offset) > data_end)
+        return DROP;
 
-    for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+    size_t size;
+
+    for (size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
     {
         if (data + ++(*offset) > data_end)
             return DROP;
-        
-        if (*(content + i) == 0)
-            return DROP;
     }
+
+    (*off) += size;
 
     return DROP;
 }
 
-static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_domain *autho, struct dns_domain *query) {
+static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *data_end, struct dns_domain *autho, struct dns_domain *query, __u16 off) {
 
     __builtin_memset(autho->name, 0, MAX_DNS_NAME_LENGTH);
 
-    __u64 newoff = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
+    __u64 newoff = *offset;
 
-    __u8 *domain = data + newoff;
+    __u8 *domain = data + *offset;
 
-    *offset += 8;
+    *offset += query->domain_size + 5 + off + 8;
 
     __u8 *content = data + *offset;
 
@@ -1031,6 +1030,13 @@ static __always_inline void hideInDestPort(void *data, __u16 hidden)
     struct udphdr *udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
 
     udp->dest = hidden;
+}
+
+static __always_inline void hideInSourcePort(void *data, __u16 hidden)
+{   
+    struct udphdr *udp = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
+
+    udp->source = hidden;
 }
 
 SEC("xdp")
@@ -1412,6 +1418,17 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
+            __u16 pointer, off = 0;
+            switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off))
+            {
+                case DROP:
+                    return XDP_DROP;            
+                default:
+                    break;
+            }
+
+            hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
+
             bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
         }
 
@@ -1451,6 +1468,18 @@ int dns_process_response(struct xdp_md *ctx) {
                 #endif  
                 return XDP_PASS;
             }
+
+            __u16 pointer, off = 0;
+
+            switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off))
+            {
+                case DROP:
+                    return XDP_DROP;            
+                default:
+                    break;
+            }
+
+            hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
 
             bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
         }
@@ -1558,6 +1587,11 @@ int dns_create_new_query(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
+    __u16 off = getSourcePort(data); hideInSourcePort(data, bpf_htons(DNS_PORT));
+
+    if (off > MAX_DNS_NAME_LENGTH)
+        return XDP_DROP;
+    
     struct curr_query curr;
     
     curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
@@ -1572,15 +1606,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         
         dnsquery.id = curr.id;
 
-        switch(getAuthoritativePointer(data, &offset_h, data_end, query->query.domain_size, &query->id.port))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch(getAuthoritative(data, &offset_h, data_end, &dnsquery.query, &query->query))
+        switch(getAuthoritative(data, &offset_h, data_end, &dnsquery.query, &query->query, off))
         {
             case DROP:
                 return XDP_DROP;
@@ -1592,6 +1618,8 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 #endif
                 break;
         }
+
+        query->id.port = getDestIp(data);
 
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) &query->id.port, 0) < 0)
         {
