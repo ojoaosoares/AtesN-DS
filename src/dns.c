@@ -821,7 +821,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     return DROP;
 }
 
-static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off)
+static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain *domain, struct dns_domain *subdomain)
 {
     __u8 *content = data + *offset;
 
@@ -837,6 +837,9 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
         #ifdef DOMAIN
             bpf_printk("[XDP] Pointer: %u", *pointer);
         #endif
+
+        for (size_t size = 0; size + *pointer < MAX_DNS_NAME_LENGTH; size++)
+            subdomain->name[size] = domain->name[*pointer + size];
 
         *off += 2;
 
@@ -860,6 +863,8 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
             return ACCEPT;
         }
+
+        subdomain->name[size] = *(content + size);
     }
 
     return DROP;
@@ -1582,32 +1587,126 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    __u8 pointer = getDestIp(data), off = 0;
-
-    if (pointer > MAX_DNS_NAME_LENGTH)
-        return XDP_DROP;
-
-    offset_h += pointer + 5;
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
+    struct curr_query curr;
     
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
-    switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off))
-    {
-        case DROP:
-            return XDP_DROP;            
-        default:
-            break;
+    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+
+    if (query) {
+
+        __u8 pointer = getDestIp(data), off = 0;
+
+        if (pointer > MAX_DNS_NAME_LENGTH)
+            return XDP_DROP;
+
+        offset_h += pointer + 5;
+
+        if (data + offset_h > data_end)
+            return XDP_DROP;
+
+        struct dns_domain subdomain;
+
+        __builtin_memset(subdomain.name, 0, MAX_DNS_NAME_LENGTH);
+
+        switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &subdomain, &query->query))
+        {
+            case DROP:
+                return XDP_DROP;            
+            default:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Subdomain %s", subdomain.name);
+                #endif 
+        
+                break;
+        }
+
+        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
+
+        if (nsrecord)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cache NS record try");
+            #endif
+            
+            __u64 diff = getTTl(nsrecord->timestamp);
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
+            #endif
+
+            if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+            {
+                bpf_map_delete_elem(&curr_queries, &curr);
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache NS record hit");
+                #endif
+
+                __s16 newsize = (data + query->query.domain_size + 5 - data_end);
+
+                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] It was't possible to resize the packet");
+                    #endif
+                    
+                    return XDP_DROP;
+                }
+
+                data = (void*) ctx->data;
+                data_end = (void*) ctx->data_end;
+
+                offset_h = 0;
+
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+                
+                switch(returnToNetwork(data, &offset_h, data_end, nsrecord->ip))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+
+                switch(swapTransportLayer(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+
+                switch(createDnsQuery(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+
+                return XDP_TX;
+            }
+            
+            else
+                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
+        }
+        
+        hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
+
+        bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
     }
 
-    #ifdef DOMAIN
-        bpf_printk("[XDP] off %d pointer %d", off, pointer);
-    #endif 
-
-    hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
-
-    bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
+    return XDP_PASS;
 }
 
 SEC("xdp")
