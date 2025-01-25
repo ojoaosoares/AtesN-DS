@@ -1420,6 +1420,10 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Aquii 1");
+            #endif  
+
             hideInDestIp (data, dnsquery.query.domain_size);
 
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
@@ -1461,6 +1465,10 @@ int dns_process_response(struct xdp_md *ctx) {
                 #endif  
                 return XDP_PASS;
             }
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Aquii 2");
+            #endif  
 
             hideInDestIp (data, dnsquery.query.domain_size);
 
