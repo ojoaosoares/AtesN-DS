@@ -175,7 +175,7 @@ int main(int argc, char *argv[]) {
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
             key = 7;
-            fd = bpf_program__fd(skel->progs.dns_check_cache);
+            fd = bpf_program__fd(skel->progs.dns_check_subdomain);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
