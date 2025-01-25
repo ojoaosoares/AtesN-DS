@@ -1558,6 +1558,10 @@ int dns_jump_query(struct xdp_md *ctx) {
 SEC("xdp")
 int dns_check_subdomain(struct xdp_md *ctx) {
 
+    #ifdef DOMAIN
+        bpf_printk("[XDP] DNS check subdomain");
+    #endif 
+
     void *data = (void*) (long) ctx->data;
     void *data_end = (void*) (long) ctx->data_end;
     
