@@ -1607,7 +1607,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
         struct dns_domain subdomain;
 
-        __builtin_memset(subdomain.name, 0, MAX_DNS_NAME_LENGTH);
+        __builtin_memset(&subdomain.name, 0, MAX_DNS_NAME_LENGTH);
 
         switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &subdomain, &query->query))
         {
@@ -1621,7 +1621,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 break;
         }
 
-        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
+        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &subdomain.name);
 
         if (nsrecord)
         {
@@ -1698,7 +1698,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             }
             
             else
-                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
+                bpf_map_delete_elem(&cache_nsrecords, &subdomain.name);
         }
         
         hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
