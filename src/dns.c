@@ -1427,6 +1427,10 @@ int dns_process_response(struct xdp_md *ctx) {
                     break;
             }
 
+            #ifdef DOMAIN
+                bpf_printk("[XDP] off %d", off);
+            #endif 
+
             hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
 
             bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
@@ -1478,6 +1482,10 @@ int dns_process_response(struct xdp_md *ctx) {
                 default:
                     break;
             }
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] off %d", off);
+            #endif 
 
             hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
 
@@ -1588,6 +1596,10 @@ int dns_create_new_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u16 off = getSourcePort(data); hideInSourcePort(data, bpf_htons(DNS_PORT));
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] off %d", off);
+    #endif 
 
     if (off > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
