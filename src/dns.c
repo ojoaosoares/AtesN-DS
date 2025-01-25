@@ -821,7 +821,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     return DROP;
 }
 
-static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u16 *pointer, __u16 *off)
+static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off)
 {
     __u8 *content = data + *offset;
 
@@ -844,6 +844,10 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
     }
 
     size_t size;
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] It's no pointer");
+    #endif
 
     for (size = 0; size < MAX_DNS_NAME_LENGTH; size++)
     {
@@ -1578,7 +1582,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    __u8 pointer = getDestIp(data), off;
+    __u8 pointer = getDestIp(data), off = 0;
 
     if (pointer > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
