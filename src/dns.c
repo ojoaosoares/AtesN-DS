@@ -865,6 +865,10 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
         }
 
         subdomain->name[size] = *(content + size);
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] %c", *(content + size));
+        #endif
     }
 
     return DROP;
