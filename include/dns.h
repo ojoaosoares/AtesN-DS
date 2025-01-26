@@ -65,6 +65,7 @@
 #define DNS_SAVE_NS_CACHE_PROG 5
 #define DNS_SELECT_SERVER_PROG 6
 #define DNS_CHECK_SUBDOMAIN_PROG 7
+#define DNS_ERROR_PROG 8
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -140,6 +141,7 @@ struct dns_domain {
 
 struct hop_query
 {
+    __u16 trash;
     __u16 pointer;
     struct dns_domain query;
 };

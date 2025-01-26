@@ -14,7 +14,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 8);                
+        __uint(max_entries, 9);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -1350,7 +1350,7 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
-    struct dns_domain *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) &dnsquery);
+    struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) &dnsquery);
 
     if (lastdomain > 0)
     {   
@@ -2063,9 +2063,9 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-        query->id.port = getDestIp(data);
+        query->id.port = getDestIp(data); query->id.id = 0;
 
-	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) &query->id.port, 0) < 0)
+	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
         {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Hop queries map error");
@@ -2162,6 +2162,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             if (ip == serverip)
             {
                 struct a_record cache_record;
+                cache_record.ip = 0;
 
                 switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
                 {
@@ -2179,6 +2180,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #endif   
                         break;
                 }        
+
+                if (cache_record.ip == 0)
+                    bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);    
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -2236,6 +2240,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 bpf_tail_call(ctx, &tail_programs, DNS_SAVE_NS_CACHE_PROG);
             }
+
+            else if (ip == 0)
+                bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
             else
             {
@@ -2305,9 +2312,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 return XDP_TX;
             }
-
         }
-        
     }
 
     return XDP_PASS;
@@ -2500,6 +2505,138 @@ int dns_select_server(struct xdp_md *ctx) {
     #endif  
 
     return XDP_TX;
+}
+
+SEC("xdp")
+int dns_error(struct xdp_md *ctx) {
+
+    void *data_end = (void*) (long) ctx->data_end;
+    void *data = (void*) (long) ctx->data;
+
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
+    struct dns_query dnsquery;
+
+    dnsquery.id.port = getDestPort(data); dnsquery.id.id = getQueryId(data);
+
+    switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
+    {
+        case DROP:
+            return XDP_PASS;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+                bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
+            #endif
+
+            break;
+    }
+
+    struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) &dnsquery);
+
+    struct dns_query *interquery = &dnsquery;
+
+    for (size_t i = 0; i < MAX_DNS_LABELS; i++)
+    {
+        if (lastdomain)
+        {
+            bpf_map_delete_elem(&new_queries, (struct rec_query_key *) interquery);
+
+            __u16 id = interquery->id.id, port = interquery->id.port;
+
+            interquery = lastdomain;
+        
+            interquery->id.id = id;
+            interquery->id.port = port;
+        }
+
+        else
+            break;
+
+        lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) interquery);
+    }
+
+    struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) interquery);
+    
+    if (powner)
+    {
+        bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
+        if (interquery->query.domain_size > MAX_DNS_NAME_LENGTH)
+            return XDP_DROP;
+
+        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + interquery->query.domain_size + 5;
+
+        if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It was't possible to resize the packet");
+            #endif
+            
+            return XDP_DROP;
+        }
+
+        data_end = (void*) (long) ctx->data_end;
+        data = (void*) (long) ctx->data;
+
+        offset_h = 0;
+
+        switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                #ifdef DEBUG
+                    bpf_printk("[XDP] Headers updated");
+                #endif  
+                break;
+        }
+        
+        switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                break;
+        }
+
+        switch(keepTransportLayer(data, &offset_h, data_end))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                break;
+        }
+
+        switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, 2, interquery->query.domain_size))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                #ifdef DEBUG
+                    bpf_printk("[XDP] Answer created");
+                #endif  
+                break;
+        }
+
+        switch(writeQuery(data, &offset_h, data_end, &interquery->query))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                break;
+        }
+
+        return XDP_TX;
+    }    
+
+    return XDP_DROP;
 }
 
 char _license[] SEC("license") = "GPL";
