@@ -1415,23 +1415,23 @@ int dns_process_response(struct xdp_md *ctx) {
             return XDP_TX;
         }
 
-        struct a_record *arecord;
+        struct a_record *record;
 
-        arecord = bpf_map_lookup_elem(&cache_arecords, (struct rec_query_key *) &dnsquery.query.name);
+        record = bpf_map_lookup_elem(&cache_arecords, (struct rec_query_key *) &dnsquery.query.name);
 
-        if (arecord)
+        if (record)
         {   
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache A record try");
             #endif
             
-            __u64 diff = getTTl(arecord->timestamp);
+            __u64 diff = getTTl(record->timestamp);
 
             #ifdef DOMAIN
-                bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
+                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
             #endif
 
-            if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
+            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
             {
                 bpf_map_delete_elem(&recursive_queries, (struct rec_query_key *) &dnsquery);
 
@@ -1441,7 +1441,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 __s16 newsize = (data + offset_h - data_end);
 
-                if (arecord->ip ^ 0)
+                if (record->ip ^ 0)
                     newsize += sizeof(struct dns_response);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -1491,7 +1491,7 @@ int dns_process_response(struct xdp_md *ctx) {
                         break;
                 }
 
-                switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, arecord->status, dnsquery.query.domain_size))
+                switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, record->status, dnsquery.query.domain_size))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -1507,6 +1507,90 @@ int dns_process_response(struct xdp_md *ctx) {
 
             else
                 bpf_map_delete_elem(&cache_arecords, &dnsquery.query.name);
+        }
+
+        record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name);
+
+        if (record)
+        {   
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cache NS record try");
+            #endif
+            
+            __u64 diff = getTTl(record->timestamp);
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
+            #endif
+
+            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache NS record hit");
+                #endif
+
+                __s16 newsize = (data + offset_h - data_end);
+
+                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] It was't possible to resize the packet");
+                    #endif
+                    
+                    return XDP_DROP;
+                }
+
+                data = (void*) (long) ctx->data;
+                data_end = (void*) (long) ctx->data_end;
+
+                offset_h = 0;
+
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (returnToNetwork(data, &offset_h, data_end, record->ip))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (swapTransportLayer(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch(createDnsQuery(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+
+                return XDP_TX;
+            }
+
+            else
+                bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
         }
 
 
