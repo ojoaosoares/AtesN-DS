@@ -1973,7 +1973,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + lastdomain->query.domain_size + 5;
 
-            if (ip != serverip)
+            if (ip == serverip)
             {
                 struct a_record cache_record;
 
