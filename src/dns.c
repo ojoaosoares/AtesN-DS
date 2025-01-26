@@ -304,6 +304,9 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
         return ACCEPT_NO_ANSWER;
     }
 
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    query->record_type = 0;
+
     size_t size;
 
     for (size = 0; size < MAX_DNS_NAME_LENGTH; size++)
