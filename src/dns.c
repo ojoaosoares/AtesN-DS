@@ -1613,7 +1613,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
         __builtin_memset(&subdomain.name, 0, MAX_DNS_NAME_LENGTH);
 
-        switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &subdomain, &query->query))
+        switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
         {
             case DROP:
                 return XDP_DROP;            
