@@ -1959,6 +1959,10 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
             break;
     }
 
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Pointer %d", pointer);
+    #endif
+
     offset_h += pointer;
 
     if (data + offset_h > data_end)
