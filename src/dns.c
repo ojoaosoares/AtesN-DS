@@ -862,7 +862,7 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
         if (*(content + size) == 0)
         {
-            (*off) += size;
+            (*off) += size + 1;
 
             return ACCEPT;
         }
@@ -881,7 +881,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
     __u8 *domain = data + *offset;
 
-    *offset += query->domain_size + 5 + off + 9;
+    *offset += query->domain_size + 5 + off + 8;
 
     __u8 *content = data + *offset;
 
@@ -1660,6 +1660,14 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 hideInDestIp(data, arecord->ip);
 
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Curr queries map error");
+                    #endif  
+                    return XDP_PASS;
+                }
+
                 bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
 
             }
@@ -1905,7 +1913,11 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             else
                 bpf_map_delete_elem(&cache_nsrecords, &subdomain.name);
         }
-        
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] off %d", off);
+        #endif
+
         hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
 
         bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
@@ -1930,6 +1942,10 @@ int dns_create_new_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u16 off = getSourcePort(data); hideInSourcePort(data, bpf_htons(DNS_PORT));
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] off %d", off);
+    #endif
 
     if (off > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
