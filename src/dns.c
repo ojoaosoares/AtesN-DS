@@ -484,10 +484,12 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
     }
 
     header->answer_count = bpf_htons(1);
-    
-    struct dns_response *response = data + *offset + domain_size + 5;
 
-    *offset += sizeof(struct dns_response) + domain_size + 5;
+    *offset += domain_size + 5;
+    
+    struct dns_response *response = data + *offset;
+
+    *offset += sizeof(struct dns_response);
 
     if (data + *offset > data_end)
     {
@@ -585,6 +587,9 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     struct dns_response *response;
 
     response = data + *offset;
+
+    if ((bpf_ntohs(header->flags) & 0x000F) == 2 || (bpf_ntohs(header->flags) & 0x000F) == 5)
+        return ACCEPT_NO_ANSWER;
 
     if (bpf_ntohs(header->answer_count))
     {
@@ -1410,6 +1415,101 @@ int dns_process_response(struct xdp_md *ctx) {
             return XDP_TX;
         }
 
+        struct a_record *arecord;
+
+        arecord = bpf_map_lookup_elem(&cache_arecords, (struct rec_query_key *) &dnsquery.query.name);
+
+        if (arecord)
+        {   
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cache A record try");
+            #endif
+            
+            __u64 diff = getTTl(arecord->timestamp);
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
+            #endif
+
+            if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
+            {
+                bpf_map_delete_elem(&recursive_queries, (struct rec_query_key *) &dnsquery);
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache A record  hit");
+                #endif
+
+                __s16 newsize = (data + offset_h - data_end);
+
+                if (arecord->ip ^ 0)
+                    newsize += sizeof(struct dns_response);
+
+                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] It was't possible to resize the packet");
+                    #endif
+                    
+                    return XDP_DROP;
+                }
+
+                data = (void*) (long) ctx->data;
+                data_end = (void*) (long) ctx->data_end;
+
+                offset_h = 0;
+
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (keepTransportLayer(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, arecord->status, dnsquery.query.domain_size))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DEBUG
+                            bpf_printk("[XDP] Answer created");
+                        #endif  
+                        break;
+                }
+
+                return XDP_TX;
+            }
+
+            else
+                bpf_map_delete_elem(&cache_arecords, &dnsquery.query.name);
+        }
+
+
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
             hideInDestIp (data, dnsquery.query.domain_size);
@@ -1605,7 +1705,10 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 break;
         }
 
-        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &subdomain.name);
+        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &query->query.name);
+
+        if (!nsrecord)
+            nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &subdomain.name);
 
         if (nsrecord)
         {
