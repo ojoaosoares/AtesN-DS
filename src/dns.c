@@ -314,6 +314,10 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
         if ((content + size) == 0)
             break;
 
+        #ifdef DOMAIN
+            bpf_printk("%c", *(char *)(content + size));
+        #endif
+
         query->name[size] = *(char *)(content + size);        
     }
 
