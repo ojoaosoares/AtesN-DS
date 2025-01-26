@@ -288,19 +288,11 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     return ACCEPT;
 }
 
-static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_end, struct dns_domain *query, __u8 pointer)
+static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_end, struct dns_domain *query)
 {
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
-    query->record_type = 0;
-
-    if (pointer > MAX_DNS_NAME_LENGTH)
-        return XDP_DROP;
-
     __u8 *content = (data + *offset);
 
-    *offset += sizeof(__u8);
-
-    if (data + *offset > data_end)
+    if (data + (*offset) + 1 > data_end)
         return DROP;
 
     if (*(content) == 0)
@@ -309,19 +301,20 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
             bpf_printk("[DROP] No Dns domain");
         #endif
 
-        return DROP;
+        return ACCEPT_NO_ANSWER;
     }
-    __u8 index = 0;
 
     size_t size;
 
-    for (size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
+    for (size = 0; size < MAX_DNS_NAME_LENGTH; size++)
     {
-        if (size >= pointer)
-            query->name[index++] =  *(char *)(content + size);
-    
         if (data + ++(*offset) > data_end)
             return DROP;
+
+        if ((content + size) == 0)
+            break;
+
+        query->name[size] = *(char *)(content + size);        
     }
 
     query->domain_size = (__u8) size;
@@ -823,6 +816,8 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
 static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain *domain, struct dns_domain *subdomain)
 {
+    __builtin_memset(&subdomain->name, 0, MAX_DNS_NAME_LENGTH);
+
     __u8 *content = data + *offset;
 
     if (data + *offset + 2 > data_end)
@@ -865,10 +860,6 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
         }
 
         subdomain->name[size] = *(content + size);
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] %c", *(content + size));
-        #endif
     }
 
     return DROP;
@@ -1433,12 +1424,6 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Aquii 1");
-            #endif  
-
-            hideInDestIp (data, dnsquery.query.domain_size);
-
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
         }
 
@@ -1478,12 +1463,6 @@ int dns_process_response(struct xdp_md *ctx) {
                 #endif  
                 return XDP_PASS;
             }
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Aquii 2");
-            #endif  
-
-            hideInDestIp (data, dnsquery.query.domain_size);
 
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
         }
@@ -1599,19 +1578,17 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
     if (query) {
 
-        __u8 pointer = getDestIp(data), off = 0;
+        __u8 pointer = 0, off = 0;
 
-        if (pointer > MAX_DNS_NAME_LENGTH)
+        if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
             return XDP_DROP;
 
-        offset_h += pointer + 5;
+        offset_h += query->query.domain_size + 5;
 
         if (data + offset_h > data_end)
             return XDP_DROP;
 
         struct dns_domain subdomain;
-
-        __builtin_memset(&subdomain.name, 0, MAX_DNS_NAME_LENGTH);
 
         switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
         {
@@ -1729,10 +1706,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u16 off = getSourcePort(data); hideInSourcePort(data, bpf_htons(DNS_PORT));
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] off %d", off);
-    #endif 
 
     if (off > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
@@ -1950,11 +1923,14 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    struct a_record record; __u8 pointer;
+    struct a_record record; 
+    
+    __u8 pointer;
 
     record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data); record.status = getDNSStatus(data);
 
-    bpf_printk("[XDP] Additional Pointer: %u", pointer);
+    if (pointer > MAX_DNS_NAME_LENGTH)
+        return XDP_DROP;
 
     record.timestamp = bpf_ktime_get_ns() / 1000000000;
 
@@ -1983,37 +1959,42 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
             break;
     }
 
+    offset_h += pointer;
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
     struct dns_domain query;
 
-    switch (getSubDomain(data, &offset_h, data_end, &query, pointer))
+    switch (getSubDomain(data, &offset_h, data_end, &query))
     {
         case DROP:
             return XDP_DROP;
         case PASS:
             return XDP_PASS;
+        case ACCEPT_NO_ANSWER:
+            break;
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Subdomain: %s", query.name);
 		        bpf_printk("[XDP] Size: %u Type %u", query.domain_size, query.record_type);
             #endif
-            break;
-    }
 
-    if (query.name[0] != 0)
-    {
-        if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
-        {
+            if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] NS Cache map error");
+                #endif
+
+                return XDP_PASS;
+            }
+
             #ifdef DOMAIN
-                bpf_printk("[XDP] NS Cache map error");
+                bpf_printk("[XDP] NS Cache Updated");
             #endif
 
-            return XDP_PASS;
-        }
+            break;
     }
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] NS Cache Updated");
-    #endif
 
     return XDP_TX;
 }
