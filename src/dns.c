@@ -828,6 +828,16 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
     __u8 *content = data + *offset;
 
+    if (data + *offset + 1 > data_end)
+        return DROP;
+
+    if (*content == 0)
+    {
+        (*offset)++; *off++;
+
+        return ACCEPT;
+    }
+
     if (data + *offset + 2 > data_end)
         return DROP;
 
@@ -2390,21 +2400,21 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
 		        bpf_printk("[XDP] Size: %u Type %u", query.domain_size, query.record_type);
             #endif
 
-            if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
-            {
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] NS Cache map error");
-                #endif
-
-                return XDP_PASS;
-            }
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] NS Cache Updated");
-            #endif
-
             break;
     }
+
+    if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[XDP] NS Cache map error");
+        #endif
+
+        return XDP_PASS;
+    }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] NS Cache Updated");
+    #endif
 
     return XDP_TX;
 }
