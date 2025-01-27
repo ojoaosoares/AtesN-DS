@@ -1369,7 +1369,17 @@ int dns_process_response(struct xdp_md *ctx) {
         if (data + offset_h + 1 <= data_end)
         {
             if (*zero == 0)
+            {
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Curr queries map error");
+                    #endif  
+                    return XDP_PASS;
+                }
+                
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+            }
         }
     }
 
@@ -2165,8 +2175,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
     if (query) {
 
-        bpf_map_delete_elem(&curr_queries, &curr);
-
         offset_h += query->query.domain_size + 5;
 
         if (data + offset_h > data_end)
@@ -2204,6 +2212,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (cache_record.ip == 0)
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);    
+
+                bpf_map_delete_elem(&curr_queries, &curr);
 
                 bpf_map_delete_elem(&new_queries, query);
 
@@ -2269,6 +2279,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else
             {
+                bpf_map_delete_elem(&curr_queries, &curr);
+
                 bpf_map_delete_elem(&new_queries, query);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -2543,138 +2555,126 @@ int dns_error(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    struct dns_query dnsquery;
-
-    dnsquery.id.port = getDestPort(data); dnsquery.id.id = getQueryId(data);
-
-    switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
-    {
-        case DROP:
-            return XDP_PASS;
-        case PASS:
-            return XDP_PASS;
-        default:
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
-                bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
-            #endif
-
-            break;
-    }
-
-    struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) &dnsquery);
-
-    struct dns_query *interquery = &dnsquery;
-
-    __u8 inter = 0;
-
-    for (size_t i = 0; i < MAX_DNS_LABELS; i++)
-    {
-        if (lastdomain)
-        {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Cleaning domain: %s", lastdomain->query.name);
-		    #endif
-
-            inter = 1;
-            
-            bpf_map_delete_elem(&new_queries, (struct rec_query_key *) interquery);
-
-            __u16 id = interquery->id.id, port = interquery->id.port;
-
-            interquery = lastdomain;
-        
-            interquery->id.id = id;
-            interquery->id.port = port;
-        }
-
-        else
-            break;
-
-        lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) interquery);
-    }
-
-    struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) interquery);
+    struct curr_query curr;
     
-    if (powner)
-    {
-        bpf_map_delete_elem(&recursive_queries, &dnsquery);
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Cleaning recursive query");
-		#endif
+    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
-        if (interquery->query.domain_size > MAX_DNS_NAME_LENGTH)
-            return XDP_DROP;
+    if (query) {
 
-        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + interquery->query.domain_size + 5;
+        bpf_map_delete_elem(&curr_queries, &curr);
 
-        if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+        struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) query);
+
+        __u8 inter = 0;
+
+        for (size_t i = 0; i < MAX_DNS_LABELS; i++)
         {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] It was't possible to resize the packet");
-            #endif
+            if (lastdomain)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cleaning domain: %s", lastdomain->query.name);
+                #endif
+
+                inter = 1;
+                
+                bpf_map_delete_elem(&new_queries, (struct rec_query_key *) query);
+
+                __u16 id = query->id.id, port = query->id.port;
+
+                query = lastdomain;
             
-            return XDP_DROP;
-        }
+                query->id.id = id; query->id.port = port;
+            }
 
-        data_end = (void*) (long) ctx->data_end;
-        data = (void*) (long) ctx->data;
-
-        offset_h = 0;
-
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
+            else
                 break;
+
+            lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) query);
         }
+
+        struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) query);
         
-        switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+        if (powner)
         {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+            bpf_map_delete_elem(&recursive_queries, query);
 
-        switch(keepTransportLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cleaning recursive query");
+            #endif
 
-        switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, 2, interquery->query.domain_size))
-        {
-            case DROP:
+            if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
                 return XDP_DROP;
-            default:
-                #ifdef DEBUG
-                    bpf_printk("[XDP] Answer created");
-                #endif  
-                break;
-        }
 
-        if (inter)
-        {
-            switch(writeQuery(data, &offset_h, data_end, &interquery->query))
+            __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + query->query.domain_size + 5;
+
+            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] It was't possible to resize the packet");
+                #endif
+                
+                return XDP_DROP;
+            }
+
+            data_end = (void*) (long) ctx->data_end;
+            data = (void*) (long) ctx->data;
+
+            offset_h = 0;
+
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
+                    break;
+            }
+            
+            switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
             {
                 case DROP:
                     return XDP_DROP;
                 default:
                     break;
             }
-        }
 
-        return XDP_TX;
-    }    
+            switch(keepTransportLayer(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, 2, query->query.domain_size))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] Answer created");
+                    #endif  
+                    break;
+            }
+
+            if (inter)
+            {
+                switch(writeQuery(data, &offset_h, data_end, &query->query))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
+            }
+
+            return XDP_TX;
+        }    
+    }
 
     return XDP_DROP;
 }
