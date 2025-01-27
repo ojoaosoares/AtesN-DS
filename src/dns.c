@@ -2165,8 +2165,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
         if (lastdomain && lastdomain->query.domain_size <= MAX_DNS_NAME_LENGTH)
         {
-            bpf_map_delete_elem(&new_queries, query);
-
             __u32 ip = getDestIp(data);
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + lastdomain->query.domain_size + 5;
@@ -2191,10 +2189,12 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                             bpf_printk("[XDP] A cache updated");
                         #endif   
                         break;
-                }        
+                }
 
                 if (cache_record.ip == 0)
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);    
+
+                bpf_map_delete_elem(&new_queries, query);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -2258,6 +2258,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else
             {
+                bpf_map_delete_elem(&new_queries, query);
+
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
                     #ifdef DOMAIN
@@ -2558,6 +2560,10 @@ int dns_error(struct xdp_md *ctx) {
     {
         if (lastdomain)
         {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cleaning domain: %s", lastdomain->query.name);
+		    #endif
+            
             bpf_map_delete_elem(&new_queries, (struct rec_query_key *) interquery);
 
             __u16 id = interquery->id.id, port = interquery->id.port;
@@ -2579,6 +2585,11 @@ int dns_error(struct xdp_md *ctx) {
     if (powner)
     {
         bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Cleaning recursive query");
+		#endif
+                
 
         if (interquery->query.domain_size > MAX_DNS_NAME_LENGTH)
             return XDP_DROP;
