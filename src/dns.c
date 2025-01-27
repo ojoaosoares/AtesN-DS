@@ -640,9 +640,11 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         record->timestamp = bpf_ktime_get_ns() / 1000000000;
         record->status = (bpf_ntohs(header->flags) & 0x000F);
 
-        bpf_printk("[XDP] Answer IP: %u", record->ip);
-        bpf_printk("[XDP] Answer TTL: %u", record->ttl);
-
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Answer IP: %u", record->ip);
+            bpf_printk("[XDP] Answer TTL: %u", record->ttl);
+        #endif
+        
         return ACCEPT;
     }
 
