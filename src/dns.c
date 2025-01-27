@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define ERROR
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -1372,9 +1372,12 @@ int dns_process_response(struct xdp_md *ctx) {
             {
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                 {
-                    #ifdef DOMAIN
+                    #ifdef ERROR
                         bpf_printk("[XDP] Curr queries map error");
                     #endif  
+
+                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+
                     return XDP_PASS;
                 }
                 
@@ -1391,9 +1394,13 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
-                #ifdef DOMAIN
+                #ifdef ERROR
                     bpf_printk("[XDP] Curr queries map error");
                 #endif  
+
+                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                bpf_printk("[XDP] Last domain: %s", lastdomain->query.name);
+
                 return XDP_PASS;
             }
 
@@ -1432,9 +1439,13 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                 {
-                    #ifdef DOMAIN
+                    #ifdef ERROR
                         bpf_printk("[XDP] Curr queries map error");
                     #endif  
+
+                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                    bpf_printk("[XDP] Last domain: %s", lastdomain->query.name);
+                    
                     return XDP_PASS;
                 }
 
@@ -1538,13 +1549,12 @@ int dns_process_response(struct xdp_md *ctx) {
     
         else if (query_response == QUERY_NAMESERVERS_RETURN)
         {
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-            {
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Curr queries map error");
-                #endif  
-                return XDP_PASS;
-            }
+            #ifdef ERROR
+                bpf_printk("[XDP] Curr queries map error");
+            #endif  
+
+            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+            
 
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
         }
@@ -1806,9 +1816,12 @@ int dns_process_response(struct xdp_md *ctx) {
         {   
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
-                #ifdef DOMAIN
+                #ifdef ERROR
                     bpf_printk("[XDP] Curr queries map error");
                 #endif  
+
+                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                
                 return XDP_PASS;
             }
 
