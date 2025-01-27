@@ -793,6 +793,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
                     if (*subdomain == 0)
                     {
+                        bpf_printk("[XDP] Root");
                         *subpointer == querysize;
                         return ACCEPT;
                     }
@@ -1425,7 +1426,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
         record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name);
 
-        if (record)
+        if (record && record->ip != curr.ip)
         {   
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record try");
@@ -1691,7 +1692,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
         record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name);
 
-        if (record)
+        if (record && record->ip != curr.ip)
         {   
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record try");
