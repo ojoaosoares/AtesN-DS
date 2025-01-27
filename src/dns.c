@@ -750,20 +750,10 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
         if (data + ++(*offset) > data_end)
             return DROP;
 
-        if ((*(content + size) & 0xC0) == 0xC0) {
+        if ((*(content + size) & 0xC0) == 0xC0 || *(content + size) == 0) {
 
-            if (count < bpf_ntohs(header->name_servers))
-            {
-                if (data + (*offset) + 1 > data_end)
-                    return DROP;
-
-                __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
-                
-                if (pointer >= querysize)    
-                    continue;
-
+            if (count < bpf_ntohs(header->name_servers) * 2)
                 count++;
-            }
 
             else
             {   
@@ -796,7 +786,18 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
                 if (pointer_autho >= sizeof(struct dns_header) + querysize + 5)
                 {
-                    __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
+                    __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 11;
+
+                    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 1 -11 > data_end)
+                        return DROP;
+
+                    if (*subdomain == 0)
+                    {
+                        *subpointer == querysize;
+                        return ACCEPT;
+                    }
+
+                    subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
 
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
                         return DROP;
