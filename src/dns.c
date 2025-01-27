@@ -1362,6 +1362,17 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
+    if (query_response != RESPONSE_RETURN)
+    {
+        __u8 *zero = data + offset_h;
+
+        if (data + offset_h + 1 <= data_end)
+        {
+            if (*zero == 0)
+                bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+        }
+    }
+
     struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) &dnsquery);
 
     if (lastdomain > 0)
@@ -2556,6 +2567,8 @@ int dns_error(struct xdp_md *ctx) {
 
     struct dns_query *interquery = &dnsquery;
 
+    __u8 inter = 0;
+
     for (size_t i = 0; i < MAX_DNS_LABELS; i++)
     {
         if (lastdomain)
@@ -2563,6 +2576,8 @@ int dns_error(struct xdp_md *ctx) {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cleaning domain: %s", lastdomain->query.name);
 		    #endif
+
+            inter = 1;
             
             bpf_map_delete_elem(&new_queries, (struct rec_query_key *) interquery);
 
@@ -2589,7 +2604,6 @@ int dns_error(struct xdp_md *ctx) {
         #ifdef DOMAIN
             bpf_printk("[XDP] Cleaning recursive query");
 		#endif
-                
 
         if (interquery->query.domain_size > MAX_DNS_NAME_LENGTH)
             return XDP_DROP;
@@ -2648,12 +2662,15 @@ int dns_error(struct xdp_md *ctx) {
                 break;
         }
 
-        switch(writeQuery(data, &offset_h, data_end, &interquery->query))
+        if (inter)
         {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
+            switch(writeQuery(data, &offset_h, data_end, &interquery->query))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
         }
 
         return XDP_TX;
