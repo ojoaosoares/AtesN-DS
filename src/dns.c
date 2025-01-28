@@ -758,20 +758,22 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
         if ((*(content + size) & 0xC0) == 0xC0 || *(content + size) == 0) {
 
-            if (count < bpf_ntohs(header->name_servers) * 2)
+            if (count < bpf_ntohs(header->name_servers))
+            {
+                if (data + (*offset) + 1 > data_end)
+                    return DROP;
+
+                __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
+                
+                if (pointer >= querysize)    
+                    continue;
+
                 count++;
+            }
 
             else
             {   
-                // if (*(content + size) == 0)
-                // {
-                //     if (content + *offset + 2 > data_end)
-                //         return DROP;
-                    
-                //     if (bpf_ntohs(*((__u16 *) (content + size + 1))) == OPT_TYPE)
-                //         return ACCEPT_NO_ANSWER;
-                // }
-
+                
                 if (data + (*offset) + 5 > data_end)
                     return DROP;
 
@@ -1592,17 +1594,6 @@ int dns_process_response(struct xdp_md *ctx) {
             
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-            {
-                #ifdef ERROR
-                    bpf_printk("[XDP] Curr queries map error");
-                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                    bpf_printk("[XDP] Nameservers");
-                #endif  
-                
-                return XDP_PASS;
-            }
-
             hideInDestIp (data, dnsquery.query.domain_size);
         
             bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
@@ -1873,17 +1864,6 @@ int dns_process_response(struct xdp_md *ctx) {
 
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-            {
-                #ifdef ERROR
-                    bpf_printk("[XDP] Curr queries map error");
-                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                    bpf_printk("[XDP] Nameservers");
-                #endif  
-                
-                return XDP_PASS;
-            }
-            
             hideInDestIp (data, dnsquery.query.domain_size);
 
             bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
@@ -1928,20 +1908,12 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     __u8 pointer = 0, domainsize = getDestIp(data);
 
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
-
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
-
     struct a_record record;
     
     switch (getAdditional(data, &offset_h, data_end, domainsize, &pointer, &record))
     {
         case DROP:
             return XDP_DROP;
-        case ACCEPT_NO_ANSWER:
-            bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);    
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
@@ -1950,8 +1922,6 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
             break;
     } 
-
-    bpf_map_delete_elem(&curr_queries, &curr);
 
     if (pointer > domainsize)
         return XDP_PASS;
