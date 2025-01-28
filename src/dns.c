@@ -67,7 +67,7 @@ unsigned char proxy_mac[ETH_ALEN];
 
 static __always_inline __u64 getTTl(__u64 timestamp) {
 
-    __u64 now = bpf_ktime_get_ns() / 1000000000;
+    __u64 now = bpf_ktime_get_ns() / 1000000000 + 1;
 
     if (now > timestamp)
         return now - timestamp;
@@ -400,7 +400,7 @@ static __always_inline __u8 swapInternetLayer(void *data, __u64 *offset, void *d
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = tmp_ip;
 
-    // ipv4->ttl = MINIMUM_TTL;
+    ipv4->ttl = 255;
 
     ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
 
@@ -573,7 +573,7 @@ static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *dat
 	ipv4->saddr = serverip;
     ipv4->daddr = ip_dest;
 
-    // ipv4->ttl = MINIMUM_TTL;
+    ipv4->ttl = 255;
 
     ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
 
@@ -742,6 +742,104 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
     return ACCEPT;
 }
 
+// static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, __u8 querysize, __u8 *subpointer, struct a_record *record) {
+
+//     struct dns_header *header;    
+//     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+//     record->status = (bpf_ntohs(header->flags) & 0x000F);;
+
+//     __u8 *content = data + *offset, count = 0;
+
+//     for (size_t size = 0; size < 500; size++)
+//     {
+//         if (data + ++(*offset) > data_end)
+//             return DROP;
+
+//         if ((*(content + size) & 0xC0) == 0xC0) {
+
+//             if (count < bpf_ntohs(header->name_servers))
+//             {
+//                 if (data + (*offset) + 1 > data_end)
+//                     return DROP;
+
+//                 __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
+                
+//                 if (pointer >= querysize)    
+//                     continue;
+
+//                 count++;
+//             }
+
+//             else
+//             {   
+                
+//                 if (data + (*offset) + 5 > data_end)
+//                     return DROP;
+
+//                 if (bpf_ntohs(*((__u16 *) (content + size + 2))) ^ A_RECORD_TYPE)
+//                     continue;
+
+//                 if (bpf_ntohs(*((__u16 *) (content + size + 4))) ^ INTERNT_CLASS)
+//                     continue;
+                
+//                 if (data + (*offset) + 15 > data_end)
+//                     return DROP;
+
+//                 record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
+                
+//                 record->ip = *((__u32 *) (content + size + 12));
+
+//                 if (data + (*offset) + 1 > data_end)
+//                     return DROP;
+            
+//                 __u16 pointer_autho = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF);
+
+//                 #ifdef DOMAIN
+//                     bpf_printk("[XDP] Subpointer: %u", pointer_autho);
+//                     bpf_printk("[XDP] Header + query: %u", (sizeof(struct dns_header) + querysize + 5));
+//                     bpf_printk("[XDP] Size: %u", querysize);
+//                 #endif
+
+//                 if (pointer_autho >= sizeof(struct dns_header) + querysize + 5)
+//                 {
+//                     __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 11;
+
+//                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 1 -11 > data_end)
+//                         return DROP;
+
+//                     if (*subdomain == 0)
+//                     {
+//                         *subpointer == querysize;
+//                         return ACCEPT;
+//                     }
+
+//                     subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
+
+//                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
+//                         return DROP;
+
+//                     *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
+
+//                     if (*subpointer >= querysize)
+//                         return DROP;
+
+//                     #ifdef DOMAIN
+//                         bpf_printk("[XDP] Subpointer: %u", *subpointer);
+//                     #endif
+//                 }
+
+//                 else 
+//                     *subpointer = pointer_autho - sizeof(struct dns_header);
+            
+//                 return ACCEPT;
+//             }
+//         }
+//     }
+    
+//     return DROP;
+// }
+
 static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, __u8 querysize, __u8 *subpointer, struct a_record *record) {
 
     struct dns_header *header;    
@@ -753,27 +851,17 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     for (size_t size = 0; size < 500; size++)
     {
-        if (data + ++(*offset) > data_end)
+        if (data + ++(*offset) + 3 > data_end)
             return DROP;
 
-        if ((*(content + size) & 0xC0) == 0xC0 || *(content + size) == 0) {
 
-            if (count < bpf_ntohs(header->name_servers))
-            {
-                if (data + (*offset) + 1 > data_end)
-                    return DROP;
+        if (bpf_ntohs(*((__u16 *) (content + size))) == NS_RECORD_TYPE && bpf_ntohs(*((__u16 *) (content + size + 2))) == INTERNT_CLASS)
+            count++;
 
-                __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
-                
-                if (pointer >= querysize)    
-                    continue;
+        else if ((*(content + size) & 0xC0) == 0xC0) {
 
-                count++;
-            }
-
-            else
+            if (count >= bpf_ntohs(header->name_servers))
             {   
-                
                 if (data + (*offset) + 5 > data_end)
                     return DROP;
 
@@ -819,10 +907,13 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
                         return DROP;
 
+                    if ((*subdomain & 0xC0) != 0xC0)
+                        continue;
+
                     *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
 
                     if (*subpointer >= querysize)
-                        return DROP;
+                        *subpointer = querysize;
 
                     #ifdef DOMAIN
                         bpf_printk("[XDP] Subpointer: %u", *subpointer);
@@ -1913,7 +2004,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     switch (getAdditional(data, &offset_h, data_end, domainsize, &pointer, &record))
     {
         case DROP:
-            return XDP_DROP;
+            return XDP_PASS;
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
@@ -1924,7 +2015,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     } 
 
     if (pointer > domainsize)
-        return XDP_PASS;
+        pointer = domainsize;
 
     __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + domainsize + 5) - data_end);
 
