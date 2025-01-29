@@ -37,6 +37,7 @@
 #define CNAME_RECORD_TYPE 5
 #define SOA_RECORD_TYPE 6 
 #define OPT_TYPE 41
+#define DS_TYPE 43
 
 #define INTERNT_CLASS 1
 
@@ -171,6 +172,7 @@ struct rec_query_key {
 struct query_owner {
     unsigned char mac_address[6];
     __be32 ip_address;
+    __u8 rec;
 };
 
 struct curr_query

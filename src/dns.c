@@ -852,10 +852,9 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     for (size_t size = 0; size < 500; size++)
     {
         if (data + ++(*offset) + 3 > data_end)
-            return DROP;
+            break;
 
-
-        if (bpf_ntohs(*((__u16 *) (content + size))) == NS_RECORD_TYPE && bpf_ntohs(*((__u16 *) (content + size + 2))) == INTERNT_CLASS)
+        if ((bpf_ntohs(*((__u16 *) (content + size))) == NS_RECORD_TYPE || bpf_ntohs(*((__u16 *) (content + size))) == DS_TYPE) && bpf_ntohs(*((__u16 *) (content + size + 2))) == INTERNT_CLASS)
             count++;
 
         else if ((*(content + size) & 0xC0) == 0xC0) {
@@ -1387,6 +1386,8 @@ int dns_check_cache(struct xdp_md *ctx) {
 
             getSourceMac(data, &owner); owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data);
 
+            owner.rec = 0;
+
             if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
             {
                 #ifdef DOMAIN
@@ -1534,6 +1535,24 @@ int dns_process_response(struct xdp_md *ctx) {
 
     if (lastdomain > 0)
     {   
+        lastdomain->trash++;
+
+        if (lastdomain->trash == 16)
+        {
+            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+            {
+                #ifdef ERROR
+                    bpf_printk("[XDP] Curr queries map error");
+                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                    bpf_printk("[XDP] ZERO");
+                #endif  
+
+                return XDP_PASS;
+            }
+
+            bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+        }
+
         if (query_response == RESPONSE_RETURN)
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
@@ -1714,6 +1733,24 @@ int dns_process_response(struct xdp_md *ctx) {
 
     if (powner)
     {
+        powner->rec++;
+
+        if (powner->rec == 16)
+        {
+            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+            {
+                #ifdef ERROR
+                    bpf_printk("[XDP] Curr queries map error");
+                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                    bpf_printk("[XDP] ZERO");
+                #endif  
+
+                return XDP_PASS;
+            }
+
+            bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+        }
+
         if (query_response == RESPONSE_RETURN)
         {
             bpf_map_delete_elem(&recursive_queries, &dnsquery);
@@ -2119,7 +2156,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         if (!nsrecord)
             nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &subdomain.name);
 
-        if (nsrecord)
+        if (nsrecord && nsrecord->ip != curr.ip)
         {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record try");
@@ -2139,7 +2176,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Cache NS record hit");
                 #endif
 
-                __s16 newsize = (data + query->query.domain_size + 5 - data_end);
+                __s16 newsize = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5 - data_end);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -2260,7 +2297,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-        query->id.port = getDestIp(data); query->id.id = 0;
+        query->id.port = getDestIp(data);
         dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
 
         incrementID(data);
