@@ -10,8 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DEEP
-
+#define DEEP_2
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
         __uint(max_entries, 9);                
