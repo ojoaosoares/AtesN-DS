@@ -913,10 +913,10 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     if (data + *(offset) + 2 > data_end)
         return DROP;
 
-    if (*((__u16 *) content) == SOA_RECORD_TYPE)
+    if (*((__u16 *) content) ^ NS_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
-    offset += 8;
+    *offset += 8;
 
     content = data + *offset;
 
