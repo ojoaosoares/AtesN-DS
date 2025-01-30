@@ -37,7 +37,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 500000);
+        __uint(max_entries, 1000000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct hop_query));
 
@@ -913,7 +913,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     if (data + *(offset) + 2 > data_end)
         return DROP;
 
-    if (*((__u16 *) content) != NS_RECORD_TYPE)
+    if (*((__u16 *) content) == SOA_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
     offset += 8;
@@ -2434,7 +2434,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             else if (ip == 0)
             {
                 hideInDestIp(data, 3);
-                
+
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
 
