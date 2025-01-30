@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define TESTE_ERRO
+#define DOMAIN
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -21,7 +21,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 1300000);
+        __uint(max_entries, 200000);
         __uint(key_size, sizeof(struct curr_query));
         __uint(value_size, sizeof(struct dns_query));
 
@@ -29,7 +29,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 2000000);
+        __uint(max_entries, 200000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct query_owner));
 
@@ -37,7 +37,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 1000000);
+        __uint(max_entries, 900000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct hop_query));
 
@@ -45,7 +45,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 5000000);
+        __uint(max_entries, 400000);
         __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
         __uint(value_size, sizeof(struct a_record));
 
@@ -53,7 +53,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 1000000);
+        __uint(max_entries, 250000);
         __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
         __uint(value_size, sizeof(struct a_record));
 
