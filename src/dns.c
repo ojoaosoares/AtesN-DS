@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define DEEP
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -2386,20 +2386,40 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 __u8 pointer = lastdomain->pointer, deep = lastdomain->trash;
 
+                
+                #ifdef DEEP
+                    bpf_printk("last %d", deep);
+                #endif
+
                 lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
                 lastdomain->pointer = curr.id.port;
 
                 struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
 
                 if (last_of_last)
+                {
+
                     last_of_last->trash += deep;
 
-                else {
+                    #ifdef DEEP
+                        bpf_printk("curr %d", last_of_last->trash);
+                    #endif
+                }
 
+                else {
+                    
                     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
 
                     if (powner)
+                    {
                         powner->rec += deep;
+
+                        #ifdef DEEP
+                            bpf_printk("curr %d", powner->rec);
+                        #endif
+                    }
+
+                    
                 }
                 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -2479,20 +2499,39 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 __u8 deep = lastdomain->trash;
 
+                #ifdef DEEP
+                    bpf_printk("last %d", deep);
+                #endif
+
                 lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
                 lastdomain->pointer = curr.id.port;
 
                 struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
 
                 if (last_of_last)
+                {
+
                     last_of_last->trash += deep;
+
+                    #ifdef DEEP
+                        bpf_printk("curr %d", last_of_last->trash);
+                    #endif
+                }
 
                 else {
                     
                     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
 
                     if (powner)
+                    {
                         powner->rec += deep;
+
+                        #ifdef DEEP
+                            bpf_printk("curr %d", powner->rec);
+                        #endif
+                    }
+
+                    
                 }
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
