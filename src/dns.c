@@ -1064,7 +1064,7 @@ static __always_inline void decrementID(void *data)
     struct dns_header *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
     
     // Decrementa com underflow controlado
-    header->id = bpf_ntohs((bpf_ntohs(header->id) - 1));
+    header->id = bpf_htons((bpf_ntohs(header->id) - 1));
 }
 
 static __always_inline void hideInSourceIp(void *data, __u32 hidden)
@@ -2384,6 +2384,24 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 bpf_map_delete_elem(&new_queries, query);
 
+                __u8 pointer = lastdomain->pointer, deep = lastdomain->trash;
+
+                lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
+                lastdomain->pointer = curr.id.port;
+
+                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
+
+                if (last_of_last)
+                    last_of_last->trash += deep;
+
+                else {
+
+                    struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
+
+                    if (powner)
+                        powner->rec += deep;
+                }
+                
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
                     #ifdef DOMAIN
@@ -2422,7 +2440,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         break;
                 }
 
-                hideInDestIp(data, cache_record.ip); hideInSourceIp(data, cache_record.ttl); hideInDestPort(data, bpf_htons(lastdomain->pointer));
+                hideInDestIp(data, cache_record.ip); hideInSourceIp(data, cache_record.ttl); hideInDestPort(data, bpf_htons(pointer));
 
                 offset_h += sizeof(struct dns_header);
 
@@ -2458,6 +2476,24 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_map_delete_elem(&curr_queries, &curr);
 
                 bpf_map_delete_elem(&new_queries, query);
+
+                __u8 deep = lastdomain->trash;
+
+                lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
+                lastdomain->pointer = curr.id.port;
+
+                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
+
+                if (last_of_last)
+                    last_of_last->trash += deep;
+
+                else {
+                    
+                    struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
+
+                    if (powner)
+                        powner->rec += deep;
+                }
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
