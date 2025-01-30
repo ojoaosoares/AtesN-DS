@@ -903,22 +903,14 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     __u64 newoff = *offset;
 
     __u8 *domain = data + *offset;
-
-    // *offset += query->domain_size + 5 + off + 8;
     
     *offset += query->domain_size + 5 + off;
 
-    __u8 *content = data + *offset;
-
-    if (data + *(offset) + 2 > data_end)
-        return DROP;
-
-    if (*((__u16 *) content) ^ NS_RECORD_TYPE)
-        return ACCEPT_NO_ANSWER;
+    __u8 *type = data + *offset;
 
     *offset += 8;
 
-    content = data + *offset;
+    __u8 *content = data + *offset;
 
     *offset += 2;
     
@@ -931,6 +923,12 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
         return DROP;
 
     content += 2;
+
+    if (type + 2 > data_end)
+        return DROP;
+
+    if (*((__u16 *) type)  ^ NS_RECORD_TYPE)
+        return ACCEPT_NO_ANSWER;
 
     for (size_t size = 0; size < autho->domain_size; size++)
     {
