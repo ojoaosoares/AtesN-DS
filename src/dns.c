@@ -890,7 +890,7 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
             return ACCEPT;
         }
 
-        if ((*(content) & 0xC0) == 0xC0)
+        if ((*(content + size) & 0xC0) == 0xC0)
         {
             (*off) += size + 2;
 
