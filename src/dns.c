@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define TESTE
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -742,104 +742,6 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
     return ACCEPT;
 }
 
-// static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, __u8 querysize, __u8 *subpointer, struct a_record *record) {
-
-//     struct dns_header *header;    
-//     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-//     record->status = (bpf_ntohs(header->flags) & 0x000F);;
-
-//     __u8 *content = data + *offset, count = 0;
-
-//     for (size_t size = 0; size < 500; size++)
-//     {
-//         if (data + ++(*offset) > data_end)
-//             return DROP;
-
-//         if ((*(content + size) & 0xC0) == 0xC0) {
-
-//             if (count < bpf_ntohs(header->name_servers))
-//             {
-//                 if (data + (*offset) + 1 > data_end)
-//                     return DROP;
-
-//                 __u16 pointer = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF) - sizeof(struct dns_header);
-                
-//                 if (pointer >= querysize)    
-//                     continue;
-
-//                 count++;
-//             }
-
-//             else
-//             {   
-                
-//                 if (data + (*offset) + 5 > data_end)
-//                     return DROP;
-
-//                 if (bpf_ntohs(*((__u16 *) (content + size + 2))) ^ A_RECORD_TYPE)
-//                     continue;
-
-//                 if (bpf_ntohs(*((__u16 *) (content + size + 4))) ^ INTERNT_CLASS)
-//                     continue;
-                
-//                 if (data + (*offset) + 15 > data_end)
-//                     return DROP;
-
-//                 record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
-                
-//                 record->ip = *((__u32 *) (content + size + 12));
-
-//                 if (data + (*offset) + 1 > data_end)
-//                     return DROP;
-            
-//                 __u16 pointer_autho = (bpf_ntohs(*((__u16 *) (content + size))) & 0x3FFF);
-
-//                 #ifdef DOMAIN
-//                     bpf_printk("[XDP] Subpointer: %u", pointer_autho);
-//                     bpf_printk("[XDP] Header + query: %u", (sizeof(struct dns_header) + querysize + 5));
-//                     bpf_printk("[XDP] Size: %u", querysize);
-//                 #endif
-
-//                 if (pointer_autho >= sizeof(struct dns_header) + querysize + 5)
-//                 {
-//                     __u8 *subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 11;
-
-//                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 1 -11 > data_end)
-//                         return DROP;
-
-//                     if (*subdomain == 0)
-//                     {
-//                         *subpointer == querysize;
-//                         return ACCEPT;
-//                     }
-
-//                     subdomain = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho - 12;
-
-//                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + pointer_autho + 2 -12 > data_end)
-//                         return DROP;
-
-//                     *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
-
-//                     if (*subpointer >= querysize)
-//                         return DROP;
-
-//                     #ifdef DOMAIN
-//                         bpf_printk("[XDP] Subpointer: %u", *subpointer);
-//                     #endif
-//                 }
-
-//                 else 
-//                     *subpointer = pointer_autho - sizeof(struct dns_header);
-            
-//                 return ACCEPT;
-//             }
-//         }
-//     }
-    
-//     return DROP;
-// }
-
 static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, __u8 querysize, __u8 *subpointer, struct a_record *record) {
 
     struct dns_header *header;    
@@ -930,7 +832,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
         }
     }
     
-    return DROP;
+    return ACCEPT_NO_ANSWER;
 }
 
 static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain *domain, struct dns_domain *subdomain)
@@ -1704,6 +1606,15 @@ int dns_process_response(struct xdp_md *ctx) {
             else
                 bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
         }
+
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        {
+            #ifdef ERROR
+                bpf_printk("[XDP] Curr queries map error");
+            #endif  
+            
+            return XDP_PASS;
+        }
             
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
@@ -1716,17 +1627,6 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             hideInDestIp(data, lastdomain->trash);
 
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-            {
-                #ifdef ERROR
-                    bpf_printk("[XDP] Curr queries map error");
-                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                    bpf_printk("[XDP] Nameservers");
-                #endif  
-                
-                return XDP_PASS;
-            }
-            
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
         }
         
@@ -1994,6 +1894,15 @@ int dns_process_response(struct xdp_md *ctx) {
                 bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
         }
 
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        {
+            #ifdef ERROR
+                bpf_printk("[XDP] Curr queries map error");
+            #endif  
+            
+            return XDP_PASS;
+        }
+
         if (query_response == QUERY_ADDITIONAL_RETURN)
         {
             hideInDestIp (data, dnsquery.query.domain_size);
@@ -2004,17 +1913,6 @@ int dns_process_response(struct xdp_md *ctx) {
         else if (query_response == QUERY_NAMESERVERS_RETURN)
         {   
             hideInDestIp(data, powner->rec);
-
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-            {
-                #ifdef ERROR
-                    bpf_printk("[XDP] Curr queries map error");
-                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                    bpf_printk("[XDP] Nameservers");
-                #endif  
-                
-                return XDP_PASS;
-            }
 
             bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
         }
@@ -2042,12 +1940,23 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     __u8 pointer = 0, domainsize = getDestIp(data);
 
+    struct curr_query curr;
+    
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
+
     struct a_record record;
     
     switch (getAdditional(data, &offset_h, data_end, domainsize, &pointer, &record))
     {
         case DROP:
-            return XDP_PASS;
+             #ifdef TESTE
+                bpf_printk("[XDP] oii");
+            #endif
+            return XDP_DROP;
+        case ACCEPT_NO_ANSWER:
+            bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+
+            return XDP_ABORTED;
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
@@ -2056,6 +1965,8 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
             break;
     } 
+    
+    bpf_map_delete_elem(&curr_queries, &curr);
 
     if (pointer > domainsize)
         pointer = domainsize;
