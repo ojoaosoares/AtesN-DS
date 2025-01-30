@@ -907,7 +907,10 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                         return DROP;
 
                     if ((*subdomain & 0xC0) != 0xC0)
-                        continue;
+                    {
+                        *subpointer = querysize;
+                        return ACCEPT; 
+                    }
 
                     *subpointer = (__u8) (bpf_ntohs(*((__u16 *) (subdomain))) & 0x3FFF) - sizeof(struct dns_header);
 
@@ -1711,7 +1714,8 @@ int dns_process_response(struct xdp_md *ctx) {
     
         else if (query_response == QUERY_NAMESERVERS_RETURN)
         {
-            
+            hideInDestIp(data, lastdomain->trash);
+
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
                 #ifdef ERROR
@@ -1999,6 +2003,8 @@ int dns_process_response(struct xdp_md *ctx) {
         
         else if (query_response == QUERY_NAMESERVERS_RETURN)
         {   
+            hideInDestIp(data, powner->rec);
+
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
                 #ifdef ERROR
@@ -2119,6 +2125,8 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
+    __u8 deep = getDestIp(data);
+
     struct curr_query curr;
     
     curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
@@ -2238,7 +2246,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             bpf_printk("[XDP] off %d", off);
         #endif
 
-        hideInDestIp(data, pointer); hideInSourcePort(data, bpf_htons(off));
+        hideInDestIp(data, deep << 8 | pointer); hideInSourcePort(data, bpf_htons(off));
 
         bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
     }
@@ -2297,11 +2305,13 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-        query->id.port = getDestIp(data);
+        __u32 value = getDestIp(data);
+
+        query->id.port =  value & 0xFF;
         dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
 
-        incrementID(data);
-        
+        incrementID(data); query->id.id = (value >> 8) & 0xFF;
+
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
         {
             #ifdef DOMAIN
