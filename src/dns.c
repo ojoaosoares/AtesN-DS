@@ -2397,7 +2397,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (last_of_last)
                 {
 
-                    last_of_last->trash += deep;
+                    last_of_last->trash = deep;
 
                     #ifdef DEEP
                         bpf_printk("curr %d", last_of_last->trash);
@@ -2410,7 +2410,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                     if (powner)
                     {
-                        powner->rec += deep;
+                        powner->rec = deep;
 
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
@@ -2509,7 +2509,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (last_of_last)
                 {
 
-                    last_of_last->trash += deep;
+                    last_of_last->trash = deep;
 
                     #ifdef DEEP
                         bpf_printk("curr %d", last_of_last->trash);
@@ -2522,7 +2522,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                     if (powner)
                     {
-                        powner->rec += deep;
+                        powner->rec = deep;
 
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
