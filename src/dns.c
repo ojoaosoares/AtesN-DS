@@ -904,9 +904,21 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
     __u8 *domain = data + *offset;
 
-    *offset += query->domain_size + 5 + off + 8;
+    // *offset += query->domain_size + 5 + off + 8;
+    
+    *offset += query->domain_size + 5 + off;
 
     __u8 *content = data + *offset;
+
+    if (data + *(offset) + 2 > data_end)
+        return DROP;
+
+    if (*((__u16 *) content) != NS_RECORD_TYPE)
+        return ACCEPT_NO_ANSWER;
+
+    offset += 8;
+
+    content = data + *offset;
 
     *offset += 2;
     
@@ -2197,8 +2209,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
     if (query) {
 
-        bpf_map_delete_elem(&curr_queries, &curr);
-
         struct dns_query dnsquery; 
         
         dnsquery.id = curr.id;
@@ -2207,6 +2217,9 @@ int dns_create_new_query(struct xdp_md *ctx) {
         {
             case DROP:
                 return XDP_DROP;
+            case ACCEPT_NO_ANSWER:
+                bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                return XDP_PASS;
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
@@ -2215,6 +2228,8 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 #endif
                 break;
         }
+
+        bpf_map_delete_elem(&curr_queries, &curr);
 
         __u32 value = getDestIp(data);
 
