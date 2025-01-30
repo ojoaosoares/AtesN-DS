@@ -1421,6 +1421,8 @@ int dns_process_response(struct xdp_md *ctx) {
 
                     return XDP_PASS;
                 }
+
+                hideInDestIp(data, 2);
                 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
@@ -1466,6 +1468,8 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 return XDP_PASS;
             }
+            
+            hideInDestIp(data, 2);
 
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
         }
@@ -1663,6 +1667,8 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 return XDP_PASS;
             }
+
+            hideInDestIp(data, 2);
 
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
         }
@@ -1966,6 +1972,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
             return XDP_DROP;
         case ACCEPT_NO_ANSWER:
+            hideInDestIp(data, 5);
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
             return XDP_ABORTED;
@@ -2218,6 +2225,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             case DROP:
                 return XDP_DROP;
             case ACCEPT_NO_ANSWER:
+                hideInDestIp(data, 3);
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                 return XDP_PASS;
             default:
@@ -2351,7 +2359,11 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 }
 
                 if (cache_record.ip == 0)
-                    bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);    
+                {
+                    hideInDestIp(data, 3);
+                    
+                    bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                }
 
                 bpf_map_delete_elem(&curr_queries, &curr);
 
@@ -2420,7 +2432,11 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             }
 
             else if (ip == 0)
+            {
+                hideInDestIp(data, 3);
+                
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+            }
 
             else
             {
@@ -2702,6 +2718,8 @@ int dns_error(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
+    __u8 status = getDestIp(data);
+
     struct curr_query curr;
     
     curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
@@ -2799,7 +2817,7 @@ int dns_error(struct xdp_md *ctx) {
                     break;
             }
 
-            switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, 2, query->query.domain_size))
+            switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, status, query->query.domain_size))
             {
                 case DROP:
                     return XDP_DROP;
