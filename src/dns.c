@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define TESTE_ERRO
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -2233,6 +2233,16 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
                 #endif
                 break;
+        }
+
+        if (dnsquery.query.domain_size < 3)
+        {
+            #ifdef TESTE_ERRO
+                bpf_printk("[XDP] Query %s", query->query.name);
+		    
+                bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
+                bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+            #endif
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
