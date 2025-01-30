@@ -798,7 +798,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
                     if (*subdomain == 0)
                     {
-                        *subpointer == querysize;
+                        *subpointer = querysize;
                         return ACCEPT;
                     }
 
@@ -2256,7 +2256,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
 
         #ifdef DEEP_2
-            bpf_printk("Curr autho %d", query->id.id)
+            bpf_printk("Curr autho %d", query->id.id);
         #endif
 
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
