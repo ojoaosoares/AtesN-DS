@@ -1461,7 +1461,7 @@ int dns_process_response(struct xdp_md *ctx) {
     {   
         lastdomain->trash++;
 
-        if (lastdomain->trash == 16)
+        if (lastdomain->trash >= 16)
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
@@ -1660,7 +1660,7 @@ int dns_process_response(struct xdp_md *ctx) {
     {
         powner->rec++;
 
-        if (powner->rec == 16)
+        if (powner->rec >= 16)
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
@@ -2062,6 +2062,10 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
     __u8 deep = getDestIp(data);
 
+    #ifdef DEEP_2
+        bpf_printk("Deep csd %d", deep);
+    #endif 
+
     struct curr_query curr;
     
     curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
@@ -2242,15 +2246,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-        if (dnsquery.query.domain_size < 3)
-        {
-            #ifdef TESTE_ERRO
-                bpf_printk("[XDP] Query %s", query->query.name);
-		    
-                bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
-                bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
-            #endif
-        }
 
         bpf_map_delete_elem(&curr_queries, &curr);
 
@@ -2260,6 +2255,10 @@ int dns_create_new_query(struct xdp_md *ctx) {
         dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
 
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
+
+        #ifdef DEEP_2
+            bpf_printk("Curr autho %d", query->id.id)
+        #endif
 
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
         {
