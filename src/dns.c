@@ -10,7 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DEEP_2
+#define DOMAIN
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
         __uint(max_entries, 9);                
@@ -1119,7 +1119,7 @@ int dns_filter(struct xdp_md *ctx) {
     switch (isIPV4(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
@@ -1132,7 +1132,7 @@ int dns_filter(struct xdp_md *ctx) {
     switch (isValidUDP(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
@@ -1145,7 +1145,7 @@ int dns_filter(struct xdp_md *ctx) {
     switch (isPort53(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         case TO_DNS_PORT:
@@ -1178,7 +1178,7 @@ int dns_check_cache(struct xdp_md *ctx) {
     switch (isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         case QUERY_RETURN:
@@ -1187,13 +1187,13 @@ int dns_check_cache(struct xdp_md *ctx) {
             #endif
             break;
         default:
-            return 2;
+            return XDP_DROP;
     }
 
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
@@ -1243,7 +1243,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                             bpf_printk("[XDP] It was't possible to resize the packet");
                         #endif
                         
-                        return 2;
+                        return XDP_DROP;
                     }
 
                     data = (void*) (long) ctx->data;
@@ -1254,7 +1254,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                     switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                     {
                         case DROP:
-                            return 2;
+                            return XDP_DROP;
                         default:
                             #ifdef DEBUG
                                 bpf_printk("[XDP] Headers updated");
@@ -1265,7 +1265,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                     switch (swapInternetLayer(data, &offset_h, data_end))
                     {
                         case DROP:
-                            return 2;
+                            return XDP_DROP;
                         default:
                             #ifdef DEBUG
                                 bpf_printk("[XDP] Headers updated");
@@ -1276,7 +1276,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                     switch (swapTransportLayer(data, &offset_h, data_end))
                     {
                         case DROP:
-                            return 2;
+                            return XDP_DROP;
                         default:
                             #ifdef DEBUG
                                 bpf_printk("[XDP] Headers updated");
@@ -1287,7 +1287,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                     switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, arecord->status, dnsquery.query.domain_size))
                     {
                         case DROP:
-                            return 2;
+                            return XDP_DROP;
                         default:
                             #ifdef DEBUG
                                 bpf_printk("[XDP] Answer created");
@@ -1328,7 +1328,7 @@ int dns_check_cache(struct xdp_md *ctx) {
                     bpf_printk("[XDP] It was't possible to resize the packet");
                 #endif
                 
-                return 2;
+                return XDP_DROP;
             }
 
             data = (void *) ctx->data;
@@ -1339,7 +1339,7 @@ int dns_check_cache(struct xdp_md *ctx) {
             for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
             {
                 if (content + i + 1 > data_end)
-                    return 2;
+                    return XDP_DROP;
 
                 *(content + i) = 0;
             }
@@ -1379,7 +1379,7 @@ int dns_process_response(struct xdp_md *ctx) {
     switch (query_response)
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
@@ -1571,7 +1571,7 @@ int dns_process_response(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) (long) ctx->data;
@@ -1582,7 +1582,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1593,7 +1593,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (returnToNetwork(data, &offset_h, data_end, record->ip))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1604,7 +1604,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1615,7 +1615,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch(createDnsQuery(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -1686,7 +1686,7 @@ int dns_process_response(struct xdp_md *ctx) {
             switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     #ifdef DEBUG
                         bpf_printk("[XDP] Headers updated");
@@ -1697,7 +1697,7 @@ int dns_process_response(struct xdp_md *ctx) {
             switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     break;
             }
@@ -1705,7 +1705,7 @@ int dns_process_response(struct xdp_md *ctx) {
             switch(keepTransportLayer(data, &offset_h, data_end))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     break;
             }
@@ -1717,7 +1717,7 @@ int dns_process_response(struct xdp_md *ctx) {
             switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 case ACCEPT_NO_ANSWER:
                     #ifdef DEBUG
                         bpf_printk("[XDP] No DNS answer");
@@ -1773,7 +1773,7 @@ int dns_process_response(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) (long) ctx->data;
@@ -1784,7 +1784,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1795,7 +1795,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1806,7 +1806,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (keepTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1817,7 +1817,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, record->status, dnsquery.query.domain_size))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Answer created");
@@ -1860,7 +1860,7 @@ int dns_process_response(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) (long) ctx->data;
@@ -1871,7 +1871,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1882,7 +1882,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (returnToNetwork(data, &offset_h, data_end, record->ip))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1893,7 +1893,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch (swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -1904,7 +1904,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 switch(createDnsQuery(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -1958,7 +1958,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     __u8 pointer = 0, domainsize = getDestIp(data);
 
@@ -1974,7 +1974,7 @@ int dns_jump_query(struct xdp_md *ctx) {
              #ifdef TESTE
                 bpf_printk("[XDP] oii");
             #endif
-            return 2;
+            return XDP_DROP;
         case ACCEPT_NO_ANSWER:
             hideInDestIp(data, 5);
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2002,7 +2002,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] It was't possible to resize the packet");
         #endif
         
-        return 2;
+        return XDP_DROP;
     }
 
     data = (void*) (long) ctx->data;
@@ -2013,7 +2013,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             #ifdef DEBUG
                 bpf_printk("[XDP] Headers updated");
@@ -2024,12 +2024,12 @@ int dns_jump_query(struct xdp_md *ctx) {
     offset_h += sizeof(struct iphdr);
 
     if (data + offset_h > data_end)
-        return 2;    
+        return XDP_DROP;    
 
     switch (swapTransportLayer(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2057,7 +2057,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     __u8 deep = getDestIp(data);
 
@@ -2076,19 +2076,19 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         __u8 pointer = 0, off = 0;
 
         if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
-            return 2;
+            return XDP_DROP;
 
         offset_h += query->query.domain_size + 5;
 
         if (data + offset_h > data_end)
-            return 2;
+            return XDP_DROP;
 
         struct dns_domain subdomain;
 
         switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
         {
             case DROP:
-                return 2;            
+                return XDP_DROP;            
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subdomain %s", subdomain.name);
@@ -2130,7 +2130,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) ctx->data;
@@ -2141,7 +2141,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -2152,7 +2152,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 switch(returnToNetwork(data, &offset_h, data_end, nsrecord->ip))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2160,7 +2160,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 switch(swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2168,7 +2168,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 switch(createDnsQuery(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2205,7 +2205,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     __u16 off = getSourcePort(data); hideInSourcePort(data, bpf_htons(DNS_PORT));
 
@@ -2214,7 +2214,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
     #endif
 
     if (off > MAX_DNS_NAME_LENGTH)
-        return 2;
+        return XDP_DROP;
     
     struct curr_query curr;
     
@@ -2231,7 +2231,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         switch(getAuthoritative(data, &offset_h, data_end, &dnsquery.query, &query->query, off))
         {
             case DROP:
-                return 2;
+                return XDP_DROP;
             case ACCEPT_NO_ANSWER:
                 hideInDestIp(data, 3);
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2278,7 +2278,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 bpf_printk("[XDP] It was't possible to resize the packet");
             #endif
             
-            return 2;
+            return XDP_DROP;
         }
 
         data = (void*) (long) ctx->data;
@@ -2289,7 +2289,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         switch (swapTransportLayer(data, &offset_h, data_end))
         {
             case DROP:
-                return 2;
+                return XDP_DROP;
             default:
                 break;
         }
@@ -2298,7 +2298,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
         {
             if (content + i + 1 > data_end)
-                return 2;
+                return XDP_DROP;
 
             *(content + i) = 0;
         }
@@ -2326,7 +2326,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     struct curr_query curr;
     
@@ -2339,7 +2339,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
         offset_h += query->query.domain_size + 5;
 
         if (data + offset_h > data_end)
-            return 2;
+            return XDP_DROP;
 
         struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, query);
 
@@ -2357,7 +2357,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     case ACCEPT_NO_ANSWER:
                         #ifdef DEBUG
                             bpf_printk("[XDP] No DNS answer");
@@ -2426,7 +2426,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) (long) ctx->data;
@@ -2437,7 +2437,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -2448,12 +2448,12 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 offset_h += sizeof(struct iphdr);
 
                 if (data + offset_h > data_end)
-                    return 2;    
+                    return XDP_DROP;    
 
                 switch (swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2470,7 +2470,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2538,7 +2538,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         bpf_printk("[XDP] It was't possible to resize the packet");
                     #endif
                     
-                    return 2;
+                    return XDP_DROP;
                 }
 
                 data = (void*) (long) ctx->data;
@@ -2549,7 +2549,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -2560,7 +2560,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch (returnToNetwork(data, &offset_h, data_end, ip))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         #ifdef DEBUG
                             bpf_printk("[XDP] Headers updated");
@@ -2571,7 +2571,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch (swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2579,7 +2579,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch(createDnsQuery(data, &offset_h, data_end))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2589,7 +2589,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2615,7 +2615,7 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     struct a_record record; 
     
@@ -2624,7 +2624,7 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data); record.status = getDNSStatus(data);
 
     if (pointer > MAX_DNS_NAME_LENGTH)
-        return 2;
+        return XDP_DROP;
 
     record.timestamp = bpf_ktime_get_ns() / 1000000000;
 
@@ -2633,7 +2633,7 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     switch(returnToNetwork(data, &offset_h, data_end, record.ip))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2641,14 +2641,14 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     offset_h += sizeof(struct udphdr);
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     hideInDestPort(data, bpf_htons(DNS_PORT));
 
     switch(createDnsQuery(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2656,7 +2656,7 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     offset_h += pointer;
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Pointer %d", pointer);
@@ -2667,7 +2667,7 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     switch (getSubDomain(data, &offset_h, data_end, &query))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         case ACCEPT_NO_ANSWER:
@@ -2706,7 +2706,7 @@ int dns_select_server(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     __u8 domainsize = getDestIp(data);
 
@@ -2715,7 +2715,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch (findOwnerServer(data, &offset_h, data_end, &ip))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
@@ -2735,7 +2735,7 @@ int dns_select_server(struct xdp_md *ctx) {
             bpf_printk("[XDP] It was't possible to resize the packet");
         #endif
         
-        return 2;
+        return XDP_DROP;
     }
 
     data = (void*) ctx->data;
@@ -2746,7 +2746,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             #ifdef DEBUG
                 bpf_printk("[XDP] Headers updated");
@@ -2757,7 +2757,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch(returnToNetwork(data, &offset_h, data_end, ip))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2765,7 +2765,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch(keepTransportLayer(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2773,7 +2773,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch(createDnsQuery(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2783,7 +2783,7 @@ int dns_select_server(struct xdp_md *ctx) {
     switch(fixDnsQuery(data, &offset_h, data_end))
     {
         case DROP:
-            return 2;
+            return XDP_DROP;
         default:
             break;
     }
@@ -2804,7 +2804,7 @@ int dns_error(struct xdp_md *ctx) {
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
-        return 2;
+        return XDP_DROP;
 
     __u8 status = getDestIp(data);
 
@@ -2860,7 +2860,7 @@ int dns_error(struct xdp_md *ctx) {
             #endif
 
             if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
-                return 2;
+                return XDP_DROP;
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + query->query.domain_size + 5;
 
@@ -2870,7 +2870,7 @@ int dns_error(struct xdp_md *ctx) {
                     bpf_printk("[XDP] It was't possible to resize the packet");
                 #endif
                 
-                return 2;
+                return XDP_DROP;
             }
 
             data_end = (void*) (long) ctx->data_end;
@@ -2881,7 +2881,7 @@ int dns_error(struct xdp_md *ctx) {
             switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     #ifdef DEBUG
                         bpf_printk("[XDP] Headers updated");
@@ -2892,7 +2892,7 @@ int dns_error(struct xdp_md *ctx) {
             switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     break;
             }
@@ -2900,7 +2900,7 @@ int dns_error(struct xdp_md *ctx) {
             switch(keepTransportLayer(data, &offset_h, data_end))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     break;
             }
@@ -2908,7 +2908,7 @@ int dns_error(struct xdp_md *ctx) {
             switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, status, query->query.domain_size))
             {
                 case DROP:
-                    return 2;
+                    return XDP_DROP;
                 default:
                     #ifdef DEBUG
                         bpf_printk("[XDP] Answer created");
@@ -2921,7 +2921,7 @@ int dns_error(struct xdp_md *ctx) {
                 switch(writeQuery(data, &offset_h, data_end, &query->query))
                 {
                     case DROP:
-                        return 2;
+                        return XDP_DROP;
                     default:
                         break;
                 }
@@ -2931,7 +2931,7 @@ int dns_error(struct xdp_md *ctx) {
         }    
     }
 
-    return 2;
+    return XDP_DROP;
 }
 
 char _license[] SEC("license") = "GPL";
