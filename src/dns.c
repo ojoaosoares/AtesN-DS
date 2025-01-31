@@ -935,7 +935,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     if (type + 2 > data_end)
         return DROP;
 
-    if (*((__u16 *) type) ^ NS_RECORD_TYPE)
+    if (*((__u16 *) type) == SOA_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
     for (size_t size = 0; size < autho->domain_size; size++)
