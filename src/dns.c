@@ -475,15 +475,17 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
 
     header->name_servers = bpf_htons(0);
     header->additional_records = bpf_htons(0);
-    header->flags = bpf_htons(flags);
 
     if (ip == 0)
     {
+        flags = 0x8180 + 3;
+        header->flags = bpf_htons(flags);
         header->answer_count = bpf_htons(0);
-
+        
         return ACCEPT;
     }
 
+    header->flags = bpf_htons(flags);
     header->answer_count = bpf_htons(1);
 
     *offset += domain_size + 5;
