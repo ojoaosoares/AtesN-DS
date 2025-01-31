@@ -1503,7 +1503,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
         record = bpf_map_lookup_elem(&cache_arecords, (struct rec_query_key *) &dnsquery.query.name);
 
-        if (record && record->ip ^ 0)
+        if (record)
         {   
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache A record try");
@@ -1517,13 +1517,10 @@ int dns_process_response(struct xdp_md *ctx) {
 
             if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
             {
-
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Cache A record  hit");
                 #endif
-
-                hideInDestIp(data, record->ip);
-
+                
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                 {
                     #ifdef ERROR
@@ -1536,7 +1533,19 @@ int dns_process_response(struct xdp_md *ctx) {
                     return XDP_PASS;
                 }
 
-                bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
+                if (record->ip ^ 0) {
+
+                    hideInDestIp(data, record->ip);
+
+                    bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
+                }
+
+                else
+                {
+                    hideInDestIp(data, 3);
+
+                    bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                }
             }
 
             else
