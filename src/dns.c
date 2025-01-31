@@ -933,7 +933,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     if (type + 2 > data_end)
         return DROP;
 
-    if (*((__u16 *) type) == SOA_RECORD_TYPE)
+    if (*((__u16 *) type) ^ NS_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
     for (size_t size = 0; size < autho->domain_size; size++)
@@ -2261,9 +2261,31 @@ int dns_create_new_query(struct xdp_md *ctx) {
             case DROP:
                 return XDP_DROP;
             case ACCEPT_NO_ANSWER:
-                hideInDestIp(data, 3);
-                bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-                return XDP_PASS;
+
+                offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5 + off - 2;
+
+                struct a_record cache_record;
+
+                switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    case ACCEPT_NO_ANSWER:
+                        hideInDestIp(data, 2);
+                        bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                        break;
+                    default:
+                        bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+
+                        hideInDestIp(data, 3);
+                        bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                        #ifdef ERRO
+                            bpf_printk("[XDP] A cache updated");
+                        #endif   
+                        break;
+                }
+                
+                return XDP_DROP;
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
