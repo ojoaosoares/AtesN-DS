@@ -17,3 +17,5 @@ nohup*
 *.skel.h
 
 *.txt
+
+*.pcap
