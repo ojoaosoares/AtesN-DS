@@ -2087,7 +2087,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             break;
     }
 
-    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(udphdr) > data_end)
+    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
         return XDP_DROP;
 
     hideInDestIp(data, record.ip); hideInSourceIp(data, record.ttl); hideInDestPort(data, bpf_htons(pointer));
@@ -2240,7 +2240,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             bpf_printk("[XDP] off %d", off);
         #endif
 
-        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(udphdr) > data_end)
+        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
             return XDP_DROP;
 
         hideInDestIp(data, deep << 8 | pointer); hideInSourcePort(data, bpf_htons(off));
