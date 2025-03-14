@@ -68,10 +68,10 @@ void tutorial() {
     printf("AtesN-DS\n");
     printf("Usage: sudo ./atesnds [options]\n");
     printf("  -h\tShow a help message\n");
-    printf("  \t-a\t your ip address\n");
     printf("  \t-i\t interface where attach the dns\n");
+    printf("  \t-a\t ip address of your dev interface\n");
     printf("  \t-s\t the root dns server\n");
-    printf("  \t-m\t mac of the proxy\n");
+    printf("  \t-m\t mac of the gateway\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -88,135 +88,90 @@ int main(int argc, char *argv[]) {
 
     printf("loaded\n");
 
-    if (argc >= 2)
-    {
-    
-        if (argc == 7 || argc == 9)
-        {
-            int opt, index;
+    int opt, index = 0;
 
-            char mac_address[18], recursive[MAX_IP_STRING_LENGTH];
+    char mac_address[18], recursive[MAX_IP_STRING_LENGTH];
 
-            strcpy(recursive, standard_recursive_server);
+    strcpy(recursive, standard_recursive_server);
 
-            __u32 myip;
+    __u32 myip;
 
-            optind = 1;
+    optind = 1;
 
-            while ((opt = getopt(argc, argv, "a:i:m:s:")) != -1) {
-                switch (opt) {
-                case 'a':
-                    inet_pton(AF_INET, optarg, &skel->bss->serverip);
-                    break;
-                case 'i':
-                    index = if_nametoindex(optarg);
-                    break;
-                case 'm':
-                    strcpy(mac_address, optarg);                    
-                    break;
-                case 's':
-                    strcpy(recursive, optarg);
-                    break;
-                default:
-                    tutorial();
-                    return 1;
-                }
-            }
-
-            if (index == 0)
-            {
-                printf("interface where the program will be attached is requeried \n");
-                goto cleanup;
-            }
-
-            if(!validate_ipv4(recursive))
-            {
-                printf("Invalid recursive server\n");
-                goto cleanup;
-            }
-
-            inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
-
-            convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
-            
-            // int key = 0;
-            // int fd = bpf_program__fd(skel->progs.dns_check_cache);
-
-            // bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            int key = 1;
-            int fd = bpf_program__fd(skel->progs.dns_process_response);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 2;
-            fd = bpf_program__fd(skel->progs.dns_jump_query);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 3;
-            fd = bpf_program__fd(skel->progs.dns_create_new_query);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 4;
-            fd = bpf_program__fd(skel->progs.dns_back_to_last_query);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 5;
-            fd = bpf_program__fd(skel->progs.dns_save_ns_cache);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 6;
-            fd = bpf_program__fd(skel->progs.dns_select_server);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 7;
-            fd = bpf_program__fd(skel->progs.dns_check_subdomain);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-            key = 8;
-            fd = bpf_program__fd(skel->progs.dns_error);
-
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
-
-	        printf("%s\n", recursive);
-
-            if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
-            {
-                printf("it was not possiblle to attach the program \n");
-                goto cleanup;
-            }
-
-            printf("attached\n");
-
-            printf("make debug to see the progam running\n");
-            printf("CTRL + C to stop\n");
-
-
-            for ( ; ; )
-            {
-                sleep(1);
-            }
-
-            goto cleanup;
+    while ((opt = getopt(argc, argv, "a:i:m:s:h")) != -1) {
+        switch (opt) {
+        case 'a':
+            inet_pton(AF_INET, optarg, &skel->bss->serverip);
+            break;
+        case 'i':
+            index = if_nametoindex(optarg);
+            break;
+        case 'm':
+            strcpy(mac_address, optarg);                    
+            break;
+        case 's':
+            strcpy(recursive, optarg);
+            break;
+        case 'h':
+        default:
+            tutorial();
+            return 1;
         }
+    }
 
-        else if (!strcmp(argv[1], "-h") && argc == 2)
-            tutorial();
-
-        else
-            tutorial();
-
+    if (index == 0)
+    {
+        printf("interface where the program will be attached is requeried \n");
         goto cleanup;
     }
 
-    else
-        tutorial();
+    if(!validate_ipv4(recursive))
+    {
+        printf("Invalid recursive server\n");
+        goto cleanup;
+    }
+
+    inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
+
+    convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
+
+    struct {
+        int key;
+        struct bpf_program *prog;
+    } programs[] = {
+        {1, skel->progs.dns_process_response},
+        {2, skel->progs.dns_jump_query},
+        {3, skel->progs.dns_create_new_query},
+        {4, skel->progs.dns_back_to_last_query},
+        {5, skel->progs.dns_save_ns_cache},
+        {6, skel->progs.dns_select_server},
+        {7, skel->progs.dns_check_subdomain},
+        {8, skel->progs.dns_error}
+    };
+    
+    for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
+        int fd = bpf_program__fd(programs[i].prog);
+        bpf_map__update_elem(skel->maps.tail_programs, &programs[i].key, sizeof(programs[i].key), &fd, sizeof(fd), 0);
+    }
+
+    printf("%s\n", recursive);
+
+    if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
+    {
+        printf("it was not possiblle to attach the program \n");
+        goto cleanup;
+    }
+
+    printf("attached\n");
+
+    printf("make debug to see the progam running\n");
+    printf("CTRL + C to stop\n");
+
+
+    for ( ; ; )
+    {
+        sleep(1);
+    }
     
 cleanup: 
     dns__destroy(skel);
