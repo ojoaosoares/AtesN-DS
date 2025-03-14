@@ -62,7 +62,7 @@ __u32 recursive_server_ip;
 
 __u32 serverip;
 
-unsigned char proxy_mac[ETH_ALEN];
+unsigned char gateway_mac[ETH_ALEN];
 
 static __always_inline __u64 getTTl(__u64 timestamp) {
 
@@ -1154,26 +1154,15 @@ int dns_filter(struct xdp_md *ctx) {
             #ifdef DOMAIN
                 bpf_printk("[XDP] It's to Port 53");
             #endif  
-            bpf_tail_call(ctx, &tail_programs, DNS_CHECK_CACHE_PROG);
+            break;
         case FROM_DNS_PORT:
             #ifdef DOMAIN
                 bpf_printk("[XDP] It's from Port 53");
             #endif  
             bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
         default:
-            break;
+            return XDP_DROP;
     }
-
-    return XDP_PASS;
-}
-
-SEC("xdp")
-int dns_check_cache(struct xdp_md *ctx) {
-
-    void *data_end = (void*) (long) ctx->data_end;
-    void *data = (void*) (long) ctx->data;
-
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr); // Desclocamento d e bits para verificar as informações do pacote
 
     struct dns_query dnsquery;
 
@@ -1253,7 +1242,7 @@ int dns_check_cache(struct xdp_md *ctx) {
 
                     offset_h = 0;
 
-                    switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                    switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -1307,7 +1296,8 @@ int dns_check_cache(struct xdp_md *ctx) {
 
             struct query_owner owner;
 
-            getSourceMac(data, &owner); owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data);
+            // getSourceMac(data, &owner); 
+            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data);
 
             owner.rec = 0;
 
@@ -1358,7 +1348,6 @@ int dns_check_cache(struct xdp_md *ctx) {
 
     return XDP_PASS;
 }
-
 
 SEC("xdp")
 int dns_process_response(struct xdp_md *ctx) {
@@ -1590,7 +1579,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -1704,7 +1693,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
             offset_h = 0;
 
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
             {
                 case DROP:
                     return XDP_DROP;
@@ -1802,7 +1791,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -1889,7 +1878,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -2040,7 +2029,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     offset_h = 0;
 
-    switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+    switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
     {
         case DROP:
             return XDP_DROP;
@@ -2168,7 +2157,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -2486,7 +2475,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 offset_h = 0;      
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -2598,7 +2587,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 offset_h = 0;      
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
                 {
                     case DROP:
                         return XDP_DROP;
@@ -2795,7 +2784,7 @@ int dns_select_server(struct xdp_md *ctx) {
 
     offset_h = 0;
 
-    switch (formatNetworkAcessLayer(data, &offset_h, data_end, proxy_mac))
+    switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
     {
         case DROP:
             return XDP_DROP;
@@ -2930,7 +2919,7 @@ int dns_error(struct xdp_md *ctx) {
 
             offset_h = 0;
 
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end, powner->mac_address))
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end, gateway_mac))
             {
                 case DROP:
                     return XDP_DROP;

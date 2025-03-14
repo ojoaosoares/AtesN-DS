@@ -61,7 +61,7 @@ make clean
 
 After compiling, run the program using:
 ```bash
-./bin/atesn_ds [-h] [-a your_ip] [-i bind_interface] [-s root_server_ip] [-m proxy_mac]
+./bin/atesn_ds [-h] [-a your_ip] [-i bind_interface] [-s root_server_ip] [-m gateway_mac]
 ```
 
 where
@@ -69,5 +69,5 @@ where
 - **-m [your_ip]**: The ip address the server will run
 - **-i [bind_interface]**: The interface where the program will be attached in the XDP hook
 - **-s [root_server_ip]**: The ip address of a root dns server
-- **-m [proxy_mac]**: The mac address of the proxy
+- **-m [gateway_mac]**: The mac address of the proxy
 - **-h**: Outputs usage

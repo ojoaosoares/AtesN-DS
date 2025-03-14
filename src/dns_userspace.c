@@ -137,15 +137,15 @@ int main(int argc, char *argv[]) {
 
             inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
-            convert_mac_to_bytes(mac_address, skel->bss->proxy_mac);
+            convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
             
-            int key = 0;
-            int fd = bpf_program__fd(skel->progs.dns_check_cache);
+            // int key = 0;
+            // int fd = bpf_program__fd(skel->progs.dns_check_cache);
 
-            bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
+            // bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
-            key = 1;
-            fd = bpf_program__fd(skel->progs.dns_process_response);
+            int key = 1;
+            int fd = bpf_program__fd(skel->progs.dns_process_response);
 
             bpf_map__update_elem(skel->maps.tail_programs, &key, sizeof(key), &fd, sizeof(int), 0);
 
