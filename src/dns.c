@@ -1144,25 +1144,32 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    switch (isPort53(data, &offset_h, data_end))
+    __u8 ret = isPort53(data, &offset_h, data_end);
+    switch (ret)
     {
         case DROP:
             return XDP_DROP;
         case PASS:
-            return XDP_PASS;
-        case TO_DNS_PORT:
+            return XDP_PASS;        
+        default:
             #ifdef DOMAIN
-                bpf_printk("[XDP] It's to Port 53");
+                bpf_printk("[XDP] It's DNS");
             #endif  
             break;
-        case FROM_DNS_PORT:
-            #ifdef DOMAIN
-                bpf_printk("[XDP] It's from Port 53");
-            #endif  
-            bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
-        default:
-            return XDP_DROP;
     }
+
+    if (ret == FROM_DNS_PORT)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[XDP] It's from Port 53");
+        #endif  
+
+        bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
+    }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] It's to Port 53");
+    #endif  
 
     struct dns_query dnsquery;
 
