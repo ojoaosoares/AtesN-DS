@@ -5,7 +5,6 @@
 #include <linux/if_vlan.h> // Essential to verify the ip type
 #include <linux/if_ether.h> // Essential for ethernet headers
 #include <linux/if_packet.h>
-#include <linux/bpf.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
@@ -59,11 +58,9 @@ struct {
 
 } cache_nsrecords SEC(".maps");
 
-__u32 recursive_server_ip;
+__u32 recursive_server_ip SEC(".bss"), serverip SEC(".bss");
 
-__u32 serverip;
-
-unsigned char gateway_mac[ETH_ALEN];
+unsigned char gateway_mac[ETH_ALEN] SEC(".bss");
 
 static __always_inline __u64 getTTl(__u64 timestamp) {
 
@@ -1399,18 +1396,7 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
-    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-    {
-        #ifdef ERROR
-            bpf_printk("[XDP] Curr queries map error process");
-            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-            bpf_printk("[XDP] ZERO");
-        #endif  
-
-        return XDP_PASS;
-    }
-
-    __u8 back_to_last = 0, additional = 0, new_query = 0, recursion_limit;
+    __u8 back_to_last = 0, recursion_limit = 0;
 
     struct query_owner *powner = NULL; struct hop_query *lastdomain = NULL;
 
@@ -1451,10 +1437,23 @@ int dns_process_response(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
+    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+    {
+        #ifdef ERROR
+            bpf_printk("[XDP] Curr queries map error process");
+            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+            bpf_printk("[XDP] ZERO");
+        #endif  
+
+        return XDP_PASS;
+    }
+
     if (query_response == RESPONSE_RETURN)
     {
         if (powner)
         {
+            bpf_map_delete_elem(&curr_queries, &curr);
+
             bpf_map_delete_elem(&recursive_queries, &dnsquery);
 
             offset_h = 0;
@@ -1515,7 +1514,15 @@ int dns_process_response(struct xdp_md *ctx) {
         }
 
         else if (lastdomain) 
-            back_to_last = 1;
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] A last response came");
+            #endif
+
+            bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
+
+            return XDP_PASS;
+        }
 
         else return XDP_PASS;        
     }
@@ -1542,6 +1549,10 @@ int dns_process_response(struct xdp_md *ctx) {
             
             if (powner)
             {
+                bpf_map_delete_elem(&curr_queries, &curr);
+
+                bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
                 __s16 newsize = (data + offset_h - data_end);
 
                 if (record->ip ^ 0)
@@ -1617,7 +1628,13 @@ int dns_process_response(struct xdp_md *ctx) {
     
                     hideInDestIp(data, record->ip);
     
-                    back_to_last = 1;
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] A last response came");
+                    #endif
+
+                    bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
+
+                    return XDP_PASS;
                 }
     
                 else
@@ -1636,15 +1653,6 @@ int dns_process_response(struct xdp_md *ctx) {
 
         else
             bpf_map_delete_elem(&cache_arecords, &dnsquery.query.name);
-    }
-    
-    if (back_to_last)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] A last response came");
-        #endif
-
-        bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
     }
 
     record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name);
@@ -1740,6 +1748,8 @@ int dns_process_response(struct xdp_md *ctx) {
         hideInDestIp (data, dnsquery.query.domain_size);
 
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
+        
+        return XDP_PASS;
     }
 
     else if (query_response == NAMESERVERS)
@@ -1750,6 +1760,8 @@ int dns_process_response(struct xdp_md *ctx) {
         hideInDestIp(data, lastdomain->trash);
 
         bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
+
+        return XDP_PASS;
     }
 
     else if (query_response != RESPONSE_RETURN)
@@ -1778,28 +1790,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
-        }
-
-        // content += 2;
-
-        // if (data + offset_h + 4 <= data_end)
-        //     if (bpf_ntohs(*content) != NS_RECORD_TYPE)
-        //     {
-        //         if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-        //         {
-        //             #ifdef ERROR
-        //                 bpf_printk("[XDP] Curr queries map error");
-        //                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-        //                 bpf_printk("[XDP] ZERO");
-        //             #endif  
-
-        //             return XDP_PASS;
-        //         }
-                
-        //         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-        //     }
-                
-        
+        }      
     }
 
     return XDP_PASS;
