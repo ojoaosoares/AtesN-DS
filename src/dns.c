@@ -1160,6 +1160,7 @@ int dns_filter(struct xdp_md *ctx) {
                 bpf_printk("[XDP] It's from Port 53");
             #endif  
             bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
+            return XDP_DROP;
         
     }
 
@@ -1421,7 +1422,14 @@ int dns_process_response(struct xdp_md *ctx) {
                 recursion_limit = 1;
         }
 
-        else return XDP_PASS;
+        else
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It belongs to the OS");
+            #endif
+
+            return XDP_PASS;
+        }
     }
 
     if (recursion_limit)
