@@ -175,7 +175,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
     return PASS;
 }
 
-static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void *data_end, struct id *id)
+static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void *data_end, __u16 *id)
 {
     struct dns_header *header;
     header = data + *offset;
@@ -200,7 +200,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
         return PASS;
     }
 
-    id->id = header->id;
+    id = header->id;
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Flags %d %d", bpf_ntohs(header->flags), header->flags);
@@ -1165,7 +1165,7 @@ int dns_filter(struct xdp_md *ctx) {
 
     struct dns_query dnsquery;
 
-    switch (isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id))
+    switch (isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id.id))
     {
         case DROP:
             return XDP_DROP;
@@ -1358,7 +1358,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
     struct dns_query dnsquery; struct curr_query curr;
 
-    __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id);
+    __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id.id);
 
     #ifdef DOMAIN
         bpf_printk("[XDP] response %d", query_response);
