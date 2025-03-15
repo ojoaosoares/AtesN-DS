@@ -59,15 +59,15 @@
 
 #define MINIMUM_TTL 30
 
-#define DNS_CHECK_CACHE_PROG 0
-#define DNS_PROCESS_RESPONSE_PROG 1
-#define DNS_JUMP_QUERY_PROG 2
-#define DNS_CREATE_NEW_QUERY_PROG 3
-#define DNS_BACK_TO_LAST_QUERY 4
-#define DNS_SAVE_NS_CACHE_PROG 5
-#define DNS_SELECT_SERVER_PROG 6
-#define DNS_CHECK_SUBDOMAIN_PROG 7
-#define DNS_ERROR_PROG 8
+#define DNS_PROCESS_RESPONSE_PROG 0
+#define DNS_JUMP_QUERY_PROG 1
+#define DNS_CREATE_NEW_QUERY_PROG 2
+#define DNS_BACK_TO_LAST_QUERY 3
+#define DNS_SAVE_NS_CACHE_PROG 4
+#define DNS_SELECT_SERVER_PROG 5
+#define DNS_CHECK_SUBDOMAIN_PROG 6
+#define DNS_ERROR_PROG 7
+
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))

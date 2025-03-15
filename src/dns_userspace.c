@@ -114,14 +114,14 @@ int main(int argc, char *argv[]) {
         int key;
         struct bpf_program *prog;
     } programs[] = {
-        {1, skel->progs.dns_process_response},
-        {2, skel->progs.dns_jump_query},
-        {3, skel->progs.dns_create_new_query},
-        {4, skel->progs.dns_back_to_last_query},
-        {5, skel->progs.dns_save_ns_cache},
-        {6, skel->progs.dns_select_server},
-        {7, skel->progs.dns_check_subdomain},
-        {8, skel->progs.dns_error}
+        {0, skel->progs.dns_process_response},
+        {1, skel->progs.dns_jump_query},
+        {2, skel->progs.dns_create_new_query},
+        {3, skel->progs.dns_back_to_last_query},
+        {4, skel->progs.dns_save_ns_cache},
+        {5, skel->progs.dns_select_server},
+        {6, skel->progs.dns_check_subdomain},
+        {7, skel->progs.dns_error}
     };
     
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
