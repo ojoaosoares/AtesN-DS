@@ -1649,7 +1649,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                     bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
 
-                    return XDP_PASS;
+                    return XDP_DROP;
                 }
     
                 else
@@ -1663,7 +1663,7 @@ int dns_process_response(struct xdp_md *ctx) {
     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
     
-                    return XDP_PASS;
+                    return XDP_DROP;
                 }
             }
         }
@@ -1758,31 +1758,28 @@ int dns_process_response(struct xdp_md *ctx) {
 
     if (query_response == QUERY_ADDITIONAL_RETURN)
     {
-
-        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
+        if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
             return XDP_DROP;
-
-            if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
-            return XDP_DROP;
-
 
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
-        return XDP_PASS;
+        return XDP_DROP;
     }
 
     else if (query_response == QUERY_NAMESERVERS_RETURN)
     {
-        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-            return XDP_DROP;
 
-        if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
-            return XDP_DROP;
+        if (powner)
+            if (hideInDestIp(data, data_end, powner->rec) == DROP)
+                return XDP_DROP;    
 
+        if (lastdomain)
+            if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
+                return XDP_DROP;
 
         bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
 
-        return XDP_PASS;
+        return XDP_DROP;
     }
 
     else if (query_response != RESPONSE_RETURN)
