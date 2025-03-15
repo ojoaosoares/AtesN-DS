@@ -58,9 +58,9 @@ struct {
 
 } cache_nsrecords SEC(".maps");
 
-__u32 recursive_server_ip SEC(".bss"), serverip SEC(".bss");
+__u32 recursive_server_ip;
 
-unsigned char gateway_mac[ETH_ALEN] SEC(".bss");
+__u32 serverip;
 
 static __always_inline __u64 getTTl(__u64 timestamp) {
 
@@ -1144,32 +1144,24 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    __u8 ret = isPort53(data, &offset_h, data_end);
-    switch (ret)
+    switch (isPort53(data, &offset_h, data_end))
     {
         case DROP:
             return XDP_DROP;
         case PASS:
-            return XDP_PASS;        
-        default:
+            return XDP_PASS;
+        case TO_DNS_PORT:
             #ifdef DOMAIN
-                bpf_printk("[XDP] It's DNS");
+                bpf_printk("[XDP] It's to Port 53");
             #endif  
             break;
+        case FROM_DNS_PORT:
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It's from Port 53");
+            #endif  
+            bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
+        
     }
-
-    if (ret == FROM_DNS_PORT)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] It's from Port 53");
-        #endif  
-
-        bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
-    }
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] It's to Port 53");
-    #endif  
 
     struct dns_query dnsquery;
 
