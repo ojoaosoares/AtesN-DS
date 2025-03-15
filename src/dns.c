@@ -200,7 +200,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
         return PASS;
     }
 
-    id = header->id;
+    *id = header->id;
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Flags %d %d", bpf_ntohs(header->flags), header->flags);
