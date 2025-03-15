@@ -1746,7 +1746,7 @@ int dns_process_response(struct xdp_md *ctx) {
             bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
     }
 
-    if (query_response == ADDITIONAL)
+    if (query_response == QUERY_ADDITIONAL_RETURN)
     {
 
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
@@ -1759,7 +1759,7 @@ int dns_process_response(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
-    else if (query_response == NAMESERVERS)
+    else if (query_response == QUERY_NAMESERVERS_RETURN)
     {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
             return XDP_DROP;
