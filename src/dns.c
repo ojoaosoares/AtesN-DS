@@ -1075,11 +1075,16 @@ static __always_inline void hideInSourceIp(void *data, __u32 hidden)
     ipv4->saddr = hidden;
 }
 
-static __always_inline void hideInDestIp(void *data, __u32 hidden)
+static __always_inline __u8 hideInDestIp(void *data, void *data_end, __u32 hidden)
 {   
     struct iphdr *ipv4 = data + sizeof(struct ethhdr);
 
+    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
+        return DROP;
+
     ipv4->daddr = hidden;
+
+    return ACCEPT;
 }
 
 static __always_inline __u32 getDestIp(void *data)
@@ -1310,7 +1315,8 @@ int dns_filter(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
-            hideInDestIp(data, dnsquery.query.domain_size);
+            if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
+                return XDP_DROP;
 
             __s16 newsize = (data + offset_h - data_end) + MAX_DNS_NAME_LENGTH;
 
@@ -1437,7 +1443,8 @@ int dns_process_response(struct xdp_md *ctx) {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
             return XDP_DROP;
         
-        hideInDestIp(data, 2);
+        if (hideInDestIp(data, data_end, 2) == DROP)
+            return XDP_DROP;
 
         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
@@ -1633,7 +1640,8 @@ int dns_process_response(struct xdp_md *ctx) {
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                         return XDP_DROP;
     
-                    hideInDestIp(data, record->ip);
+                    if (hideInDestIp(data, data_end, record->ip) == DROP)
+                        return XDP_DROP;
     
                     #ifdef DOMAIN
                         bpf_printk("[XDP] A last response came");
@@ -1649,7 +1657,9 @@ int dns_process_response(struct xdp_md *ctx) {
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                         return XDP_DROP;
                     
-                    hideInDestIp(data, 2);
+                    if (hideInDestIp(data, data_end, 2) == DROP)
+                        return XDP_DROP;
+    
     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
     
@@ -1752,7 +1762,9 @@ int dns_process_response(struct xdp_md *ctx) {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
             return XDP_DROP;
 
-        hideInDestIp (data, dnsquery.query.domain_size);
+            if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
+            return XDP_DROP;
+
 
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
@@ -1764,7 +1776,9 @@ int dns_process_response(struct xdp_md *ctx) {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
             return XDP_DROP;
 
-        hideInDestIp(data, lastdomain->trash);
+        if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
+            return XDP_DROP;
+
 
         bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
 
@@ -1793,7 +1807,9 @@ int dns_process_response(struct xdp_md *ctx) {
                 if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                     return XDP_DROP;
 
-                hideInDestIp(data, 2);
+                if (hideInDestIp(data, data_end, 2) == DROP)
+                    return XDP_DROP;
+
                 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
@@ -1838,7 +1854,9 @@ int dns_jump_query(struct xdp_md *ctx) {
             if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                 return XDP_DROP;
 
-            hideInDestIp(data, 5);
+            if (hideInDestIp(data, data_end, 5) == DROP)
+                return XDP_DROP;
+
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
             return XDP_ABORTED;
@@ -1899,7 +1917,11 @@ int dns_jump_query(struct xdp_md *ctx) {
     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
         return XDP_DROP;
 
-    hideInDestIp(data, record.ip); hideInSourceIp(data, record.ttl); hideInDestPort(data, bpf_htons(pointer));
+    if (hideInDestIp(data, data_end, record.ip) == DROP)
+        return XDP_DROP;
+
+    
+    hideInSourceIp(data, record.ttl); hideInDestPort(data, bpf_htons(pointer));
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Hop query created");
@@ -2052,7 +2074,10 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
             return XDP_DROP;
 
-        hideInDestIp(data, deep << 8 | pointer); hideInSourcePort(data, bpf_htons(off));
+        if (hideInDestIp(data, data_end, deep << 8 | pointer) == DROP)
+            return XDP_DROP;
+        
+        hideInSourcePort(data, bpf_htons(off));
 
         bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
     }
@@ -2113,19 +2138,29 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     case ACCEPT_NO_ANSWER:
                         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                             return XDP_DROP;
-                        hideInDestIp(data, 2);
+
+                        if (hideInDestIp(data, data_end, 2) == DROP)
+                            return XDP_DROP;
+
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+
+                        return XDP_DROP;
+
                         break;
                     default:
                         bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
 
                         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                             return XDP_DROP;
-                        hideInDestIp(data, 3);
+
+                        if (hideInDestIp(data, data_end, 3) == DROP)
+                            return XDP_DROP;
+
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                         #ifdef ERRO
                             bpf_printk("[XDP] A cache updated");
                         #endif   
+                        return XDP_DROP;
                         break;
                 }
                 
@@ -2165,7 +2200,8 @@ int dns_create_new_query(struct xdp_md *ctx) {
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
             return XDP_DROP;
 
-        hideInDestIp(data, dnsquery.query.domain_size);
+        if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
+            return XDP_DROP;
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end) + MAX_DNS_NAME_LENGTH;
 
@@ -2273,7 +2309,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                          return XDP_DROP;
-                    hideInDestIp(data, 3);
+                    
+                    if (hideInDestIp(data, data_end, 3) == DROP)
+                        return XDP_DROP;
                     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                 }
@@ -2361,7 +2399,10 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
                     return XDP_DROP;
 
-                hideInDestIp(data, cache_record.ip); hideInSourceIp(data, cache_record.ttl); hideInDestPort(data, bpf_htons(pointer));
+                if (hideInDestIp(data, data_end, cache_record.ip) == DROP)
+                    return XDP_DROP;
+
+                hideInSourceIp(data, cache_record.ttl); hideInDestPort(data, bpf_htons(pointer));
 
                 offset_h += sizeof(struct dns_header);
 
@@ -2391,7 +2432,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                     return XDP_DROP;
 
-                hideInDestIp(data, 3);
+                if (hideInDestIp(data, data_end, 3) == DROP)
+                    return XDP_DROP;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
