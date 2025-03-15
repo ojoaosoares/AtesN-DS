@@ -14,25 +14,6 @@
 
 static const char *standard_recursive_server = "8.8.8.8";
 
-void convert_mac_to_bytes(const char *mac_str, unsigned char mac_bytes[6]) {
-
-    char hex[2];
-    hex[0] = mac_str[0];
-    hex[1] = mac_str[1];
-
-    char *end;
-
-    mac_bytes[0] = strtol(hex, &end, 16);
-
-
-    for( uint8_t i = 1; i < 6; i++ )
-    {
-        hex[0] = mac_str[2*i + i];
-        hex[1] = mac_str[2*i + i + 1];
-        mac_bytes[i] = strtol(hex, &end, 16);
-    }
-}
-
 int validate_ipv4(const char *ip_str) {
     regex_t regex;
     int reti;
@@ -71,7 +52,6 @@ void tutorial() {
     printf("  \t-i\t interface where attach the dns\n");
     printf("  \t-a\t ip address of your dev interface\n");
     printf("  \t-s\t the root dns server\n");
-    printf("  \t-m\t mac of the gateway\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -90,7 +70,7 @@ int main(int argc, char *argv[]) {
 
     int opt, index = 0;
 
-    char mac_address[18], recursive[MAX_IP_STRING_LENGTH];
+    char recursive[MAX_IP_STRING_LENGTH];
 
     strcpy(recursive, standard_recursive_server);
 
@@ -98,16 +78,13 @@ int main(int argc, char *argv[]) {
 
     optind = 1;
 
-    while ((opt = getopt(argc, argv, "a:i:m:s:h")) != -1) {
+    while ((opt = getopt(argc, argv, "a:i:s:h")) != -1) {
         switch (opt) {
         case 'a':
             inet_pton(AF_INET, optarg, &skel->bss->serverip);
             break;
         case 'i':
             index = if_nametoindex(optarg);
-            break;
-        case 'm':
-            strcpy(mac_address, optarg);                    
             break;
         case 's':
             strcpy(recursive, optarg);
@@ -132,8 +109,6 @@ int main(int argc, char *argv[]) {
     }
 
     inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
-
-    convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
 
     struct {
         int key;
