@@ -1494,23 +1494,10 @@ int dns_process_response(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
-    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-    {
-        #ifdef ERROR
-            bpf_printk("[XDP] Curr queries map error process");
-            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-            bpf_printk("[XDP] ZERO");
-        #endif  
-
-        return XDP_PASS;
-    }
-
     if (query_response == RESPONSE_RETURN)
     {
         if (powner)
         {
-            bpf_map_delete_elem(&curr_queries, &curr);
-
             bpf_map_delete_elem(&recursive_queries, &dnsquery);
 
             offset_h = 0;
@@ -1580,6 +1567,17 @@ int dns_process_response(struct xdp_md *ctx) {
 
         else if (lastdomain) 
         {
+            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+            {
+                #ifdef ERROR
+                    bpf_printk("[XDP] Curr queries map error process");
+                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                    bpf_printk("[XDP] ZERO");
+                #endif  
+
+                return XDP_PASS;
+            }
+            
             #ifdef DOMAIN
                 bpf_printk("[XDP] A last response came");
             #endif
@@ -1614,8 +1612,6 @@ int dns_process_response(struct xdp_md *ctx) {
             
             if (powner)
             {
-                bpf_map_delete_elem(&curr_queries, &curr);
-
                 bpf_map_delete_elem(&recursive_queries, &dnsquery);
 
                 __s16 newsize = (data + offset_h - data_end);
@@ -1686,6 +1682,17 @@ int dns_process_response(struct xdp_md *ctx) {
 
             else if (lastdomain)
             {
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                {
+                    #ifdef ERROR
+                        bpf_printk("[XDP] Curr queries map error process");
+                        bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                        bpf_printk("[XDP] ZERO");
+                    #endif  
+
+                    return XDP_PASS;
+                }
+                
                 if (record->ip ^ 0) {
 
                     if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
@@ -1812,6 +1819,17 @@ int dns_process_response(struct xdp_md *ctx) {
         if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
             return XDP_DROP;
 
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        {
+            #ifdef ERROR
+                bpf_printk("[XDP] Curr queries map error process");
+                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                bpf_printk("[XDP] ZERO");
+            #endif  
+    
+            return XDP_PASS;
+        }
+
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
         return XDP_DROP;
@@ -1827,6 +1845,17 @@ int dns_process_response(struct xdp_md *ctx) {
         if (lastdomain)
             if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
                 return XDP_DROP;
+
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        {
+            #ifdef ERROR
+                bpf_printk("[XDP] Curr queries map error process");
+                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                bpf_printk("[XDP] ZERO");
+            #endif  
+    
+            return XDP_PASS;
+        }
 
         bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
 
@@ -1858,6 +1887,16 @@ int dns_process_response(struct xdp_md *ctx) {
                 if (hideInDestIp(data, data_end, 2) == DROP)
                     return XDP_DROP;
 
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                {
+                    #ifdef ERROR
+                        bpf_printk("[XDP] Curr queries map error process");
+                        bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                        bpf_printk("[XDP] ZERO");
+                    #endif  
+            
+                    return XDP_PASS;
+                }
                 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
             }
@@ -2226,9 +2265,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                             #ifdef ERRO
                                 bpf_printk("[XDP] A cache updated");
                             #endif   
-
                         }
-
 
                         if (hideInDestIp(data, data_end, 3) == DROP)
                             return XDP_DROP;
@@ -2426,7 +2463,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_map_delete_elem(&new_queries, query);
 
                 __u8 pointer = lastdomain->pointer, deep = lastdomain->trash;
-
                 
                 #ifdef DEEP
                     bpf_printk("last %d", deep);
@@ -2458,9 +2494,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
                         #endif
-                    }
-
-                    
+                    }                    
                 }
                 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -2648,10 +2682,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
+                        decrementID(data);
                         break;
                 }
-
-                decrementID(data);
 
                 switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
                 {
