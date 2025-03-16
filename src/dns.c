@@ -456,6 +456,30 @@ static __always_inline __u8 swapTransportLayer(void *data, __u64 *offset, void *
     return ACCEPT;    
 }
 
+static __always_inline __u8 setDNSHeader(void *data, __u64 *offset, void *data_end) {
+
+    struct dns_header *header = data + *offset;
+
+    *offset += sizeof(struct dns_header);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DEBUG
+            bpf_printk("[DROP] No DNS answer");
+        #endif
+
+        return DROP;
+    }
+
+    __u16 flags = bpf_ntohs(header->flags);
+    
+    flags |= 0x0080;
+
+    header->flags = bpf_htons(flags);
+
+    return ACCEPT;
+}
+
 static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *data_end, __u32 ip, __u32 ttl, __u8 status, __u16 domain_size) {
 
     struct dns_header *header = data + *offset;
@@ -1517,7 +1541,15 @@ int dns_process_response(struct xdp_md *ctx) {
                     break;
             }
 
-            offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
+            switch(setDNSHeader(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            offset_h += dnsquery.query.domain_size + 5;
             
             struct a_record cache_record;
 
