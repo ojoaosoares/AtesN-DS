@@ -714,7 +714,6 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
     for (size_t i = 0; i < 10 && (index < MAX_DNS_NAME_LENGTH) && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
     {
-
         if(domain->name[index] == 0)
             return ACCEPT;
 
@@ -754,9 +753,6 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
             }
 
         }
-        
-        if (domain->name[index] > MAX_DNS_NAME_LENGTH)
-            return ACCEPT;
 
         index += domain->name[index] + 1;
     }
@@ -1182,10 +1178,13 @@ int dns_filter(struct xdp_md *ctx) {
             #endif  
             break;
         case FROM_DNS_PORT:
+        
             #ifdef DOMAIN
                 bpf_printk("[XDP] It's from Port 53");
             #endif  
+
             bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
+
             return XDP_DROP;
         
     }
@@ -1229,7 +1228,10 @@ int dns_filter(struct xdp_md *ctx) {
 
             struct a_record *arecord;
 
-            arecord = bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
+            arecord = NULL;
+
+            if (dnsquery.query.domain_size <= DNS_LIMIT)
+                bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
 
             if (arecord)
             {   
@@ -1482,16 +1484,13 @@ int dns_process_response(struct xdp_md *ctx) {
     }
 
     if (recursion_limit)
-    {
-        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-            return XDP_DROP;
-        
+    {    
         if (hideInDestIp(data, data_end, 2) == DROP)
             return XDP_DROP;
 
         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
-        return XDP_PASS;
+        return XDP_DROP;
     }
 
     if (query_response == RESPONSE_RETURN)
@@ -1551,10 +1550,15 @@ int dns_process_response(struct xdp_md *ctx) {
                     #endif 
                     break;
                 default:
-                    bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] A cache updated");
-                    #endif  
+                    if (dnsquery.query.domain_size <= DNS_LIMIT)
+                    {
+                        bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
+
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] A cache updated");
+                        #endif  
+                    }
+
                     break;
             }   
 
@@ -1584,7 +1588,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
             bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
 
-            return XDP_PASS;
+            return XDP_DROP;
         }
 
         else return XDP_PASS;        
@@ -1899,6 +1903,8 @@ int dns_process_response(struct xdp_md *ctx) {
                 }
                 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+
+                return XDP_DROP;
             }
         }      
     }
@@ -1946,7 +1952,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
             bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
-            return XDP_ABORTED;
+            return XDP_DROP;
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Additional IP: %u", record.ip);
@@ -2190,6 +2196,8 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         hideInSourcePort(data, bpf_htons(off));
 
         bpf_tail_call(ctx, &tail_programs, DNS_CREATE_NEW_QUERY_PROG);
+        
+        return XDP_DROP;
     }
 
     return XDP_PASS;
