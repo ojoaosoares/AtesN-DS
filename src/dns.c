@@ -20,7 +20,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 2000);
+        __uint(max_entries, 2000000);
         __uint(key_size, sizeof(struct curr_query));
         __uint(value_size, sizeof(struct dns_query));
 
@@ -28,7 +28,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 2000);
+        __uint(max_entries, 2000000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct query_owner));
 
@@ -36,7 +36,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 7000);
+        __uint(max_entries, 7000000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct hop_query));
 
@@ -44,7 +44,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 4000);
+        __uint(max_entries, 400000);
         __uint(key_size, sizeof(char[DNS_LIMIT]));
         __uint(value_size, sizeof(struct a_record));
 
@@ -52,7 +52,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 2500);
+        __uint(max_entries, 250000);
         __uint(key_size, sizeof(char[DNS_LIMIT]));
         __uint(value_size, sizeof(struct a_record));
 
