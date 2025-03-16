@@ -1231,7 +1231,7 @@ int dns_filter(struct xdp_md *ctx) {
             arecord = NULL;
 
             if (dnsquery.query.domain_size <= DNS_LIMIT)
-                bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
+                arecord = bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
 
             if (arecord)
             {   
