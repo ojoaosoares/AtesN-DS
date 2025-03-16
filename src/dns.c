@@ -474,6 +474,7 @@ static __always_inline __u8 setDNSHeader(void *data, __u64 *offset, void *data_e
     __u16 flags = bpf_ntohs(header->flags);
     
     flags |= 0x0080;
+    flags &= ~0x0400; 
 
     header->flags = bpf_htons(flags);
 
