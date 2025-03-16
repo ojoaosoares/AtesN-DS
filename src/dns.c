@@ -700,7 +700,7 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
         if (nsrecord)
         {
             #ifdef DOMAIN
-                bpf_printk("[XDP] Subdomain: %s", domain->name[index]);
+                bpf_printk("[XDP] Subdomain: %s", &domain->name[index]);
             #endif
 
             #ifdef DOMAIN
