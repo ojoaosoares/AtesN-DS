@@ -2431,11 +2431,14 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #endif  
                         break;
                 }
-
-                offset_h += sizeof(struct iphdr);
-
-                if (data + offset_h > data_end)
-                    return XDP_DROP;    
+            
+                switch(returnToNetwork(data, &offset_h, data_end, cache_record.ip))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        break;
+                }
 
                 switch (swapTransportLayer(data, &offset_h, data_end))
                 {
@@ -2445,20 +2448,14 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         break;
                 }
 
-                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
-                    return XDP_DROP;
-
-                if (hideInDestIp(data, data_end, cache_record.ip) == DROP)
-                    return XDP_DROP;
-
-                hideInSourceIp(data, cache_record.ttl); hideInDestPort(data, bpf_htons(pointer));
-
-                offset_h += sizeof(struct dns_header);
-
-                if (data + offset_h > data_end)
-                    return XDP_PASS; 
-
-                decrementID(data);
+                switch(createDnsQuery(data, &offset_h, data_end))
+                {   
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        decrementID(data);
+                        break;
+                }
 
                 switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
                 {
@@ -2468,11 +2465,27 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         break;
                 }
 
+                if (lastdomain->query.domain_size - pointer <= DNS_LIMIT &&  pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
+                {
+                    if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, 0) < 0)
+                    {
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] NS Cache map error");
+                        #endif
+
+                        return XDP_PASS;
+                    }
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] NS Cache Updated");
+                    #endif
+                }
+
                 #ifdef DOMAIN
                     bpf_printk("[XDP] New back query created");
                 #endif
 
-                bpf_tail_call(ctx, &tail_programs, DNS_SAVE_NS_CACHE_PROG);
+                return XDP_TX;
             }
 
             else if (ip == 0)
