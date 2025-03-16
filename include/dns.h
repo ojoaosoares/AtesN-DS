@@ -44,7 +44,7 @@
 #define DNS_POINTER_OFFSET 0xc00c
 
 #define MAX_DNS_NAME_LENGTH 254
-#define DNS_LIMIT 127
+#define DNS_LIMIT 126
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
