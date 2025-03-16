@@ -62,6 +62,8 @@ __u32 recursive_server_ip;
 
 __u32 serverip;
 
+unsigned char gateway_mac[ETH_ALEN];
+
 static __always_inline __u64 getTTl(__u64 timestamp) {
 
     __u64 now = bpf_ktime_get_ns() / 1000000000 + 1;
@@ -372,10 +374,8 @@ static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, v
         return DROP;
     }
 
-    char temp[ETH_ALEN];
-    __builtin_memcpy(temp, eth->h_source, ETH_ALEN);
 	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-	__builtin_memcpy(eth->h_dest, temp, ETH_ALEN);
+	__builtin_memcpy(eth->h_dest, gateway_mac, ETH_ALEN);
 
     return ACCEPT;
 }
