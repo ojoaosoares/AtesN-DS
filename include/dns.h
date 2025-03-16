@@ -44,6 +44,7 @@
 #define DNS_POINTER_OFFSET 0xc00c
 
 #define MAX_DNS_NAME_LENGTH 254
+#define DNS_LIMIT 100
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
@@ -64,9 +65,8 @@
 #define DNS_CREATE_NEW_QUERY_PROG 2
 #define DNS_BACK_TO_LAST_QUERY 3
 #define DNS_SAVE_NS_CACHE_PROG 4
-#define DNS_SELECT_SERVER_PROG 5
-#define DNS_CHECK_SUBDOMAIN_PROG 6
-#define DNS_ERROR_PROG 7
+#define DNS_CHECK_SUBDOMAIN_PROG 5
+#define DNS_ERROR_PROG 6
 
 
 #ifndef memset
@@ -128,12 +128,6 @@ struct a_record {
     __u64 timestamp;
     __u8 status;
 };
-
-// struct ns_record {
-//     uint32_t ttl;
-//     char name[MAX_DNS_NAME_LENGTH];
-// };
-
 
 struct dns_domain {
     __u16 record_type;

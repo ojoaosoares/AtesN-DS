@@ -13,7 +13,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 8);                
+        __uint(max_entries, 7);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -45,7 +45,7 @@ struct {
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 4000);
-        __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
+        __uint(key_size, sizeof(char[DNS_LIMIT]));
         __uint(value_size, sizeof(struct a_record));
 
 } cache_arecords SEC(".maps");
@@ -53,7 +53,7 @@ struct {
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 2500);
-        __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
+        __uint(key_size, sizeof(char[DNS_LIMIT]));
         __uint(value_size, sizeof(struct a_record));
 
 } cache_nsrecords SEC(".maps");
@@ -258,6 +258,9 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     
         if (data + ++(*offset) > data_end)
             return DROP;
+        
+        if (size > DNS_LIMIT)
+            return PASS;
     }
 
     query->domain_size = (__u8) size;
@@ -683,31 +686,16 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *data_end, __u32 *ip) { 
+static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip) { 
 
-    __u8 *content = (data + (*offset)++);
+    __u8 index = 0;
 
-
-    for (size_t i = 0; i < MAX_DNS_LABELS; i++)
+    for (size_t i = 0; i < 2 && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
     {
-        if (data + (*offset) > data_end)
-            return DROP;        
-
-        char *subdomain = content;
-
-        __u8 counter = *content;
-
-        if (content + MAX_DNS_NAME_LENGTH > data_end)
-            return DROP;
-
-        if(subdomain[0] == 0)
+        if(domain->name[index] == 0)
             return ACCEPT;
 
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Subdomain: %s", subdomain);
-        #endif
-
-        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain);
+        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
 
         if (nsrecord)
         {
@@ -733,11 +721,13 @@ static __always_inline __u8 findOwnerServer(void *data, __u64 *offset, void *dat
             }
             
             else
-                bpf_map_delete_elem(&cache_nsrecords, subdomain);
+                bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
         }
 
-        content += counter + 1;
-        *offset += counter + 1;
+        if (domain->name[index] > MAX_DNS_NAME_LENGTH)
+            return ACCEPT;
+
+        index += domain->name[index] + 1;
     }
 
     return ACCEPT;
@@ -1301,10 +1291,7 @@ int dns_filter(struct xdp_md *ctx) {
 
             struct query_owner owner;
 
-            // getSourceMac(data, &owner); 
-            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data);
-
-            owner.rec = 0;
+            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0;
 
             if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
             {
@@ -1315,39 +1302,64 @@ int dns_filter(struct xdp_md *ctx) {
                 return XDP_PASS;
             }
 
-            if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
-                return XDP_DROP;
+            __u32 ip = recursive_server_ip;
 
-            __s16 newsize = (data + offset_h - data_end) + MAX_DNS_NAME_LENGTH;
-
-            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+            switch (findOwnerServer(&dnsquery.query, &ip))
             {
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] It was't possible to resize the packet");
-                #endif
-                
-                return XDP_DROP;
+                case DROP:
+                    return XDP_DROP;
+                case PASS:
+                    return XDP_PASS;
+                default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Authoritative server: %u", ip);
+                    #endif
+                    break;
             }
 
-            data = (void *) ctx->data;
-            data_end = (void*) ctx->data_end;
+            offset_h = 0;
 
-            __u8 *content = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr)+ sizeof(struct dns_header) + dnsquery.query.domain_size;
-
-            for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
             {
-                if (content + i + 1 > data_end)
+                case DROP:
                     return XDP_DROP;
+                default:
+                    #ifdef DEBUG
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
+                    break;
+            }
+            
+            switch(returnToNetwork(data, &offset_h, data_end, ip))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
 
-                *(content + i) = 0;
+            switch(keepTransportLayer(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            switch(createDnsQuery(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
             }
 
             #ifdef DOMAIN
-                bpf_printk("[XDP] Searching Authorative Server");
+                bpf_printk("[XDP] Recursive Query created");
             #endif  
-    
-            bpf_tail_call(ctx, &tail_programs, DNS_SELECT_SERVER_PROG);
-    
+
+            return XDP_TX;
+
     default:
         break;
     }
@@ -2171,7 +2183,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-
         bpf_map_delete_elem(&curr_queries, &curr);
 
         __u32 value = getDestIp(data);
@@ -2180,10 +2191,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
         dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
 
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
-
-        #ifdef DEEP_2
-            bpf_printk("Curr autho %d", query->id.id);
-        #endif
 
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
         {
@@ -2194,13 +2201,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
-        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-            return XDP_DROP;
-
-        if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
-            return XDP_DROP;
-
-        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end) + MAX_DNS_NAME_LENGTH;
+        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
 
         if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
         {
@@ -2214,7 +2215,41 @@ int dns_create_new_query(struct xdp_md *ctx) {
         data = (void*) (long) ctx->data;
         data_end = (void*) (long) ctx->data_end;
 
-        offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr);
+        __u32 ip = recursive_server_ip;
+
+        switch (findOwnerServer(&dnsquery.query, &ip))
+        {
+            case DROP:
+                return XDP_DROP;
+            case PASS:
+                return XDP_PASS;
+            default:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Authoritative server: %u", ip);
+                #endif
+                break;
+        }
+
+        offset_h = 0;
+
+        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                #ifdef DEBUG
+                    bpf_printk("[XDP] Headers updated");
+                #endif  
+                break;
+        }
+        
+        switch(returnToNetwork(data, &offset_h, data_end, ip))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                break;
+        }
 
         switch (swapTransportLayer(data, &offset_h, data_end))
         {
@@ -2223,21 +2258,20 @@ int dns_create_new_query(struct xdp_md *ctx) {
             default:
                 break;
         }
-        __u8 *content = data + offset_h + sizeof(struct dns_header) + dnsquery.query.domain_size;
 
-        for (size_t i = 0; i < MAX_DNS_NAME_LENGTH; i++)
+        switch(createDnsQuery(data, &offset_h, data_end))
         {
-            if (content + i + 1 > data_end)
+            case DROP:
                 return XDP_DROP;
-
-            *(content + i) = 0;
+            default:
+                break;
         }
 
         #ifdef DOMAIN
-            bpf_printk("[XDP] Searching Authorative Server");
+            bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        bpf_tail_call(ctx, &tail_programs, DNS_SELECT_SERVER_PROG);
+        return XDP_TX;        
     }
 
     return XDP_PASS;
@@ -2639,104 +2673,6 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
     #ifdef DOMAIN
         bpf_printk("[XDP] NS Cache Updated");
     #endif
-
-    return XDP_TX;
-}
-
-SEC("xdp")
-int dns_select_server(struct xdp_md *ctx) {
-
-    void *data = (void*) (long) ctx->data;
-    void *data_end = (void*) (long) ctx->data_end;
-    
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
-
-    __u8 domainsize = getDestIp(data);
-
-    __u32 ip = recursive_server_ip;
-
-    switch (findOwnerServer(data, &offset_h, data_end, &ip))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        default:
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Authoritative server: %u", ip);
-            #endif
-            break;
-    }
-
-    offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + domainsize + 5;
-
-    __s16 newsize = (data + offset_h - data_end);
-
-    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[XDP] It was't possible to resize the packet");
-        #endif
-        
-        return XDP_DROP;
-    }
-
-    data = (void*) ctx->data;
-    data_end = (void*) ctx->data_end;
-
-    offset_h = 0;
-
-    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            #ifdef DEBUG
-                bpf_printk("[XDP] Headers updated");
-            #endif  
-            break;
-    }
-    
-    switch(returnToNetwork(data, &offset_h, data_end, ip))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    switch(keepTransportLayer(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    switch(createDnsQuery(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    offset_h += domainsize + 1;
-
-    switch(fixDnsQuery(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Recursive Query created");
-    #endif  
 
     return XDP_TX;
 }
