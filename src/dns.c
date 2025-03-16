@@ -258,9 +258,6 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     
         if (data + ++(*offset) > data_end)
             return DROP;
-        
-        if (size > DNS_LIMIT)
-            return PASS;
     }
 
     query->domain_size = (__u8) size;
@@ -688,46 +685,51 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
 static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip) { 
 
-    __u8 index = 0;
+    __u64 index = 0;
 
-    for (size_t i = 0; i < 2 && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
+    for (size_t i = 0; i < 10 && (index < MAX_DNS_NAME_LENGTH) && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
     {
+
         if(domain->name[index] == 0)
             return ACCEPT;
 
-        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
-
-        if (nsrecord)
+        if (domain->domain_size - index <= DNS_LIMIT)    
         {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Subdomain: %s", &domain->name[index]);
-            #endif
+            struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
 
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Cache NS record try");
-            #endif
-            
-            __u64 diff = getTTl(nsrecord->timestamp);
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
-            #endif
-
-            if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+            if (nsrecord)
             {
-                *ip = nsrecord->ip;
-
                 #ifdef DOMAIN
-                    bpf_printk("[XDP] Cache NS record hit");
+                    bpf_printk("[XDP] Subdomain: %s", &domain->name[index]);
                 #endif
 
-                return ACCEPT;
-            }
-            
-            else
-                bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
-        }
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache NS record try");
+                #endif
+                
+                __u64 diff = getTTl(nsrecord->timestamp);
 
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
+                #endif
+
+                if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+                {
+                    *ip = nsrecord->ip;
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Cache NS record hit");
+                    #endif
+
+                    return ACCEPT;
+                }
+                
+                else
+                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+            }
+
+        }
+        
         if (domain->name[index] > MAX_DNS_NAME_LENGTH)
             return ACCEPT;
 
@@ -2161,18 +2163,21 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                         break;
                     default:
-                        bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+                        if (query->query.name <= DNS_LIMIT)
+                        {
+                            bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
 
-                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                            return XDP_DROP;
+                            #ifdef ERRO
+                                bpf_printk("[XDP] A cache updated");
+                            #endif   
+
+                        }
+
 
                         if (hideInDestIp(data, data_end, 3) == DROP)
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-                        #ifdef ERRO
-                            bpf_printk("[XDP] A cache updated");
-                        #endif   
                         return XDP_DROP;
                         break;
                 }
@@ -2332,7 +2337,16 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #endif 
                         break;
                     default:
-                        bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+
+                        if (query->query.domain_size <= DNS_LIMIT)
+                        {
+                            bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+
+                            #ifdef ERRO
+                                bpf_printk("[XDP] A cache updated");
+                            #endif   
+                        }
+
                         #ifdef DOMAIN
                             bpf_printk("[XDP] A cache updated");
                         #endif   
@@ -2665,18 +2679,21 @@ int dns_save_ns_cache(struct xdp_md *ctx) {
             break;
     }
 
-    if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+    if (query.domain_size <= DNS_LIMIT)
     {
+        if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] NS Cache map error");
+            #endif
+
+            return XDP_PASS;
+        }
+
         #ifdef DOMAIN
-            bpf_printk("[XDP] NS Cache map error");
+            bpf_printk("[XDP] NS Cache Updated");
         #endif
-
-        return XDP_PASS;
     }
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] NS Cache Updated");
-    #endif
 
     return XDP_TX;
 }
