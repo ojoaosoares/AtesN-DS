@@ -13,7 +13,7 @@
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
-        __uint(max_entries, 7);                
+        __uint(max_entries, 6);                
         __uint(key_size, sizeof(__u32)); 
         __uint(value_size, sizeof(__u32));       
 } tail_programs SEC(".maps");
@@ -1883,11 +1883,6 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
             break;
     } 
-    
-    bpf_map_delete_elem(&curr_queries, &curr);
-
-    if (pointer > domainsize)
-        pointer = domainsize;
 
     __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + domainsize + 5) - data_end);
 
@@ -1916,10 +1911,13 @@ int dns_jump_query(struct xdp_md *ctx) {
             break;
     }
 
-    offset_h += sizeof(struct iphdr);
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;    
+    switch(returnToNetwork(data, &offset_h, data_end, record.ip))
+    {
+        case DROP:
+            return XDP_DROP;
+        default:
+            break;
+    }
 
     switch (swapTransportLayer(data, &offset_h, data_end))
     {
@@ -1929,21 +1927,46 @@ int dns_jump_query(struct xdp_md *ctx) {
             break;
     }
 
-    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
-        return XDP_DROP;
-
-    if (hideInDestIp(data, data_end, record.ip) == DROP)
-        return XDP_DROP;
-
-    
-    hideInSourceIp(data, record.ttl); hideInDestPort(data, bpf_htons(pointer));
+    switch(createDnsQuery(data, &offset_h, data_end))
+    {   
+        case DROP:
+            return XDP_DROP;
+        default:
+            break;
+    }
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Hop query created");
     #endif
 
+    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
-    bpf_tail_call(ctx, &tail_programs, DNS_SAVE_NS_CACHE_PROG);
+    if (query)
+    {
+        bpf_map_delete_elem(&curr_queries, &curr);
+        
+        if (query->query.domain_size - pointer <= DNS_LIMIT && pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH && pointer < MAX_DNS_NAME_LENGTH)
+        {
+            if (bpf_map_update_elem(&cache_nsrecords, &query->query.name[pointer], &record, 0) < 0)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] NS Cache map error");
+                #endif
+
+                return XDP_PASS;
+            }
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] NS Cache Updated");
+            #endif
+        }
+    }
+    
+    #ifdef DOMAIN
+        bpf_printk("[XDP] New back query created");
+    #endif
+
+    return XDP_TX;
 }
 
 SEC("xdp")
@@ -2615,100 +2638,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
     }
 
     return XDP_PASS;
-}
-
-SEC("xdp")
-int dns_save_ns_cache(struct xdp_md *ctx) {
-
-    void *data = (void*) (long) ctx->data;
-    void *data_end = (void*) (long) ctx->data_end;
-    
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
-
-    struct a_record record; 
-    
-    __u8 pointer;
-
-    record.ip = getDestIp(data); record.ttl = getSourceIp(data); pointer = getDestPort(data); record.status = getDNSStatus(data);
-
-    if (pointer > MAX_DNS_NAME_LENGTH)
-        return XDP_DROP;
-
-    record.timestamp = bpf_ktime_get_ns() / 1000000000;
-
-    offset_h = sizeof(struct ethhdr);
-
-    switch(returnToNetwork(data, &offset_h, data_end, record.ip))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    offset_h += sizeof(struct udphdr);
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
-
-    hideInDestPort(data, bpf_htons(DNS_PORT));
-
-    switch(createDnsQuery(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        default:
-            break;
-    }
-
-    offset_h += pointer;
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Pointer %d", pointer);
-    #endif
-
-    struct dns_domain query;
-
-    switch (getSubDomain(data, &offset_h, data_end, &query))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        case ACCEPT_NO_ANSWER:
-            break;
-        default:
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Subdomain: %s", query.name);
-		        bpf_printk("[XDP] Size: %u Type %u", query.domain_size, query.record_type);
-            #endif
-
-            break;
-    }
-
-    if (query.domain_size <= DNS_LIMIT)
-    {
-        if (bpf_map_update_elem(&cache_nsrecords, query.name, &record, 0) < 0)
-        {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] NS Cache map error");
-            #endif
-
-            return XDP_PASS;
-        }
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] NS Cache Updated");
-        #endif
-    }
-
-    return XDP_TX;
 }
 
 SEC("xdp")

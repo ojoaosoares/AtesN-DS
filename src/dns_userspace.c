@@ -118,9 +118,8 @@ int main(int argc, char *argv[]) {
         {1, skel->progs.dns_jump_query},
         {2, skel->progs.dns_create_new_query},
         {3, skel->progs.dns_back_to_last_query},
-        {4, skel->progs.dns_save_ns_cache},
-        {5, skel->progs.dns_check_subdomain},
-        {6, skel->progs.dns_error}
+        {4, skel->progs.dns_check_subdomain},
+        {5, skel->progs.dns_error}
     };
     
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
