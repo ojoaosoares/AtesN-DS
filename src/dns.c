@@ -102,7 +102,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
         return DROP;
     }
 
-    if(eth->h_proto ^ IPV4)
+    if(eth->h_proto ^ bpf_htons(IPV4))
     {
         #ifdef DOMAIN
             bpf_printk("[PASS] Ethernet type isn't IPV4");
