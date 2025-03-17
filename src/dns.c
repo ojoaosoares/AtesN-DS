@@ -1226,12 +1226,10 @@ int dns_filter(struct xdp_md *ctx) {
     {
         case A_RECORD_TYPE:
 
-            struct a_record *arecord;
-
-            arecord = NULL;
+            struct a_record *arecord = NULL;
 
             if (dnsquery.query.domain_size <= DNS_LIMIT)
-                arecord = bpf_map_lookup_elem(&cache_arecords, &dnsquery.query.name);
+                arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
             if (arecord)
             {   
@@ -1318,7 +1316,7 @@ int dns_filter(struct xdp_md *ctx) {
                 }
 
                 else
-                    bpf_map_delete_elem(&cache_arecords, &dnsquery.query.name);
+                    bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
 
             }
 
@@ -1552,7 +1550,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 default:
                     if (dnsquery.query.domain_size <= DNS_LIMIT)
                     {
-                        bpf_map_update_elem(&cache_arecords, &dnsquery.query.name, &cache_record, 0);
+                        bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, 0);
 
                         #ifdef DOMAIN
                             bpf_printk("[XDP] A cache updated");
@@ -1594,7 +1592,10 @@ int dns_process_response(struct xdp_md *ctx) {
         else return XDP_PASS;        
     }
     
-    struct a_record *record = bpf_map_lookup_elem(&cache_arecords, (struct rec_query_key *) &dnsquery.query.name);
+    struct a_record *record = NULL;
+
+    if (dnsquery.query.domain_size <= DNS_LIMIT)
+        record = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
     if (record)
     {   
@@ -1731,10 +1732,13 @@ int dns_process_response(struct xdp_md *ctx) {
         }
 
         else
-            bpf_map_delete_elem(&cache_arecords, &dnsquery.query.name);
+            bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
     }
 
-    record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name);
+    record = NULL;
+
+    if (dnsquery.query.domain_size <= DNS_LIMIT)
+        record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) dnsquery.query.name);
 
     if (record && record->ip != curr.ip)
     {   
@@ -1815,7 +1819,7 @@ int dns_process_response(struct xdp_md *ctx) {
         }
 
         else
-            bpf_map_delete_elem(&cache_nsrecords, &dnsquery.query.name);
+            bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
     }
 
     if (query_response == QUERY_ADDITIONAL_RETURN)
@@ -2100,10 +2104,16 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 break;
         }
 
-        struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &query->query.name);
+        struct a_record *nsrecord = NULL;
+
+        if (query->query.domain_size <= DNS_LIMIT)
+            nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);
 
         if (!nsrecord)
-            nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &subdomain.name);
+        {   
+            if (subdomain.domain_size <= DNS_LIMIT)
+                nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
+        }
 
         if (nsrecord && nsrecord->ip != curr.ip)
         {
@@ -2180,7 +2190,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             }
             
             else
-                bpf_map_delete_elem(&cache_nsrecords, &subdomain.name);
+                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
         }
 
         #ifdef DOMAIN
@@ -2268,7 +2278,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     default:
                         if (query->query.name <= DNS_LIMIT)
                         {
-                            bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, 0);
 
                             #ifdef ERRO
                                 bpf_printk("[XDP] A cache updated");
@@ -2441,7 +2451,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                         if (query->query.domain_size <= DNS_LIMIT)
                         {
-                            bpf_map_update_elem(&cache_arecords, &query->query.name, &cache_record, 0);
+                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, 0);
 
                             #ifdef ERRO
                                 bpf_printk("[XDP] A cache updated");
