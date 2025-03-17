@@ -89,7 +89,6 @@ static inline __u16 calculate_ip_checksum(struct iphdr *ip)
 
 static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 {
-
     struct ethhdr *eth = data;
 
     *offset = sizeof(struct ethhdr);
@@ -103,7 +102,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
         return DROP;
     }
 
-    if(eth->h_proto ^ bpf_htons(IPV4))
+    if(bpf_ntohs(eth->h_proto) ^ IPV4)
     {
         #ifdef DEBUG
             bpf_printk("[PASS] Ethernet type isn't IPV4");
@@ -129,15 +128,16 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         return DROP;
     }
     
-    if (ipv4->frag_off & IP_FRAGMENTET)
+    if (bpf_ntohs(ipv4->frag_off) & IP_FRAGMENTET)
     {
         #ifdef DEBUG
             bpf_printk("[PASS] Frame fragmented");
         #endif
+
         return PASS;
     }
 
-    if (ipv4->protocol ^ UDP_PROTOCOL)
+    if (bpf_ntohs(ipv4->protocol) ^ UDP_PROTOCOL)
     {
         #ifdef DEBUG
             bpf_printk("[PASS] Ip protocol isn't UDP. Protocol: %d", ipv4->protocol);
@@ -151,8 +151,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
 
 static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
 {
-    struct udphdr *udp;
-    udp = data + *offset;
+    struct udphdr *udp = data + *offset;
     *offset += sizeof(struct udphdr);
 
     if(data + *offset > data_end)
@@ -166,7 +165,6 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
     if (bpf_ntohs(udp->dest) == DNS_PORT)
         return TO_DNS_PORT;
     
-
     if (bpf_ntohs(udp->source) == DNS_PORT)
         return FROM_DNS_PORT;
 
@@ -1186,7 +1184,6 @@ int dns_filter(struct xdp_md *ctx) {
             bpf_tail_call(ctx, &tail_programs, DNS_PROCESS_RESPONSE_PROG);
 
             return XDP_DROP;
-        
     }
 
     struct dns_query dnsquery;
@@ -1417,7 +1414,7 @@ int dns_process_response(struct xdp_md *ctx) {
     switch (query_response)
     {
         case DROP:
-            return XDP_DROP;
+            return XDP_DROP;            
         case PASS:
             return XDP_PASS;
         default:
