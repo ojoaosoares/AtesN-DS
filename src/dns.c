@@ -102,7 +102,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
         return DROP;
     }
 
-    if(eth->h_proto ^ bpf_htons(IPV4))
+    if(bpf_htons(eth->h_proto) ^ IPV4)
     {
         #ifdef DOMAIN
             bpf_printk("[PASS] Ethernet type isn't IPV4");
@@ -128,7 +128,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         return DROP;
     }
     
-    if (bpf_ntohs(ipv4->frag_off) & IP_FRAGMENTET)
+    if (ipv4->frag_off & IP_FRAGMENTET)
     {
         #ifdef DOMAIN
             bpf_printk("[PASS] Frame fragmented");
@@ -137,7 +137,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         return PASS;
     }
 
-    if (bpf_ntohs(ipv4->protocol) ^ UDP_PROTOCOL)
+    if (ipv4->protocol ^ UDP_PROTOCOL)
     {
         #ifdef DOMAIN
             bpf_printk("[PASS] Ip protocol isn't UDP. Protocol: %d", ipv4->protocol);
