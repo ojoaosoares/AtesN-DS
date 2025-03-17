@@ -95,7 +95,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No ethernet frame");
         #endif
 
@@ -104,7 +104,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 
     if(bpf_ntohs(eth->h_proto) ^ IPV4)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[PASS] Ethernet type isn't IPV4");
         #endif
         return PASS;
@@ -122,7 +122,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No ip frame");
         #endif
         return DROP;
@@ -130,7 +130,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
     
     if (bpf_ntohs(ipv4->frag_off) & IP_FRAGMENTET)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[PASS] Frame fragmented");
         #endif
 
@@ -139,7 +139,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
 
     if (bpf_ntohs(ipv4->protocol) ^ UDP_PROTOCOL)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[PASS] Ip protocol isn't UDP. Protocol: %d", ipv4->protocol);
         #endif
 
@@ -156,7 +156,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
 
     if(data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No UDP datagram");
         #endif
         return DROP;
@@ -168,7 +168,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
     if (bpf_ntohs(udp->source) == DNS_PORT)
         return FROM_DNS_PORT;
 
-    #ifdef DEBUG
+    #ifdef DOMAIN
         bpf_printk("[PASS] No correct Port");
     #endif
 
@@ -184,7 +184,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No DNS header");
         #endif
         
@@ -193,7 +193,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     if (bpf_ntohs(header->questions) > 1)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[PASS] Multiple queries %d", bpf_ntohs(header->questions));
         #endif
         
@@ -240,7 +240,7 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
 
     if (*(content) == 0)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No Dns domain");
         #endif
 
@@ -294,7 +294,7 @@ static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_e
 
     if (*(content) == 0)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No Dns domain");
         #endif
 
@@ -365,7 +365,7 @@ static __always_inline __u8 formatNetworkAcessLayer(void *data, __u64 *offset, v
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
@@ -386,7 +386,7 @@ static __always_inline __u8 swapInternetLayer(void *data, __u64 *offset, void *d
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
@@ -414,7 +414,7 @@ static __always_inline __u8 keepTransportLayer(void *data, __u64 *offset, void *
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
@@ -436,7 +436,7 @@ static __always_inline __u8 swapTransportLayer(void *data, __u64 *offset, void *
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
@@ -462,7 +462,7 @@ static __always_inline __u8 setDNSHeader(void *data, __u64 *offset, void *data_e
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No DNS answer");
         #endif
 
@@ -487,7 +487,7 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No DNS answer");
         #endif
 
@@ -519,7 +519,7 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No DNS answer");
         #endif
 
@@ -544,7 +544,7 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] No DNS header");
         #endif
 
@@ -587,7 +587,7 @@ static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *dat
 
     if (data + *offset > data_end)
     {
-        #ifdef DEBUG
+        #ifdef DOMAIN
             bpf_printk("[DROP] Boundary exceded");
         #endif
 
@@ -625,7 +625,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
         if (data + *offset > data_end)
         {
-            #ifdef DEBUG
+            #ifdef DOMAIN
                 bpf_printk("[DROP] No DNS answer");
             #endif
 
@@ -649,7 +649,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
             if (data + *offset > data_end)
             {
-                #ifdef DEBUG
+                #ifdef DOMAIN
                     bpf_printk("[DROP] No DNS answer");
                 #endif
 
@@ -682,7 +682,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
         if (data + *offset > data_end)
         {
-            #ifdef DEBUG
+            #ifdef DOMAIN
                 bpf_printk("[DROP] No DNS answer");
             #endif
 
@@ -1145,7 +1145,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DEBUG
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's IPV4");
             #endif
             break;
@@ -1158,7 +1158,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DEBUG
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It's UDP");
             #endif
             break;
@@ -1270,7 +1270,7 @@ int dns_filter(struct xdp_md *ctx) {
                         case DROP:
                             return XDP_DROP;
                         default:
-                            #ifdef DEBUG
+                            #ifdef DOMAIN
                                 bpf_printk("[XDP] Headers updated");
                             #endif  
                             break;
@@ -1281,7 +1281,7 @@ int dns_filter(struct xdp_md *ctx) {
                         case DROP:
                             return XDP_DROP;
                         default:
-                            #ifdef DEBUG
+                            #ifdef DOMAIN
                                 bpf_printk("[XDP] Headers updated");
                             #endif  
                             break;
@@ -1292,7 +1292,7 @@ int dns_filter(struct xdp_md *ctx) {
                         case DROP:
                             return XDP_DROP;
                         default:
-                            #ifdef DEBUG
+                            #ifdef DOMAIN
                                 bpf_printk("[XDP] Headers updated");
                             #endif  
                             break;
@@ -1303,7 +1303,7 @@ int dns_filter(struct xdp_md *ctx) {
                         case DROP:
                             return XDP_DROP;
                         default:
-                            #ifdef DEBUG
+                            #ifdef DOMAIN
                                 bpf_printk("[XDP] Answer created");
                             #endif  
                             break;
@@ -1352,7 +1352,7 @@ int dns_filter(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 default:
-                    #ifdef DEBUG
+                    #ifdef DOMAIN
                         bpf_printk("[XDP] Headers updated");
                     #endif  
                     break;
@@ -1501,7 +1501,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 default:
-                    #ifdef DEBUG
+                    #ifdef DOMAIN
                         bpf_printk("[XDP] Headers updated");
                     #endif  
                     break;
@@ -1540,7 +1540,7 @@ int dns_process_response(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 case ACCEPT_NO_ANSWER:
-                    #ifdef DEBUG
+                    #ifdef DOMAIN
                         bpf_printk("[XDP] No DNS answer");
                     #endif 
                     break;
@@ -1589,37 +1589,173 @@ int dns_process_response(struct xdp_md *ctx) {
         else return XDP_PASS;        
     }
     
-    struct a_record *record = NULL;
 
     if (dnsquery.query.domain_size <= DNS_LIMIT)
-        record = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
+    {
 
-    if (record)
-    {   
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Cache A record try");
-        #endif
-        
-        __u64 diff = getTTl(record->timestamp);
+    
 
-        #ifdef DOMAIN
-            bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
-        #endif
+        struct a_record *record = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
-        if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
-        {
+        if (record)
+        {   
             #ifdef DOMAIN
-                bpf_printk("[XDP] Cache A record  hit");
+                bpf_printk("[XDP] Cache A record try");
             #endif
             
-            if (powner)
+            __u64 diff = getTTl(record->timestamp);
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
+            #endif
+
+            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
             {
-                bpf_map_delete_elem(&recursive_queries, &dnsquery);
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache A record  hit");
+                #endif
+                
+                if (powner)
+                {
+                    bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
+                    __s16 newsize = (data + offset_h - data_end);
+
+                    if (record->ip ^ 0)
+                        newsize += sizeof(struct dns_response);
+
+                    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+                    {
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] It was't possible to resize the packet");
+                        #endif
+                        
+                        return XDP_DROP;
+                    }
+
+                    data = (void*) (long) ctx->data;
+                    data_end = (void*) (long) ctx->data_end;
+
+                    offset_h = 0;
+
+                    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+                    {
+                        case DROP:
+                            return XDP_DROP;
+                        default:
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Headers updated");
+                            #endif  
+                            break;
+                    }
+
+                    switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+                    {
+                        case DROP:
+                            return XDP_DROP;
+                        default:
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Headers updated");
+                            #endif  
+                            break;
+                    }
+
+                    switch (keepTransportLayer(data, &offset_h, data_end))
+                    {
+                        case DROP:
+                            return XDP_DROP;
+                        default:
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Headers updated");
+                            #endif  
+                            break;
+                    }
+
+                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, record->status, dnsquery.query.domain_size))
+                    {
+                        case DROP:
+                            return XDP_DROP;
+                        default:
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Answer created");
+                            #endif  
+                            break;
+                    }
+
+                    return XDP_TX;
+                }
+
+                else if (lastdomain)
+                {
+                    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                    {
+                        #ifdef ERROR
+                            bpf_printk("[XDP] Curr queries map error process");
+                            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
+                            bpf_printk("[XDP] ZERO");
+                        #endif  
+
+                        return XDP_PASS;
+                    }
+                    
+                    if (record->ip ^ 0) {
+
+                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
+                            return XDP_DROP;
+        
+                        if (hideInDestIp(data, data_end, record->ip) == DROP)
+                            return XDP_DROP;
+        
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] A last response came");
+                        #endif
+
+                        bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
+
+                        return XDP_DROP;
+                    }
+        
+                    else
+                    {
+                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
+                            return XDP_DROP;
+                        
+                        if (hideInDestIp(data, data_end, 2) == DROP)
+                            return XDP_DROP;
+        
+        
+                        bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+        
+                        return XDP_DROP;
+                    }
+                }
+            }
+
+            else
+                bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+        }
+
+        record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) dnsquery.query.name);
+
+        if (record && record->ip != curr.ip)
+        {   
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cache NS record try");
+            #endif
+            
+            __u64 diff = getTTl(record->timestamp);
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
+            #endif
+
+            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache NS record hit");
+                #endif
 
                 __s16 newsize = (data + offset_h - data_end);
-
-                if (record->ip ^ 0)
-                    newsize += sizeof(struct dns_response);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
@@ -1640,183 +1776,48 @@ int dns_process_response(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
                 }
 
-                switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+                switch (returnToNetwork(data, &offset_h, data_end, record->ip))
                 {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
                 }
 
-                switch (keepTransportLayer(data, &offset_h, data_end))
+                switch (swapTransportLayer(data, &offset_h, data_end))
                 {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
                 }
 
-                switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, record->status, dnsquery.query.domain_size))
+                switch(createDnsQuery(data, &offset_h, data_end))
                 {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
-                            bpf_printk("[XDP] Answer created");
-                        #endif  
                         break;
                 }
 
                 return XDP_TX;
             }
 
-            else if (lastdomain)
-            {
-                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-                {
-                    #ifdef ERROR
-                        bpf_printk("[XDP] Curr queries map error process");
-                        bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                        bpf_printk("[XDP] ZERO");
-                    #endif  
-
-                    return XDP_PASS;
-                }
-                
-                if (record->ip ^ 0) {
-
-                    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                        return XDP_DROP;
-    
-                    if (hideInDestIp(data, data_end, record->ip) == DROP)
-                        return XDP_DROP;
-    
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] A last response came");
-                    #endif
-
-                    bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
-
-                    return XDP_DROP;
-                }
-    
-                else
-                {
-                    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                        return XDP_DROP;
-                    
-                    if (hideInDestIp(data, data_end, 2) == DROP)
-                        return XDP_DROP;
-    
-    
-                    bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-    
-                    return XDP_DROP;
-                }
-            }
+            else
+                bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
         }
-
-        else
-            bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
-    }
-
-    record = NULL;
-
-    if (dnsquery.query.domain_size <= DNS_LIMIT)
-        record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) dnsquery.query.name);
-
-    if (record && record->ip != curr.ip)
-    {   
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Cache NS record try");
-        #endif
-        
-        __u64 diff = getTTl(record->timestamp);
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
-        #endif
-
-        if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
-        {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Cache NS record hit");
-            #endif
-
-            __s16 newsize = (data + offset_h - data_end);
-
-            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-            {
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] It was't possible to resize the packet");
-                #endif
-                
-                return XDP_DROP;
-            }
-
-            data = (void*) (long) ctx->data;
-            data_end = (void*) (long) ctx->data_end;
-
-            offset_h = 0;
-
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DEBUG
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
-
-            switch (returnToNetwork(data, &offset_h, data_end, record->ip))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DEBUG
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
-
-            switch (swapTransportLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DEBUG
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
-
-            switch(createDnsQuery(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
-
-            return XDP_TX;
-        }
-
-        else
-            bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
     }
 
     if (query_response == QUERY_ADDITIONAL_RETURN)
@@ -1984,7 +1985,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         case DROP:
             return XDP_DROP;
         default:
-            #ifdef DEBUG
+            #ifdef DOMAIN
                 bpf_printk("[XDP] Headers updated");
             #endif  
             break;
@@ -2153,7 +2154,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
@@ -2354,7 +2355,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             case DROP:
                 return XDP_DROP;
             default:
-                #ifdef DEBUG
+                #ifdef DOMAIN
                     bpf_printk("[XDP] Headers updated");
                 #endif  
                 break;
@@ -2440,7 +2441,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     case ACCEPT_NO_ANSWER:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] No DNS answer");
                         #endif 
                         break;
@@ -2531,7 +2532,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
@@ -2667,7 +2668,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
@@ -2678,7 +2679,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
-                        #ifdef DEBUG
+                        #ifdef DOMAIN
                             bpf_printk("[XDP] Headers updated");
                         #endif  
                         break;
@@ -2809,7 +2810,7 @@ int dns_error(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 default:
-                    #ifdef DEBUG
+                    #ifdef DOMAIN
                         bpf_printk("[XDP] Headers updated");
                     #endif  
                     break;
@@ -2836,7 +2837,7 @@ int dns_error(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 default:
-                    #ifdef DEBUG
+                    #ifdef DOMAIN
                         bpf_printk("[XDP] Answer created");
                     #endif  
                     break;
