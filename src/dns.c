@@ -702,7 +702,9 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     record->status = (bpf_ntohs(header->flags) & 0x000F);;
 
-    __u8 *content = data + *offset, count = 0;
+    __u8 *content = data + *offset + querysize + 5, count = 0;
+
+    *offset += querysize + 5;
 
     for (size_t size = 0; size < 500; size++)
     {
