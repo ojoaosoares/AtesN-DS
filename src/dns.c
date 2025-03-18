@@ -285,43 +285,6 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     return ACCEPT;
 }
 
-static __always_inline __u8 getSubDomain(void *data, __u64 *offset, void *data_end, struct dns_domain *query)
-{
-    __u8 *content = (data + *offset);
-
-    if (data + (*offset) + 1 > data_end)
-        return DROP;
-
-    if (*(content) == 0)
-    {
-        #ifdef DOMAIN
-            bpf_printk("[DROP] No Dns domain");
-        #endif
-
-        return ACCEPT_NO_ANSWER;
-    }
-
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
-    query->record_type = 0;
-
-    size_t size;
-
-    for (size = 0; size < MAX_DNS_NAME_LENGTH; size++)
-    {
-        if (data + ++(*offset) > data_end)
-            return DROP;
-
-        if (*(content + size) == 0)
-            break;
-
-        query->name[size] = *(char *)(content + size);        
-    }
-
-    query->domain_size = (__u8) size;
-    
-    return ACCEPT;
-}
-
 static __always_inline __u16 getQueryId(void *data)
 {
     struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
@@ -341,13 +304,6 @@ static __always_inline __u16 getDestPort(void *data)
     struct udphdr *udp = (data + sizeof(struct ethhdr) + sizeof(struct iphdr));
 
     return bpf_ntohs(udp->dest);
-}
-
-static __always_inline void getSourceMac(void *data, char mac[ETH_ALEN])
-{
-    struct ethhdr *eth = data;
-
-    __builtin_memcpy(mac, eth->h_source, ETH_ALEN);
 }
 
 static __always_inline __u32 getSourceIp(void *data)
@@ -559,25 +515,6 @@ static __always_inline __u8 createDnsQuery(void *data, __u64 *offset, void *data
     
     return ACCEPT;
 }
-
-static __always_inline __u8 fixDnsQuery(void *data, __u64 *offset, void *data_end) {
-
-    __u8 *content = data + *offset;
-
-    *offset += (sizeof(__u8) * 4);
-
-    if (data + *offset > data_end)
-        return DROP;
-
-    *((__u16 *) content) = bpf_htons(A_RECORD_TYPE);
-
-    content += 2;    
-
-    *((__u16 *) content) = bpf_htons(INTERNT_CLASS);
-    
-    return ACCEPT;
-}
-
 
 static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *data_end, __u32 ip_dest) {
 
