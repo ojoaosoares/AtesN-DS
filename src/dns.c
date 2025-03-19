@@ -1422,6 +1422,10 @@ int dns_process_response(struct xdp_md *ctx) {
         if (hideInDestIp(data, data_end, 2) == DROP)
             return XDP_DROP;
 
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Recursion Limit");
+        #endif
+
         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
         return XDP_DROP;
@@ -1507,6 +1511,10 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
             {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Error map 1");
+                #endif
+
                 #ifdef ERROR
                     bpf_printk("[XDP] Curr queries map error process");
                     bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1625,6 +1633,11 @@ int dns_process_response(struct xdp_md *ctx) {
                 {
                     if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                     {
+
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Error map 2");
+                        #endif
+
                         #ifdef ERROR
                             bpf_printk("[XDP] Curr queries map error process");
                             bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1764,8 +1777,17 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             if (*content == 0)
             {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Strange Packet");
+                #endif
+
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                 {
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Error map 3");
+                    #endif
+
                     #ifdef ERROR
                         bpf_printk("[XDP] Curr queries map error process");
                         bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1783,6 +1805,10 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
                 {
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Error map 4");
+                    #endif
                     #ifdef ERROR
                         bpf_printk("[XDP] Curr queries map error process");
                         bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1806,6 +1832,11 @@ int dns_process_response(struct xdp_md *ctx) {
 
         if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
         {
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Error map 5");
+            #endif
+
             #ifdef ERROR
                 bpf_printk("[XDP] Curr queries map error process");
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1815,6 +1846,10 @@ int dns_process_response(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Additional Query");
+        #endif
+
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
         return XDP_DROP;
@@ -1822,7 +1857,6 @@ int dns_process_response(struct xdp_md *ctx) {
 
     else if (query_response == QUERY_NAMESERVERS_RETURN)
     {
-
         if (powner)
             if (hideInDestIp(data, data_end, powner->rec) == DROP)
                 return XDP_DROP;    
@@ -1833,6 +1867,11 @@ int dns_process_response(struct xdp_md *ctx) {
 
         if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
         {
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Error map 6");
+            #endif
+
             #ifdef ERROR
                 bpf_printk("[XDP] Curr queries map error process");
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
@@ -1842,10 +1881,18 @@ int dns_process_response(struct xdp_md *ctx) {
             return XDP_PASS;
         }
 
+        #ifdef DOMAIN
+            bpf_printk("[XDP] New query");
+        #endif
+
         bpf_tail_call(ctx, &tail_programs, DNS_CHECK_SUBDOMAIN_PROG);
 
         return XDP_DROP;
     }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Nothing");
+    #endif
 
     return XDP_PASS;
 }
