@@ -1825,7 +1825,7 @@ int dns_process_response(struct xdp_md *ctx) {
         }      
     }
 
-    else if (query_response == QUERY_ADDITIONAL_RETURN)
+    if (query_response == QUERY_ADDITIONAL_RETURN)
     {
         if (hideInDestIp(data, data_end, dnsquery.query.domain_size) == DROP)
             return XDP_DROP;
