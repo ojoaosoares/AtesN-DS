@@ -95,7 +95,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 
     if (data + *offset > data_end)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[DROP] No ethernet frame");
         #endif
 
@@ -104,7 +104,7 @@ static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
 
     if(bpf_htons(eth->h_proto) ^ IPV4)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[PASS] Ethernet type isn't IPV4");
         #endif
         return PASS;
@@ -122,7 +122,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
 
     if (data + *offset > data_end)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[DROP] No ip frame");
         #endif
         return DROP;
@@ -130,7 +130,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
     
     if (ipv4->frag_off & IP_FRAGMENTET)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[PASS] Frame fragmented");
         #endif
 
@@ -139,7 +139,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
 
     if (ipv4->protocol ^ UDP_PROTOCOL)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[PASS] Ip protocol isn't UDP. Protocol: %d", ipv4->protocol);
         #endif
 
@@ -156,7 +156,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
 
     if(data + *offset > data_end)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[DROP] No UDP datagram");
         #endif
         return DROP;
@@ -168,7 +168,7 @@ static __always_inline __u8 isPort53(void *data, __u64 *offset, void *data_end)
     if (bpf_ntohs(udp->source) == DNS_PORT)
         return FROM_DNS_PORT;
 
-    #ifdef DOMAIN
+    #ifdef FILTER
         bpf_printk("[PASS] No correct Port");
     #endif
 
@@ -184,7 +184,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     if (data + *offset > data_end)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[DROP] No DNS header");
         #endif
         
@@ -193,7 +193,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     if (bpf_ntohs(header->questions) > 1)
     {
-        #ifdef DOMAIN
+        #ifdef FILTER
             bpf_printk("[PASS] Multiple queries %d", bpf_ntohs(header->questions));
         #endif
         
@@ -202,7 +202,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
     *id = header->id;
 
-    #ifdef DOMAIN
+    #ifdef FILTER
         bpf_printk("[XDP] Flags %d %d", bpf_ntohs(header->flags), header->flags);
     #endif
 
@@ -1084,7 +1084,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DOMAIN
+            #ifdef FILTER
                 bpf_printk("[XDP] It's IPV4");
             #endif
             break;
@@ -1097,7 +1097,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef DOMAIN
+            #ifdef FILTER
                 bpf_printk("[XDP] It's UDP");
             #endif
             break;
@@ -1110,13 +1110,13 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         case TO_DNS_PORT:
-            #ifdef DOMAIN
+            #ifdef FILTER
                 bpf_printk("[XDP] It's to Port 53");
             #endif  
             break;
         case FROM_DNS_PORT:
         
-            #ifdef DOMAIN
+            #ifdef FILTER
                 bpf_printk("[XDP] It's from Port 53");
             #endif  
 
@@ -1134,7 +1134,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         case QUERY_RETURN:
-            #ifdef DOMAIN
+            #ifdef FILTER
                 bpf_printk("[XDP] It's a query");
             #endif
             break;
