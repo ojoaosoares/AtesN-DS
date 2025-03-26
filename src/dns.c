@@ -717,8 +717,10 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
     record->status = (bpf_ntohs(header->flags) & 0x000F);
+    record->ip = 0;
 
     __u8 *content = data + *offset, count = 0;
+    __u8 rand = (bpf_get_prandom_u32() % 3) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
 
     for (size_t size = 0; size < 500; size++)
     {
@@ -747,11 +749,17 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
                 record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
                 
                 record->ip = *((__u32 *) (content + size + 12));            
-            
-                return ACCEPT;
+
+                if (!rand)
+                    return ACCEPT;
+
+                rand--;
             }
         }
     }
+
+    if (record->ip)
+        return ACCEPT;
     
     return ACCEPT_NO_ANSWER;
 }
