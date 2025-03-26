@@ -711,7 +711,7 @@ static __always_inline __u8 getAdditionalPointer(void *data, __u64 *offset, void
 }
 
 
-static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, struct a_record *record, __u8 domainsize) {
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -719,42 +719,27 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     record->status = (bpf_ntohs(header->flags) & 0x000F);
     record->ip = 0;
 
-    __u8 *content = data + *offset, count = 0;
+    __u8 *content = data + *offset;
     __u8 rand = (bpf_get_prandom_u32() % 3) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
 
-    for (size_t size = 0; size < 500; size++)
+    for (size_t size = 0; size < 500 - domainsize; size++)
     {
-        if (data + ++(*offset) + 3 > data_end)
+        if (data + ++(*offset) + 5 > data_end)
             break;
 
-        if ((bpf_ntohs(*((__u16 *) (content + size))) == NS_RECORD_TYPE || bpf_ntohs(*((__u16 *) (content + size))) == DS_TYPE) && bpf_ntohs(*((__u16 *) (content + size + 2))) == INTERNT_CLASS)
-            count++;
+        else if ((*(content + size) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (content + size + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (content + size + 4))) == INTERNT_CLASS)
+        {        
+            if (data + (*offset) + 15 > data_end)
+                return DROP;
 
-        else if ((*(content + size) & 0xC0) == 0xC0) {
+            record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
+            
+            record->ip = *((__u32 *) (content + size + 12));            
 
-            if (count >= bpf_ntohs(header->name_servers))
-            {   
-                if (data + (*offset) + 5 > data_end)
-                    return DROP;
+            if (!rand)
+                return ACCEPT;
 
-                if (bpf_ntohs(*((__u16 *) (content + size + 2))) ^ A_RECORD_TYPE)
-                    continue;
-
-                if (bpf_ntohs(*((__u16 *) (content + size + 4))) ^ INTERNT_CLASS)
-                    continue;
-                
-                if (data + (*offset) + 15 > data_end)
-                    return DROP;
-
-                record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
-                
-                record->ip = *((__u32 *) (content + size + 12));            
-
-                if (!rand)
-                    return ACCEPT;
-
-                rand--;
-            }
+            rand--;
         }
     }
 
@@ -1919,7 +1904,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         struct a_record record;
         
-        switch (getAdditional(data, &offset_h, data_end, &record))
+        switch (getAdditional(data, &offset_h, data_end, &record, query->query.domain_size))
         {
             case DROP:
                 return XDP_DROP;
