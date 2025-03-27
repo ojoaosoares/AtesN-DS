@@ -868,7 +868,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             autho->domain_size += (query->domain_size - pointer) - 2;
 
-            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH; i++)
+            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH && size < size + i < MAX_DNS_NAME_LENGTH; i++)
             {
                 if (data + ++newoff > data_end)
                     return DROP;
@@ -877,6 +877,8 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
                 if (*(domain++) == 0)
                     break;
+
+                autho->name[size + i] == query->name[pointer + i];
             }
 
             newoff = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + autho->domain_size;
