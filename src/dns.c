@@ -812,6 +812,8 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
             (*off) += size + 2;
 
+            subdomain->domain_size = size + (domain->domain_size - *pointer);
+
             // for (size_t size2 = 0; size2 < MAX_DNS_NAME_LENGTH; size2++)
             // {
             //     if (*pointer + size2 >= domain->domain_size)
