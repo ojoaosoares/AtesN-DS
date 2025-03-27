@@ -11,6 +11,7 @@
 #define ACCEPT 2
 
 #define ACCEPT_NO_ANSWER 3
+#define ACCEPT_JUST_POINTER 3
 
 #define IPV4 0x0800
 #define IP_FRAGMENTET 65343

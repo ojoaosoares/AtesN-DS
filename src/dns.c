@@ -762,7 +762,7 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
     {
         (*offset)++; *off++;
 
-        return ACCEPT;
+        return ACCEPT_JUST_POINTER;
     }
 
     if (data + *offset + 2 > data_end)
@@ -778,12 +778,9 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
             bpf_printk("[XDP] Pointer: %u", *pointer);
         #endif
 
-        for (size_t size = 0; size + *pointer < MAX_DNS_NAME_LENGTH; size++)
-            subdomain->name[size] = domain->name[*pointer + size];
-
         *off += 2;
 
-        return ACCEPT;
+        return ACCEPT_JUST_POINTER;
     }
 
     size_t size;
@@ -806,7 +803,15 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
         if ((*(content + size) & 0xC0) == 0xC0)
         {
+            if (data + (*offset) + 1 > data_end)
+                return DROP;
+
+            *pointer = (__u16) (bpf_ntohs(*(__u16 *) (content + size)) & 0x3FFF) - sizeof(struct dns_header);
+
             (*off) += size + 2;
+
+            for (size_t subpointer = *pointer; subpointer < domain->domain_size && size < MAX_DNS_NAME_LENGTH; subpointer++, size++)
+                subdomain->name[size] = domain->name[subpointer];
 
             return ACCEPT;   
         }
@@ -2026,10 +2031,6 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
     __u8 deep = getDestIp(data);
 
-    #ifdef DEEP_2
-        bpf_printk("Deep csd %d", deep);
-    #endif 
-
     struct curr_query curr;
     
     curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
@@ -2050,27 +2051,33 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
         struct dns_domain subdomain;
 
+        struct a_record *nsrecord = NULL;
+
         switch (getAuthoritativePointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
         {
             case DROP:
-                return XDP_DROP;            
-            default:
+                return XDP_DROP;   
+            case ACCEPT:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subdomain %s", subdomain.name);
                 #endif 
-        
+
+                if (subdomain.domain_size <= DNS_LIMIT)
+                    nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
+
+            case ACCEPT_JUST_POINTER:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Subpointer %d", pointer);
+                #endif 
+
+                if (!nsrecord)
+                {   
+                    if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                        nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
+                }
+
+            default:        
                 break;
-        }
-
-        struct a_record *nsrecord = NULL;
-
-        if (query->query.domain_size <= DNS_LIMIT)
-            nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);
-
-        if (!nsrecord)
-        {   
-            if (subdomain.domain_size <= DNS_LIMIT)
-                nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
         }
 
         if (nsrecord && nsrecord->ip != curr.ip)
