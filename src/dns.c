@@ -810,8 +810,10 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
             (*off) += size + 2;
 
-            for (size_t subpointer = *pointer; subpointer < domain->domain_size && size < MAX_DNS_NAME_LENGTH; subpointer++, size++)
-                subdomain->name[size] = domain->name[subpointer];
+            for (size_t size2 = 0; *pointer + size2 < domain->domain_size && size + size2 < MAX_DNS_NAME_LENGTH; size2++)
+                subdomain->name[size + size2] = domain->name[*pointer + size2];
+
+            // __builtin_memcpy(&subdomain->name[size], &domain->name[*pointer], domain->domain_size - *pointer);
 
             return ACCEPT;   
         }
