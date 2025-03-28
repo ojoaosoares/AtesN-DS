@@ -829,7 +829,7 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
             // return ACCEPT;   
 
-            return ACCEPT_JUST_POINTER;
+            return ACCEPT;
         }
 
         subdomain->name[size] = *(content + size);
@@ -2081,16 +2081,14 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 if (subdomain.domain_size <= DNS_LIMIT)
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
 
+                break;
             case ACCEPT_JUST_POINTER:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subpointer %d", pointer);
                 #endif 
 
-                if (!nsrecord)
-                {   
-                    if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
-                        nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
-                }
+                if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                    nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
 
             default:        
                 break;
