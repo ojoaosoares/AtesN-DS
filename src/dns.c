@@ -643,7 +643,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip) { 
+static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip, __u8 kill_first) { 
 
     __u64 index = 0;
 
@@ -658,6 +658,16 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
             if (nsrecord)
             {
+
+                if (kill_first)
+                {
+                    kill_first = 0;
+
+                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+
+                    continue;
+                }
+
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subdomain: %s", &domain->name[index]);
                 #endif
@@ -1242,18 +1252,20 @@ int dns_filter(struct xdp_md *ctx) {
 
             owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0;
 
-            if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
+            __u8 kill_first = 0;
+
+            if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, BPF_NOEXIST) < 0)
             {
                 #ifdef ERROR
                     bpf_printk("[XDP] Recursive queries map error check cache");
                 #endif  
 
-                return XDP_PASS;
+                kill_first =1 ;
             }
 
             __u32 ip = recursive_server_ip;
 
-            switch (findOwnerServer(&dnsquery.query, &ip))
+            switch (findOwnerServer(&dnsquery.query, &ip, kill_first))
             {
                 case DROP:
                     return XDP_DROP;
@@ -2291,13 +2303,15 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
 
-	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
+        __u8 kill_first = 0;
+
+	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, BPF_NOEXIST) < 0)
         {
             #ifdef ERROR
                 bpf_printk("[XDP] new query create new query");
             #endif
 
-            return XDP_PASS;
+            kill_first = 1;
         }
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
@@ -2316,7 +2330,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         __u32 ip = recursive_server_ip;
 
-        switch (findOwnerServer(&dnsquery.query, &ip))
+        switch (findOwnerServer(&dnsquery.query, &ip, kill_first))
         {
             case DROP:
                 return XDP_DROP;
