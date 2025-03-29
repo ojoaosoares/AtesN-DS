@@ -578,11 +578,11 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
     response = data + *offset;
 
-    if ((bpf_ntohs(header->flags) & 0x000F) != 0 && (bpf_ntohs(header->flags) & 0x000F) != 2)
-        return ACCEPT_ERROR;
-
     if ((bpf_ntohs(header->flags) & 0x000F) == 2)
         return ACCEPT_NO_ANSWER;
+
+    if ((bpf_ntohs(header->flags) & 0x000F) != 0 && (bpf_ntohs(header->flags) & 0x000F) != 3)
+        return ACCEPT_ERROR;
 
     if (bpf_ntohs(header->answer_count))
     {
