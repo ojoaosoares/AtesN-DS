@@ -578,7 +578,10 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
     response = data + *offset;
 
-    if ((bpf_ntohs(header->flags) & 0x000F) == 2 || (bpf_ntohs(header->flags) & 0x000F) == 5)
+    if ((bpf_ntohs(header->flags) & 0x000F) != 0 || (bpf_ntohs(header->flags) & 0x000F) != 2)
+        return ACCEPT_ERROR;
+
+    if ((bpf_ntohs(header->flags) & 0x000F) == 2)
         return ACCEPT_NO_ANSWER;
 
     if (bpf_ntohs(header->answer_count))
@@ -1503,7 +1506,7 @@ int dns_process_response(struct xdp_md *ctx) {
             {
                 case DROP:
                     return XDP_DROP;
-                case ACCEPT_NO_ANSWER:
+                case ACCEPT_ERROR:
 
                     switch (createNoDNSAnswer(data, &off_temp, data_end))
                     {
@@ -1516,6 +1519,9 @@ int dns_process_response(struct xdp_md *ctx) {
                             break;
                     }
 
+                    break;
+
+                case ACCEPT_NO_ANSWER:
                     #ifdef DOMAIN
                         bpf_printk("[XDP] No DNS answer");
                     #endif 
@@ -2287,6 +2293,8 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 {
                     case DROP:
                         return XDP_DROP;
+
+                    case ACCEPT_ERROR:
                     case ACCEPT_NO_ANSWER:
 
                         if (hideInDestIp(data, data_end, 2) == DROP)
@@ -2469,6 +2477,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 {
                     case DROP:
                         return XDP_DROP;
+                        
+                    case ACCEPT_ERROR:
                     case ACCEPT_NO_ANSWER:
                         #ifdef DOMAIN
                             bpf_printk("[XDP] No DNS answer");
