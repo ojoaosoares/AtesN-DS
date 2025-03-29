@@ -578,7 +578,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
 
     response = data + *offset;
 
-    if ((bpf_ntohs(header->flags) & 0x000F) != 0 || (bpf_ntohs(header->flags) & 0x000F) != 2)
+    if ((bpf_ntohs(header->flags) & 0x000F) != 0 && (bpf_ntohs(header->flags) & 0x000F) != 2)
         return ACCEPT_ERROR;
 
     if ((bpf_ntohs(header->flags) & 0x000F) == 2)
@@ -2477,7 +2477,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 {
                     case DROP:
                         return XDP_DROP;
-                        
+
                     case ACCEPT_ERROR:
                     case ACCEPT_NO_ANSWER:
                         #ifdef DOMAIN
