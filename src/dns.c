@@ -435,6 +435,31 @@ static __always_inline __u8 setDNSHeader(void *data, __u64 *offset, void *data_e
     return ACCEPT;
 }
 
+static __always_inline __u8 createNoDNSAnswer(void *data, __u64 *offset, void *data_end)
+{
+    struct dns_header *header = data + *offset;
+
+    *offset += sizeof(struct dns_header);
+
+    if (data + *offset > data_end)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[DROP] No DNS answer");
+        #endif
+
+        return DROP;
+    }
+
+    __u16 flags = 0x8180 + 3;
+
+    header->name_servers = bpf_htons(0);
+    header->additional_records = bpf_htons(0);
+    header->answer_count = bpf_htons(0);    
+    header->flags = bpf_htons(flags);
+        
+    return ACCEPT;
+}
+
 static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *data_end, __u32 ip, __u32 ttl, __u8 status, __u16 domain_size) {
 
     struct dns_header *header = data + *offset;
@@ -1460,15 +1485,17 @@ int dns_process_response(struct xdp_md *ctx) {
                     break;
             }
 
-            switch(setDNSHeader(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
+            // switch(setDNSHeader(data, &offset_h, data_end))
+            // {
+            //     case DROP:
+            //         return XDP_DROP;
+            //     default:
+            //         break;
+            // }
 
-            offset_h += dnsquery.query.domain_size + 5;
+            __u64 off_temp = offset_h;
+
+            offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
             
             struct a_record cache_record;
 
@@ -1477,9 +1504,22 @@ int dns_process_response(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 case ACCEPT_NO_ANSWER:
+
+                    switch (createNoDNSAnswer(data, &off_temp, data_end))
+                    {
+                        case DROP:
+                            return XDP_DROP;
+                        default:
+                            #ifdef DOMAIN
+                                bpf_printk("[XDP] Answer created");
+                            #endif  
+                            break;
+                    }
+
                     #ifdef DOMAIN
                         bpf_printk("[XDP] No DNS answer");
                     #endif 
+
                     break;
                 default:
                     if (dnsquery.query.domain_size <= DNS_LIMIT)
@@ -1490,7 +1530,6 @@ int dns_process_response(struct xdp_md *ctx) {
                             bpf_printk("[XDP] A cache updated");
                         #endif  
                     }
-
                     break;
             }   
 
@@ -1791,9 +1830,6 @@ int dns_process_response(struct xdp_md *ctx) {
                     return XDP_PASS;
                 }
 
-                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                    return XDP_DROP;
-
                 if (hideInDestIp(data, data_end, 2) == DROP)
                     return XDP_DROP;
 
@@ -1945,10 +1981,7 @@ int dns_jump_query(struct xdp_md *ctx) {
                 return XDP_DROP;
             case ACCEPT_NO_ANSWER:
 
-                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                    return XDP_DROP;
-
-                if (hideInDestIp(data, data_end, 5) == DROP)
+                if (hideInDestIp(data, data_end, 2) == DROP)
                     return XDP_DROP;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2255,8 +2288,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     case ACCEPT_NO_ANSWER:
-                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                            return XDP_DROP;
 
                         if (hideInDestIp(data, data_end, 2) == DROP)
                             return XDP_DROP;
@@ -2267,6 +2298,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                         break;
                     default:
+
                         if (query->query.name <= DNS_LIMIT)
                         {
                             bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, 0);
@@ -2280,7 +2312,9 @@ int dns_create_new_query(struct xdp_md *ctx) {
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+                        
                         return XDP_DROP;
+
                         break;
                 }
                 
@@ -2458,20 +2492,14 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 }
 
                 if (cache_record.ip == 0)
-                {
-
-                    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                         return XDP_DROP;
-                    
+                {   
                     if (hideInDestIp(data, data_end, 3) == DROP)
                         return XDP_DROP;
                     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                 }
 
-                bpf_map_delete_elem(&curr_queries, &curr);
-
-                bpf_map_delete_elem(&new_queries, query);
+                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
 
                 __u8 pointer = lastdomain->pointer, deep = lastdomain->trash;
                 
@@ -2591,10 +2619,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else if (ip == 0)
             {
-
-                if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                    return XDP_DROP;
-
                 if (hideInDestIp(data, data_end, 3) == DROP)
                     return XDP_DROP;
 
@@ -2603,9 +2627,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else
             {
-                bpf_map_delete_elem(&curr_queries, &curr);
-
-                bpf_map_delete_elem(&new_queries, query);
+                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
 
                 __u8 deep = lastdomain->trash;
 
@@ -2620,7 +2642,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (last_of_last)
                 {
-
                     last_of_last->trash = deep;
 
                     #ifdef DEEP
@@ -2640,8 +2661,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                             bpf_printk("curr %d", powner->rec);
                         #endif
                     }
-
-                    
                 }
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -2827,7 +2846,7 @@ int dns_error(struct xdp_md *ctx) {
                     break;
             }
 
-            switch (createDNSAnswer(data, &offset_h, data_end, 0, 0, status, query->query.domain_size))
+            switch (createNoDNSAnswer(data, &offset_h, data_end))
             {
                 case DROP:
                     return XDP_DROP;
