@@ -1488,17 +1488,17 @@ int dns_process_response(struct xdp_md *ctx) {
                     break;
             }
 
-            // switch(setDNSHeader(data, &offset_h, data_end))
-            // {
-            //     case DROP:
-            //         return XDP_DROP;
-            //     default:
-            //         break;
-            // }
-
             __u64 off_temp = offset_h;
 
-            offset_h += sizeof(struct dns_header) + dnsquery.query.domain_size + 5;
+            switch(setDNSHeader(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            offset_h += dnsquery.query.domain_size + 5;
             
             struct a_record cache_record;
 
