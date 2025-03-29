@@ -450,7 +450,7 @@ static __always_inline __u8 createNoDNSAnswer(void *data, __u64 *offset, void *d
         return DROP;
     }
 
-    __u16 flags = 0x8180 + 3;
+    __u16 flags = 0x8180 + 2;
 
     header->name_servers = bpf_htons(0);
     header->additional_records = bpf_htons(0);
