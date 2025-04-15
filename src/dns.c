@@ -27,7 +27,7 @@ struct {
 } curr_queries SEC(".maps");
 
 struct {
-        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 2000000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct query_owner));
@@ -1278,7 +1278,7 @@ int dns_filter(struct xdp_md *ctx) {
 
             struct query_owner owner;
 
-            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0;
+            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0; owner.timestamp = bpf_ktime_get_ns() / 1000000000;
 
             __u8 kill_first = 0;
 

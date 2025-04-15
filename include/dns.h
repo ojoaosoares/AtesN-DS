@@ -167,6 +167,7 @@ struct rec_query_key {
 struct query_owner {
     __be32 ip_address;
     __u8 rec;
+    __u64 timestamp;
 };
 
 struct curr_query
