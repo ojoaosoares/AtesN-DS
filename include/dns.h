@@ -169,6 +169,7 @@ struct query_owner {
     __be32 ip_address;
     __u8 rec;
     __u8 not_cache;
+    __u8 curr_pointer;
 };
 
 struct curr_query

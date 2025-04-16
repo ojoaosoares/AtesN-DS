@@ -677,14 +677,17 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip) { 
+static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip, __u8 *pointer) { 
 
     __u64 index = 0;
 
     for (size_t i = 0; i < 10 && (index < MAX_DNS_NAME_LENGTH) && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
     {
         if(domain->name[index] == 0)
+        {
+            *pointer = index;
             return ACCEPT;
+        }
 
         if (domain->domain_size - index <= DNS_LIMIT)    
         {
@@ -716,6 +719,8 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                             bpf_printk("[XDP] Cache NS record hit");
                         #endif
 
+                        *pointer = index;
+
                         return ACCEPT;
                     }
                     
@@ -723,9 +728,6 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                         bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
 
                 }
-
-                // if (diff > 3)
-                //     bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
                 
             }
 
@@ -734,12 +736,14 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
         index += domain->name[index] + 1;
     }
 
+    *pointer = index;
+    
     return ACCEPT;
 }
 
-static __always_inline __u8 getAdditionalPointer(void *data, __u64 *offset, void *data_end, __u8 *pointer) {
+static __always_inline __u8 getPointer(void *data, __u64 *offset, void *data_end, __u8 *pointer) {
 
-    __u8 *content = data + *offset, count = 0;
+    __u8 *content = data + *offset;
 
     if (data + *offset + 2 > data_end)
         return DROP;
@@ -1276,22 +1280,9 @@ int dns_filter(struct xdp_md *ctx) {
 
     }
 
-    struct query_owner owner;
+    __u32 ip = recursive_server_ip; __u8 pointer;
 
-    owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0, owner.not_cache = 0;
-
-    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
-    {
-        #ifdef ERROR
-            bpf_printk("[XDP] Recursive queries map error check cache");
-        #endif  
-
-        return XDP_DROP;
-    }
-
-    __u32 ip = recursive_server_ip;
-
-    switch (findOwnerServer(&dnsquery.query, &ip))
+    switch (findOwnerServer(&dnsquery.query, &ip, &pointer))
     {
         case DROP:
             return XDP_DROP;
@@ -1302,6 +1293,19 @@ int dns_filter(struct xdp_md *ctx) {
                 bpf_printk("[XDP] Authoritative server: %u", ip);
             #endif
             break;
+    }
+
+    struct query_owner owner;
+
+    owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0, owner.not_cache = 0, owner.curr_pointer = pointer;
+
+    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
+    {
+        #ifdef ERROR
+            bpf_printk("[XDP] Recursive queries map error check cache");
+        #endif  
+
+        return XDP_DROP;
     }
 
     offset_h = 0;
@@ -1755,6 +1759,13 @@ int dns_process_response(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Cache NS record hit");
                 #endif
 
+                if (powner)
+                    powner->curr_pointer = 0;
+                
+                else if (lastdomain)
+                    lastdomain->pointer &= 0x00FF;
+                
+
                 __s16 newsize = (data + offset_h - data_end);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -1877,7 +1888,7 @@ int dns_process_response(struct xdp_md *ctx) {
     {
         __u8 pointer;
 
-        switch (getAdditionalPointer(data, &offset_h, data_end, &pointer))
+        switch (getPointer(data, &offset_h, data_end, &pointer))
         {
             case DROP:
                 return XDP_DROP;
@@ -1912,10 +1923,17 @@ int dns_process_response(struct xdp_md *ctx) {
         #endif
 
         if (powner)
+        {
             powner->not_cache = 1;
+            powner->curr_pointer = pointer;
+        }
 
         else if (lastdomain)
+        {
             lastdomain->trash |= (1 << 8);
+            lastdomain->pointer &= 0x00FF;
+            lastdomain->pointer |= (pointer << 8);
+        }
 
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
@@ -1924,13 +1942,35 @@ int dns_process_response(struct xdp_md *ctx) {
 
     else if (query_response == QUERY_NAMESERVERS_RETURN)
     {
+        __u8 pointer;
+
+        switch (getPointer(data, &offset_h, data_end, &pointer))
+        {
+            case DROP:
+                return XDP_DROP;
+            default:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Additional Pointer: %d", pointer);
+                #endif
+                break;
+        }
+
         if (powner)
+        {
             if (hideInDestIp(data, data_end, powner->rec) == DROP)
                 return XDP_DROP;    
 
+            powner->curr_pointer = pointer;
+        }
+
         else if (lastdomain)
+        {
             if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
                 return XDP_DROP;
+
+            lastdomain->pointer &= 0x00FF;
+            lastdomain->pointer |= (pointer << 8);
+        }
 
         if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
         {
@@ -2356,12 +2396,28 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         bpf_map_delete_elem(&curr_queries, &curr);
 
+        __u32 ip = recursive_server_ip; __u8 pointer;
+
+        switch (findOwnerServer(&dnsquery.query, &ip, &pointer))
+        {
+            case DROP:
+                return XDP_DROP;
+            case PASS:
+                return XDP_PASS;
+            default:
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Authoritative server: %u", ip);
+                #endif
+                break;
+        }
+
         __u32 value = getDestIp(data);
 
-        query->id.port =  value & 0xFF;
         dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
 
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
+
+        query->id.port = ((pointer & 0xFF) << 8) | (value & 0xFF);
 
 	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
         {
@@ -2385,21 +2441,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         data = (void*) (long) ctx->data;
         data_end = (void*) (long) ctx->data_end;
-
-        __u32 ip = recursive_server_ip;
-
-        switch (findOwnerServer(&dnsquery.query, &ip))
-        {
-            case DROP:
-                return XDP_DROP;
-            case PASS:
-                return XDP_PASS;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Authoritative server: %u", ip);
-                #endif
-                break;
-        }
 
         offset_h = 0;
 
