@@ -1278,7 +1278,7 @@ int dns_filter(struct xdp_md *ctx) {
 
     struct query_owner owner;
 
-    owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0; owner.timestamp = bpf_ktime_get_ns() / 1000000000;
+    owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0, owner.not_cache = 0;
 
     if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
     {
@@ -1408,6 +1408,12 @@ int dns_process_response(struct xdp_md *ctx) {
 
         if (powner->rec >= 16)
             recursion_limit = 1;
+
+        if (powner->not_cache)
+        {
+            powner->not_cache = 0;
+            // TODO
+        }
     }
 
     else 
@@ -1418,8 +1424,16 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             lastdomain->trash++;
 
-            if (lastdomain->trash >= 16)
+            __u8 rec = lastdomain->trash++;
+
+            if (rec >= 16)
                 recursion_limit = 1;
+
+            if (lastdomain->trash & (1 << 8)) 
+            {
+                lastdomain->trash &= ~(1 << 8);
+                // TODO
+            }
         }
 
         else
@@ -1897,6 +1911,12 @@ int dns_process_response(struct xdp_md *ctx) {
             bpf_printk("[XDP] Additional Query");
         #endif
 
+        if (powner)
+            powner->not_cache = 1;
+
+        else if (lastdomain)
+            lastdomain->trash |= (1 << 8);
+
         bpf_tail_call(ctx, &tail_programs, DNS_JUMP_QUERY_PROG);
         
         return XDP_DROP;
@@ -1908,7 +1928,7 @@ int dns_process_response(struct xdp_md *ctx) {
             if (hideInDestIp(data, data_end, powner->rec) == DROP)
                 return XDP_DROP;    
 
-        if (lastdomain)
+        else if (lastdomain)
             if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
                 return XDP_DROP;
 
@@ -2522,6 +2542,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 {
 
                     last_of_last->trash = deep;
+                    lastdomain->trash |= (1 << 8);
 
                     #ifdef DEEP
                         bpf_printk("curr %d", last_of_last->trash);
@@ -2535,6 +2556,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     if (powner)
                     {
                         powner->rec = deep;
+                        powner->not_cache = 1;
 
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
@@ -2649,6 +2671,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (last_of_last)
                 {
                     last_of_last->trash = deep;
+                    lastdomain->trash |= (1 << 8);
 
                     #ifdef DEEP
                         bpf_printk("curr %d", last_of_last->trash);
@@ -2662,6 +2685,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     if (powner)
                     {
                         powner->rec = deep;
+                        powner->not_cache = 1;
 
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
