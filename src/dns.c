@@ -1765,7 +1765,6 @@ int dns_process_response(struct xdp_md *ctx) {
                 else if (lastdomain)
                     lastdomain->pointer &= 0x00FF;
                 
-
                 __s16 newsize = (data + offset_h - data_end);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -2712,7 +2711,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (last_of_last)
                 {
                     last_of_last->trash = deep;
-                    lastdomain->trash |= (1 << 8);
 
                     #ifdef DEEP
                         bpf_printk("curr %d", last_of_last->trash);
@@ -2726,7 +2724,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     if (powner)
                     {
                         powner->rec = deep;
-                        powner->not_cache = 1;
 
                         #ifdef DEEP
                             bpf_printk("curr %d", powner->rec);
