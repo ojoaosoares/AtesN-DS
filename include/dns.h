@@ -69,6 +69,10 @@
 #define DNS_CHECK_SUBDOMAIN_PROG 4
 #define DNS_ERROR_PROG 5
 
+#define RCODE_NOERROR 0
+#define RCODE_SERVERFAIL 2
+#define RCODE_NXDOMAIN 3
+
 
 #ifndef memset
     #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
@@ -127,7 +131,6 @@ struct a_record {
     __u32 ip;
     __u32 ttl;
     __u64 timestamp;
-    __u8 status;
 };
 
 struct dns_domain {

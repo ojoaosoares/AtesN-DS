@@ -631,7 +631,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         record->ip = response->ip;
         record->ttl = bpf_ntohl(response->ttl);
         record->timestamp = bpf_ktime_get_ns() / 1000000000;
-        record->status = (bpf_ntohs(header->flags) & 0x000F);
+        // *status = (bpf_ntohs(header->flags) & 0x000F);
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Answer IP: %u", record->ip);
@@ -663,7 +663,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
         record->ip = 0;
         record->ttl = bpf_ntohl(response->ttl);
         record->timestamp = bpf_ktime_get_ns() / 1000000000;
-        record->status = (bpf_ntohs(header->flags) & 0x000F);
+        // *status = (bpf_ntohs(header->flags) & 0x000F);
 
         return ACCEPT;  
     }
@@ -744,7 +744,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    record->status = (bpf_ntohs(header->flags) & 0x000F);
+    // *status = (bpf_ntohs(header->flags) & 0x000F);
     record->ip = 0;
 
     __u8 *content = data + *offset;
@@ -1197,8 +1197,12 @@ int dns_filter(struct xdp_md *ctx) {
 
                     __s16 newsize = (data + offset_h - data_end);
 
+                    __u8 status = RCODE_NXDOMAIN;
+
                     if (arecord->ip ^ 0)
-                        newsize += sizeof(struct dns_response);
+                    {
+                        newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
+                    }
 
                     if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                     {
@@ -1247,7 +1251,7 @@ int dns_filter(struct xdp_md *ctx) {
                             break;
                     }
 
-                    switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, arecord->status, dnsquery.query.domain_size))
+                    switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, status, dnsquery.query.domain_size))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -1429,7 +1433,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
     if (recursion_limit)
     {    
-        if (hideInDestIp(data, data_end, 2) == DROP)
+        if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
             return XDP_DROP;
 
         #ifdef DOMAIN
@@ -1516,6 +1520,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                     break;
                 default:
+
                     if (dnsquery.query.domain_size <= DNS_LIMIT)
                     {
                         bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, 0);
@@ -1592,8 +1597,12 @@ int dns_process_response(struct xdp_md *ctx) {
 
                     __s16 newsize = (data + offset_h - data_end);
 
+                    __u8 status = RCODE_NXDOMAIN;
+
                     if (record->ip ^ 0)
-                        newsize += sizeof(struct dns_response);
+                    {
+                        newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
+                    }
 
                     if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                     {
@@ -1642,7 +1651,7 @@ int dns_process_response(struct xdp_md *ctx) {
                             break;
                     }
 
-                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, record->status, dnsquery.query.domain_size))
+                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, status, dnsquery.query.domain_size))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -1696,7 +1705,7 @@ int dns_process_response(struct xdp_md *ctx) {
                         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
                             return XDP_DROP;
                         
-                        if (hideInDestIp(data, data_end, 2) == DROP)
+                        if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
                             return XDP_DROP;
         
         
@@ -1824,7 +1833,7 @@ int dns_process_response(struct xdp_md *ctx) {
                     return XDP_PASS;
                 }
 
-                if (hideInDestIp(data, data_end, 2) == DROP)
+                if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
                     return XDP_DROP;
 
                 if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
@@ -1975,7 +1984,7 @@ int dns_jump_query(struct xdp_md *ctx) {
                 return XDP_DROP;
             case ACCEPT_NO_ANSWER:
 
-                if (hideInDestIp(data, data_end, 2) == DROP)
+                if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
                     return XDP_DROP;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2285,7 +2294,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     case ACCEPT_ERROR:
                     case ACCEPT_NO_ANSWER:
 
-                        if (hideInDestIp(data, data_end, 2) == DROP)
+                        if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2304,7 +2313,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                             #endif   
                         }
 
-                        if (hideInDestIp(data, data_end, 3) == DROP)
+                        if (hideInDestIp(data, data_end, RCODE_NXDOMAIN) == DROP)
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2489,7 +2498,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (cache_record.ip == 0)
                 {   
-                    if (hideInDestIp(data, data_end, 3) == DROP)
+                    if (hideInDestIp(data, data_end, RCODE_NXDOMAIN) == DROP)
                         return XDP_DROP;
                     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -2615,7 +2624,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else if (ip == 0)
             {
-                if (hideInDestIp(data, data_end, 3) == DROP)
+                if (hideInDestIp(data, data_end, RCODE_NXDOMAIN) == DROP)
                     return XDP_DROP;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
