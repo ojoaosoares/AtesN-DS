@@ -248,7 +248,6 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     }
 
     __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
-    query->record_type = 0;
 
     size_t size;
 
@@ -269,7 +268,14 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
     if (data + *offset > data_end)
         return DROP;
 
-    query->record_type = bpf_ntohs(*((__u16 *) content));
+    if (bpf_ntohs(*((__u16 *) content)) ^ A_RECORD_TYPE)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[PASS] It's not a DNS query TYPE A");
+        #endif
+
+        return PASS;
+    }
 
     content += 2;
 
@@ -696,23 +702,31 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                 
                 __u64 diff = getTTl(nsrecord->timestamp);
 
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
-                #endif
-
-                if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
-                {
-                    *ip = nsrecord->ip;
+                if (nsrecord->ip) {
 
                     #ifdef DOMAIN
-                        bpf_printk("[XDP] Cache NS record hit");
+                        bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
                     #endif
 
-                    return ACCEPT;
+                    if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+                    {
+                        *ip = nsrecord->ip;
+
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Cache NS record hit");
+                        #endif
+
+                        return ACCEPT;
+                    }
+                    
+                    else
+                        bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+
                 }
+
+                // if (diff > 3)
+                //     bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
                 
-                else
-                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
             }
 
         }
@@ -950,8 +964,6 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
 
-	        autho->record_type = A_RECORD_TYPE;
-
             return ACCEPT;
         }
 
@@ -975,8 +987,6 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
     domain += 2;
 
     *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
-
-    autho->record_type = A_RECORD_TYPE;
 
     return ACCEPT;
 }
@@ -1007,7 +1017,7 @@ static __always_inline __u8 writeQuery(void *data, __u64 *offset, void *data_end
     if (data + *(offset) > data_end)
         return DROP;
 
-    (* (__u16 *) content) = bpf_htons(query->record_type);
+    (* (__u16 *) content) = bpf_htons(A_RECORD_TYPE);
 
     content += 2;
 
@@ -1161,142 +1171,56 @@ int dns_filter(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+		        bpf_printk("[XDP] Size: %u", dnsquery.query.domain_size);
                 bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
             #endif
 
             break;
     }
-    
-    switch (dnsquery.query.record_type)
-    {
-        case A_RECORD_TYPE:
 
-            struct a_record *arecord = NULL;
+    struct a_record *arecord = NULL;
 
-            if (dnsquery.query.domain_size <= DNS_LIMIT)
-                arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
+    if (dnsquery.query.domain_size <= DNS_LIMIT)
+        arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
-            if (arecord)
-            {   
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Cache A record try");
-                #endif
-                
-                __u64 diff = getTTl(arecord->timestamp);
+    if (arecord)
+    {   
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Cache A record try");
+        #endif
+        
+        __u64 diff = getTTl(arecord->timestamp);
 
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
-                #endif
+        #ifdef DOMAIN
+            bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
+        #endif
 
-                if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
-                {
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Cache A record  hit");
-                    #endif
+        if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Cache A record  hit");
+            #endif
 
-                    __s16 newsize = (data + offset_h - data_end);
+            __s16 newsize = (data + offset_h - data_end);
 
-                    __u8 status = RCODE_NXDOMAIN;
+            __u8 status = RCODE_NXDOMAIN;
 
-                    if (arecord->ip ^ 0)
-                    {
-                        newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
-                    }
-
-                    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-                    {
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] It was't possible to resize the packet");
-                        #endif
-                        
-                        return XDP_DROP;
-                    }
-
-                    data = (void*) (long) ctx->data;
-                    data_end = (void*) (long) ctx->data_end;
-
-                    offset_h = 0;
-
-                    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (swapInternetLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (swapTransportLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, status, dnsquery.query.domain_size))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Answer created");
-                            #endif  
-                            break;
-                    }
-
-                    return XDP_TX;
-                }
-
-                else
-                    bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
-
+            if (arecord->ip ^ 0)
+            {
+                newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
             }
 
-            struct query_owner owner;
-
-            owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0; owner.timestamp = bpf_ktime_get_ns() / 1000000000;
-
-            if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
+            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
             {
-                #ifdef ERROR
-                    bpf_printk("[XDP] Recursive queries map error check cache");
-                #endif  
-
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] It was't possible to resize the packet");
+                #endif
+                
                 return XDP_DROP;
             }
 
-            __u32 ip = recursive_server_ip;
-
-            switch (findOwnerServer(&dnsquery.query, &ip))
-            {
-                case DROP:
-                    return XDP_DROP;
-                case PASS:
-                    return XDP_PASS;
-                default:
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Authoritative server: %u", ip);
-                    #endif
-                    break;
-            }
+            data = (void*) (long) ctx->data;
+            data_end = (void*) (long) ctx->data_end;
 
             offset_h = 0;
 
@@ -1310,42 +1234,119 @@ int dns_filter(struct xdp_md *ctx) {
                     #endif  
                     break;
             }
-            
-            switch(returnToNetwork(data, &offset_h, data_end, ip))
+
+            switch (swapInternetLayer(data, &offset_h, data_end))
             {
                 case DROP:
                     return XDP_DROP;
                 default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
                     break;
             }
 
-            switch(keepTransportLayer(data, &offset_h, data_end))
+            switch (swapTransportLayer(data, &offset_h, data_end))
             {
                 case DROP:
                     return XDP_DROP;
                 default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
                     break;
             }
 
-            switch(createDnsQuery(data, &offset_h, data_end))
+            switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, status, dnsquery.query.domain_size))
             {
                 case DROP:
                     return XDP_DROP;
                 default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Answer created");
+                    #endif  
                     break;
             }
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Recursive Query created");
-            #endif  
 
             return XDP_TX;
+        }
 
-    default:
-        break;
+        else
+            bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+
     }
 
-    return XDP_PASS;
+    struct query_owner owner;
+
+    owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0; owner.timestamp = bpf_ktime_get_ns() / 1000000000;
+
+    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
+    {
+        #ifdef ERROR
+            bpf_printk("[XDP] Recursive queries map error check cache");
+        #endif  
+
+        return XDP_DROP;
+    }
+
+    __u32 ip = recursive_server_ip;
+
+    switch (findOwnerServer(&dnsquery.query, &ip))
+    {
+        case DROP:
+            return XDP_DROP;
+        case PASS:
+            return XDP_PASS;
+        default:
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Authoritative server: %u", ip);
+            #endif
+            break;
+    }
+
+    offset_h = 0;
+
+    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+    {
+        case DROP:
+            return XDP_DROP;
+        default:
+            #ifdef DOMAIN
+                bpf_printk("[XDP] Headers updated");
+            #endif  
+            break;
+    }
+    
+    switch(returnToNetwork(data, &offset_h, data_end, ip))
+    {
+        case DROP:
+            return XDP_DROP;
+        default:
+            break;
+    }
+
+    switch(keepTransportLayer(data, &offset_h, data_end))
+    {
+        case DROP:
+            return XDP_DROP;
+        default:
+            break;
+    }
+
+    switch(createDnsQuery(data, &offset_h, data_end))
+    {
+        case DROP:
+            return XDP_DROP;
+        default:
+            break;
+    }
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Recursive Query created");
+    #endif  
+
+    return XDP_TX;
+
 }
 
 SEC("xdp")
@@ -1388,7 +1389,7 @@ int dns_process_response(struct xdp_md *ctx) {
         default:
             #ifdef DOMAIN
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-		        bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+		        bpf_printk("[XDP] Size: %u", dnsquery.query.domain_size);
                 bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
             #endif
 
@@ -2327,7 +2328,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
-		            bpf_printk("[XDP] Size: %u Type %u", dnsquery.query.domain_size, dnsquery.query.record_type);
+		            bpf_printk("[XDP] Size: %u", dnsquery.query.domain_size);
                     bpf_printk("[XDP] Id: %u Port %u", dnsquery.id.id, dnsquery.id.port);
                 #endif
                 break;

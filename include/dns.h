@@ -134,7 +134,6 @@ struct a_record {
 };
 
 struct dns_domain {
-    __u16 record_type;
     __u8 domain_size;
     char name[MAX_DNS_NAME_LENGTH];
 };
@@ -157,7 +156,6 @@ struct dns_query {
 };
 
 struct rec_query_domain {
-    __u16 record_type;
     __u8 domain_size;
     char name;
 };
