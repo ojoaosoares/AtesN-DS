@@ -64,14 +64,13 @@ __u32 serverip;
 
 unsigned char gateway_mac[ETH_ALEN];
 
-static __always_inline __u64 getTTl(__u64 timestamp) {
+static __always_inline __u64 getTTL(__u64 timestamp) {
+    __u64 now = bpf_ktime_get_ns() / 1000000000;
 
-    __u64 now = bpf_ktime_get_ns() / 1000000000 + 1;
+    if (now >= timestamp)
+        return 0;
 
-    if (now > timestamp)
-        return now - timestamp;
-
-    return (UINT64_MAX - timestamp) + now;
+    return timestamp - now;
 }
 
 static inline __u16 calculate_ip_checksum(struct iphdr *ip)
@@ -635,13 +634,10 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             return ACCEPT_NO_ANSWER;
 
         record->ip = response->ip;
-        record->ttl = bpf_ntohl(response->ttl);
-        record->timestamp = bpf_ktime_get_ns() / 1000000000;
-        // *status = (bpf_ntohs(header->flags) & 0x000F);
+        record->timestamp = (bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl);
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Answer IP: %u", record->ip);
-            bpf_printk("[XDP] Answer TTL: %u", record->ttl);
         #endif
         
         return ACCEPT;
@@ -667,10 +663,8 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             return ACCEPT_NO_ANSWER;
 
         record->ip = 0;
-        record->ttl = bpf_ntohl(response->ttl);
-        record->timestamp = bpf_ktime_get_ns() / 1000000000;
-        // *status = (bpf_ntohs(header->flags) & 0x000F);
-
+        record->timestamp = (bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl);
+        
         return ACCEPT;  
     }
     
@@ -703,15 +697,15 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                     bpf_printk("[XDP] Cache NS record try");
                 #endif
                 
-                __u64 diff = getTTl(nsrecord->timestamp);
+                __u64 diff = getTTL(nsrecord->timestamp);
 
                 if (nsrecord->ip) {
 
                     #ifdef DOMAIN
-                        bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
+                        bpf_printk("[XDP] Current: %llu", diff);
                     #endif
 
-                    if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+                    if (diff >  MINIMUM_TTL)
                     {
                         *ip = nsrecord->ip;
 
@@ -762,11 +756,13 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-    // *status = (bpf_ntohs(header->flags) & 0x000F);
     record->ip = 0;
 
     __u8 *content = data + *offset;
     __u8 rand = (bpf_get_prandom_u32() % 3) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
+    __u32 ttl = 0;
+
+    record->timestamp = (bpf_ktime_get_ns() / 1000000000);
 
     for (size_t size = 0; size < 500 - domainsize; size++)
     {
@@ -778,20 +774,26 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
             if (data + (*offset) + 15 > data_end)
                 return DROP;
 
-            record->ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
+            ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
             
             record->ip = *((__u32 *) (content + size + 12));            
 
             if (!rand)
+            {
+                record->timestamp += ttl;
                 return ACCEPT;
+            }
 
             rand--;
         }
     }
 
     if (record->ip)
+    {
+        record->timestamp += ttl;
         return ACCEPT;
-    
+    }
+
     return ACCEPT_NO_ANSWER;
 }
 
@@ -1193,13 +1195,13 @@ int dns_filter(struct xdp_md *ctx) {
             bpf_printk("[XDP] Cache A record try");
         #endif
         
-        __u64 diff = getTTl(arecord->timestamp);
+        __u64 diff = getTTL(arecord->timestamp);
 
         #ifdef DOMAIN
-            bpf_printk("[XDP] TTL: %llu Current: %llu", arecord->ttl, diff);
+            bpf_printk("[XDP] Current: %llu", diff);
         #endif
 
-        if (arecord->ttl > diff && (arecord->ttl) - diff >  MINIMUM_TTL)
+        if (diff >  MINIMUM_TTL)
         {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache A record  hit");
@@ -1261,7 +1263,7 @@ int dns_filter(struct xdp_md *ctx) {
                     break;
             }
 
-            switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, arecord->ttl - diff, status, dnsquery.query.domain_size))
+            switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size))
             {
                 case DROP:
                     return XDP_DROP;
@@ -1598,13 +1600,13 @@ int dns_process_response(struct xdp_md *ctx) {
                 bpf_printk("[XDP] Cache A record try");
             #endif
             
-            __u64 diff = getTTl(record->timestamp);
+            __u64 diff = getTTL(record->timestamp);
 
             #ifdef DOMAIN
-                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
+                bpf_printk("[XDP] Current: %llu", diff);
             #endif
 
-            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
+            if (diff >  MINIMUM_TTL)
             {
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Cache A record  hit");
@@ -1670,7 +1672,7 @@ int dns_process_response(struct xdp_md *ctx) {
                             break;
                     }
 
-                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, record->ttl - diff, status, dnsquery.query.domain_size))
+                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size))
                     {
                         case DROP:
                             return XDP_DROP;
@@ -1747,13 +1749,13 @@ int dns_process_response(struct xdp_md *ctx) {
                 bpf_printk("[XDP] Cache NS record try");
             #endif
             
-            __u64 diff = getTTl(record->timestamp);
+            __u64 diff = getTTL(record->timestamp);
 
             #ifdef DOMAIN
-                bpf_printk("[XDP] TTL: %llu Current: %llu", record->ttl, diff);
+                bpf_printk("[XDP] Current: %llu", diff);
             #endif
 
-            if (record->ttl > diff && (record->ttl) - diff >  MINIMUM_TTL)
+            if (diff >  MINIMUM_TTL)
             {
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Cache NS record hit");
@@ -2053,7 +2055,6 @@ int dns_jump_query(struct xdp_md *ctx) {
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Additional IP: %u", record.ip);
-                    bpf_printk("[XDP] Additional TTL: %u", record.ttl);
                     bpf_printk("[XDP] Additional Pointer: %u", pointer);
                 #endif
                 break;
@@ -2208,13 +2209,13 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 bpf_printk("[XDP] Cache NS record try");
             #endif
             
-            __u64 diff = getTTl(nsrecord->timestamp);
+            __u64 diff = getTTL(nsrecord->timestamp);
 
             #ifdef DOMAIN
-                bpf_printk("[XDP] TTL: %llu Current: %llu", nsrecord->ttl, diff);
+                bpf_printk("[XDP] Current: %llu", diff);
             #endif
 
-            if (nsrecord->ttl > diff && (nsrecord->ttl) - diff >  MINIMUM_TTL)
+            if (diff >  MINIMUM_TTL)
             {
                 bpf_map_delete_elem(&curr_queries, &curr);
 
@@ -2685,14 +2686,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 return XDP_TX;
             }
 
-            else if (ip == 0)
-            {
-                if (hideInDestIp(data, data_end, RCODE_NXDOMAIN) == DROP)
-                    return XDP_DROP;
-
-                bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-            }
-
             else
             {
                 bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
@@ -2799,6 +2792,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 return XDP_TX;
             }
         }
+
+        bpf_map_delete_elem(&curr_queries, &curr)
     }
 
     return XDP_PASS;

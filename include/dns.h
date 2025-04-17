@@ -129,7 +129,6 @@ struct dns_authoritative {
 
 struct a_record {
     __u32 ip;
-    __u32 ttl;
     __u64 timestamp;
 };
 
