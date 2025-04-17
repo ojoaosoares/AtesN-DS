@@ -2793,7 +2793,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             }
         }
 
-        bpf_map_delete_elem(&curr_queries, &curr)
+        bpf_map_delete_elem(&curr_queries, &curr);
     }
 
     return XDP_PASS;
