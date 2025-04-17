@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define ERROR
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -1301,10 +1301,11 @@ int dns_filter(struct xdp_md *ctx) {
 
     owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0, owner.not_cache = 0, owner.curr_pointer = pointer;
 
-    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, 0) < 0)
+    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
     {
         #ifdef ERROR
             bpf_printk("[XDP] Recursive queries map error check cache");
+            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
         #endif  
 
         return XDP_DROP;
@@ -1544,7 +1545,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
                     if (dnsquery.query.domain_size <= DNS_LIMIT)
                     {
-                        bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, 0);
+                        bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, BPF_ANY);
 
                         #ifdef DOMAIN
                             bpf_printk("[XDP] A cache updated");
@@ -1562,16 +1563,10 @@ int dns_process_response(struct xdp_md *ctx) {
 
         else if (lastdomain) 
         {
-            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+            if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
             {
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Error map 1");
-                #endif
-
                 #ifdef ERROR
-                    bpf_printk("[XDP] Curr queries map error process");
-                    bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                    bpf_printk("[XDP] ZERO");
+                    bpf_printk("[XDP] Curr queries map error process/response return");
                 #endif  
 
                 return XDP_PASS;
@@ -1688,17 +1683,11 @@ int dns_process_response(struct xdp_md *ctx) {
 
                 else if (lastdomain)
                 {
-                    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
                     {
 
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Error map 2");
-                        #endif
-
                         #ifdef ERROR
-                            bpf_printk("[XDP] Curr queries map error process");
-                            bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                            bpf_printk("[XDP] ZERO");
+                            bpf_printk("[XDP] Curr queries map error/back to last");
                         #endif  
 
                         return XDP_PASS;
@@ -1844,17 +1833,11 @@ int dns_process_response(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Strange Packet");
                 #endif
 
-                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
                 {
 
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Error map 3");
-                    #endif
-
                     #ifdef ERROR
-                        bpf_printk("[XDP] Curr queries map error process");
-                        bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                        bpf_printk("[XDP] ZERO");
+                        bpf_printk("[XDP] Curr queries map error/error");
                     #endif  
 
                     return XDP_PASS;
@@ -1863,21 +1846,6 @@ int dns_process_response(struct xdp_md *ctx) {
                 if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
                     return XDP_DROP;
 
-                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
-                {
-
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Error map 4");
-                    #endif
-                    #ifdef ERROR
-                        bpf_printk("[XDP] Curr queries map error process");
-                        bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                        bpf_printk("[XDP] ZERO");
-                    #endif  
-            
-                    return XDP_PASS;
-                }
-                
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
 
                 return XDP_DROP;
@@ -1903,17 +1871,10 @@ int dns_process_response(struct xdp_md *ctx) {
         if (hideInDestIp(data, data_end, pointer) == DROP)
             return XDP_DROP;
 
-        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
         {
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Error map 5");
-            #endif
-
             #ifdef ERROR
-                bpf_printk("[XDP] Curr queries map error process");
-                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                bpf_printk("[XDP] ZERO");
+                bpf_printk("[XDP] Curr queries map error/additional");
             #endif  
     
             return XDP_PASS;
@@ -1973,17 +1934,10 @@ int dns_process_response(struct xdp_md *ctx) {
             lastdomain->pointer |= (pointer << 8);
         }
 
-        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, 0) < 0)
+        if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
         {
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] Error map 6");
-            #endif
-
             #ifdef ERROR
-                bpf_printk("[XDP] Curr queries map error process");
-                bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
-                bpf_printk("[XDP] ZERO");
+                bpf_printk("[XDP] Curr queries map error process/nameservers");
             #endif  
     
             return XDP_PASS;
@@ -2064,7 +2018,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
-            if (bpf_map_update_elem(&cache_nsrecords, &query->query.name[pointer], &record, 0) < 0)
+            if (bpf_map_update_elem(&cache_nsrecords, &query->query.name[pointer], &record, BPF_ANY) < 0)
             {
                 #ifdef DOMAIN
                     bpf_printk("[XDP] NS Cache map error");
@@ -2367,7 +2321,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                         if (query->query.name <= DNS_LIMIT)
                         {
-                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, 0);
+                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
                             #ifdef ERRO
                                 bpf_printk("[XDP] A cache updated");
@@ -2419,10 +2373,11 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         query->id.port = ((pointer & 0xFF) << 8) | (value & 0xFF);
 
-	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, 0) < 0)
+	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, BPF_ANY) < 0)
         {
             #ifdef ERROR
-                bpf_printk("[XDP] new query create new query");
+                bpf_printk("[XDP] new query map error");
+                bpf_printk("[XDP] Domain %s", dnsquery.query.name);
             #endif
 
             return XDP_DROP;
@@ -2545,7 +2500,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                         if (query->query.domain_size <= DNS_LIMIT)
                         {
-                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, 0);
+                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
                             #ifdef ERRO
                                 bpf_printk("[XDP] A cache updated");
@@ -2665,7 +2620,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (lastdomain->query.domain_size - pointer <= DNS_LIMIT &&  pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
                 {
-                    if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, 0) < 0)
+                    if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, BPF_ANY) < 0)
                     {
                         #ifdef DOMAIN
                             bpf_printk("[XDP] NS Cache map error");
