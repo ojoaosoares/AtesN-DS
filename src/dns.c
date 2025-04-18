@@ -1453,7 +1453,7 @@ int dns_process_response(struct xdp_md *ctx) {
         }
     }
 
-    if (recursion_limit)
+    if (recursion_limit && query_response ^ RESPONSE_RETURN)
     {    
         if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
             return XDP_DROP;
@@ -1584,8 +1584,7 @@ int dns_process_response(struct xdp_md *ctx) {
         else return XDP_PASS;        
     }
     
-
-    if (dnsquery.query.domain_size <= DNS_LIMIT)
+    if (dnsquery.query.domain_size <= DNS_LIMIT && powner)
     {
         struct a_record *record = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
@@ -1607,123 +1606,76 @@ int dns_process_response(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Cache A record  hit");
                 #endif
                 
-                if (powner)
+                bpf_map_delete_elem(&recursive_queries, &dnsquery);
+
+                __s16 newsize = (data + offset_h - data_end);
+
+                __u8 status = RCODE_NXDOMAIN;
+
+                if (record->ip ^ 0)
                 {
-                    bpf_map_delete_elem(&recursive_queries, &dnsquery);
-
-                    __s16 newsize = (data + offset_h - data_end);
-
-                    __u8 status = RCODE_NXDOMAIN;
-
-                    if (record->ip ^ 0)
-                    {
-                        newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
-                    }
-
-                    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-                    {
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] It was't possible to resize the packet");
-                        #endif
-                        
-                        return XDP_DROP;
-                    }
-
-                    data = (void*) (long) ctx->data;
-                    data_end = (void*) (long) ctx->data_end;
-
-                    offset_h = 0;
-
-                    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (keepTransportLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Answer created");
-                            #endif  
-                            break;
-                    }
-
-                    return XDP_TX;
+                    newsize += sizeof(struct dns_response); status = RCODE_NOERROR;
                 }
 
-                else if (lastdomain)
+                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
-                    if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
-                    {
-
-                        #ifdef ERROR
-                            bpf_printk("[XDP] Curr queries map error/back to last");
-                        #endif  
-
-                        return XDP_PASS;
-                    }
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] It was't possible to resize the packet");
+                    #endif
                     
-                    if (record->ip ^ 0) {
-
-                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                            return XDP_DROP;
-        
-                        if (hideInDestIp(data, data_end, record->ip) == DROP)
-                            return XDP_DROP;
-        
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] A last response came");
-                        #endif
-
-                        bpf_tail_call(ctx, &tail_programs, DNS_BACK_TO_LAST_QUERY);
-
-                        return XDP_DROP;
-                    }
-        
-                    else
-                    {
-                        if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end)
-                            return XDP_DROP;
-                        
-                        if (hideInDestIp(data, data_end, RCODE_SERVERFAIL) == DROP)
-                            return XDP_DROP;
-        
-        
-                        bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
-        
-                        return XDP_DROP;
-                    }
+                    return XDP_DROP;
                 }
+
+                data = (void*) (long) ctx->data;
+                data_end = (void*) (long) ctx->data_end;
+
+                offset_h = 0;
+
+                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (keepTransportLayer(data, &offset_h, data_end))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
+                        break;
+                }
+
+                switch (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size))
+                {
+                    case DROP:
+                        return XDP_DROP;
+                    default:
+                        #ifdef DOMAIN
+                            bpf_printk("[XDP] Answer created");
+                        #endif  
+                        break;
+                }
+
+                return XDP_TX;
             }
 
             else
