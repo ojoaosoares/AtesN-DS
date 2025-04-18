@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+#define ERROR
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -2473,13 +2473,23 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                 }
 
-                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
+                __u8 deep = lastdomain->trash, pointer = lastdomain->pointer; ip = cache_record.ip;
 
-                __u8 pointer = lastdomain->pointer, deep = lastdomain->trash;
-                
-                #ifdef DEEP
-                    bpf_printk("last %d", deep);
-                #endif
+                if (lastdomain->query.domain_size - pointer <= DNS_LIMIT && pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
+                {
+                    if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, BPF_ANY) < 0)
+                    {
+                        #ifdef ERROR
+                            bpf_printk("[XDP] NS Cache map error");
+                        #endif
+
+                        return XDP_PASS;
+                    }
+
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] NS Cache Updated");
+                    #endif
+                }
 
                 lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
                 lastdomain->pointer = curr.id.port;
@@ -2488,7 +2498,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (last_of_last)
                 {
-
                     last_of_last->trash = deep;
                     lastdomain->trash |= (1 << 8);
 
@@ -2497,8 +2506,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     #endif
                 }
 
-                else {
-                    
+                else
+                {   
                     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
 
                     if (powner)
@@ -2511,97 +2520,11 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #endif
                     }                    
                 }
-                
-                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-                {
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] It was't possible to resize the packet");
-                    #endif
-                    
-                    return XDP_DROP;
-                }
-
-                data = (void*) (long) ctx->data;
-                data_end = (void*) (long) ctx->data_end;
-
-                offset_h = 0;      
-
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
-            
-                switch(returnToNetwork(data, &offset_h, data_end, cache_record.ip))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                switch (swapTransportLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                switch(createDnsQuery(data, &offset_h, data_end))
-                {   
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        decrementID(data);
-                        break;
-                }
-
-                switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                if (lastdomain->query.domain_size - pointer <= DNS_LIMIT &&  pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
-                {
-                    if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, BPF_ANY) < 0)
-                    {
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] NS Cache map error");
-                        #endif
-
-                        return XDP_PASS;
-                    }
-
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] NS Cache Updated");
-                    #endif
-                }
-
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] New back query created");
-                #endif
-
-                return XDP_TX;
             }
 
             else
             {
-                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
-
                 __u8 deep = lastdomain->trash;
-
-                #ifdef DEEP
-                    bpf_printk("last %d", deep);
-                #endif
 
                 lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
                 lastdomain->pointer = curr.id.port;
@@ -2617,7 +2540,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     #endif
                 }
 
-                else {
+                else
+                {
                     
                     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
 
@@ -2630,74 +2554,76 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         #endif
                     }
                 }
-
-                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-                {
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] It was't possible to resize the packet");
-                    #endif
-                    
-                    return XDP_DROP;
-                }
-
-                data = (void*) (long) ctx->data;
-                data_end = (void*) (long) ctx->data_end;
-
-                offset_h = 0;      
-
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
-
-                switch (returnToNetwork(data, &offset_h, data_end, ip))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
-
-                switch (swapTransportLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                switch(createDnsQuery(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        decrementID(data);
-                        break;
-                }
-
-                switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] New back query created");
-                #endif
-
-                return XDP_TX;
             }
+
+            bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
+
+            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] It was't possible to resize the packet");
+                #endif
+                
+                return XDP_DROP;
+            }
+
+            data = (void*) (long) ctx->data;
+            data_end = (void*) (long) ctx->data_end;
+
+            offset_h = 0;      
+
+            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
+                    break;
+            }
+
+            switch (returnToNetwork(data, &offset_h, data_end, ip))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] Headers updated");
+                    #endif  
+                    break;
+            }
+
+            switch (swapTransportLayer(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            switch(createDnsQuery(data, &offset_h, data_end))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    decrementID(data);
+                    break;
+            }
+
+            switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
+            {
+                case DROP:
+                    return XDP_DROP;
+                default:
+                    break;
+            }
+
+            #ifdef DOMAIN
+                bpf_printk("[XDP] New back query created");
+            #endif
+
+            return XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
