@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define ERROR
+#define DOMAIN
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -1403,7 +1403,7 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
-    __u8 back_to_last = 0, recursion_limit = 0;
+    __u8 recursion_limit = 0;
 
     struct query_owner *powner = NULL; struct hop_query *lastdomain = NULL;
 
