@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define ERROR
+#define OS
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -35,7 +35,7 @@ struct {
 } recursive_queries SEC(".maps");
 
 struct {
-        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 7000000);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct hop_query));
@@ -937,7 +937,9 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             autho->domain_size += (query->domain_size - pointer) - 2;
 
-            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH && size < size + i < MAX_DNS_NAME_LENGTH; i++)
+            autho->name[size] = query->name[pointer];
+
+            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH; i++)
             {
                 if (data + ++newoff > data_end)
                     return DROP;
@@ -947,7 +949,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
                 if (*(domain++) == 0)
                     break;
 
-                autho->name[size + i] == query->name[pointer + i];
+                // autho->name[size + i] == query->name[pointer + i];
             }
 
             newoff = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + autho->domain_size;
@@ -1037,7 +1039,7 @@ static __always_inline void incrementID(void *data)
     struct dns_header *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
     
     // Incrementa com overflow controlado
-    header->id = bpf_htons((bpf_ntohs(header->id) + 1)); // Mantém o valor dentro de 16 bits
+    header->id += 1; // Mantém o valor dentro de 16 bits
 }
 
 static __always_inline void decrementID(void *data)
@@ -1045,7 +1047,7 @@ static __always_inline void decrementID(void *data)
     struct dns_header *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
     
     // Decrementa com underflow controlado
-    header->id = bpf_htons((bpf_ntohs(header->id) - 1));
+    header->id -= 1;
 }
 
 static __always_inline void hideInSourceIp(void *data, __u32 hidden)
@@ -1366,7 +1368,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
     struct dns_query dnsquery; struct curr_query curr;
 
-    __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &dnsquery.id.id);
+    __u8 query_response = isDNSQueryOrResponse(data, &offset_h, data_end, &curr.id.id);
 
     #ifdef DOMAIN
         bpf_printk("[XDP] response %d", query_response);
@@ -1385,7 +1387,8 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
-    curr.ip = getSourceIp(data); dnsquery.id.port = getDestPort(data); curr.id = dnsquery.id;
+    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); 
+    dnsquery.id.id = curr.id.id; dnsquery.id.port = curr.id.port;
 
     switch (getDomain(data, &offset_h, data_end, &dnsquery.query))
     {
@@ -1445,8 +1448,12 @@ int dns_process_response(struct xdp_md *ctx) {
 
         else
         {
-            #ifdef DOMAIN
+            #ifdef OS
                 bpf_printk("[XDP] It belongs to the OS");
+                bpf_printk("[XDP] Name %s", dnsquery.query.name);
+                bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
+                bpf_printk("[XDP] OS error %d", dnsquery.id.id);
+                bpf_printk("[XDP] Port %d", dnsquery.id.port);
             #endif
 
             return XDP_PASS;
@@ -1565,7 +1572,7 @@ int dns_process_response(struct xdp_md *ctx) {
         {
             if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) < 0)
             {
-                #ifdef ERROR
+                #ifdef SO
                     bpf_printk("[XDP] Curr queries map error process/response return");
                 #endif  
 
@@ -1908,11 +1915,6 @@ int dns_process_response(struct xdp_md *ctx) {
 
         return XDP_DROP;
     }
-
-    #ifdef DOMAIN
-        bpf_printk("[XDP] Nothing");
-    #endif
-
     return XDP_PASS;
 }
 
@@ -2246,7 +2248,8 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         struct dns_query dnsquery; 
         
-        dnsquery.id = curr.id;
+        dnsquery.id.port = curr.id.port;
+        dnsquery.id.id = curr.id.id;
 
         switch(getAuthoritative(data, &offset_h, data_end, &dnsquery.query, &query->query, off))
         {
@@ -2324,7 +2327,17 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         __u32 value = getDestIp(data);
 
-        dnsquery.id.id = bpf_htons((bpf_ntohs(dnsquery.id.id) + 1));
+        #ifdef SIZE
+            bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
+            bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
+        #endif
+
+        dnsquery.id.id += 1;
+
+        #ifdef SIZE
+            bpf_printk("[XDP] ID new %d", dnsquery.id.id);
+            bpf_printk("[XDP] Port  %d", dnsquery.id.port);
+        #endif
 
         incrementID(data); query->id.id = (value >> 8) & 0xFF;
 
@@ -2476,6 +2489,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                         return XDP_DROP;
                     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
+
+                    return XDP_PASS;
                 }
 
                 __u8 deep = lastdomain->trash, pointer = lastdomain->pointer; ip = cache_record.ip;
@@ -2496,10 +2511,10 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     #endif
                 }
 
-                lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
+                lastdomain->trash = curr.id.id - 1;
                 lastdomain->pointer = curr.id.port;
 
-                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
+                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) lastdomain);
 
                 if (last_of_last)
                 {
@@ -2531,10 +2546,10 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             {
                 __u8 deep = lastdomain->trash;
 
-                lastdomain->trash = bpf_htons((bpf_ntohs(curr.id.id) - 1));
+                lastdomain->trash = curr.id.id - 1;
                 lastdomain->pointer = curr.id.port;
 
-                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, lastdomain);
+                struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) lastdomain);
 
                 if (last_of_last)
                 {
@@ -2547,7 +2562,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 else
                 {
-                    
                     struct query_owner *powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) lastdomain);
 
                     if (powner)
@@ -2676,7 +2690,7 @@ int dns_error(struct xdp_md *ctx) {
                 
                 bpf_map_delete_elem(&new_queries, (struct rec_query_key *) query);
 
-                __u16 id = bpf_htons((bpf_ntohs(query->id.id) - 1)), port = query->id.port;
+                __u16 id = query->id.id - 1, port = query->id.port;
 
                 decrementID(data);
 

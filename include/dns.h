@@ -156,7 +156,7 @@ struct dns_query {
 
 struct rec_query_domain {
     __u8 domain_size;
-    char name;
+    char name[3];
 };
 
 struct rec_query_key {
