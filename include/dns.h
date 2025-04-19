@@ -110,7 +110,7 @@ struct dns_header
 struct dns_response {
    uint16_t query_pointer;
    uint16_t record_type;
-   uint16_t class;
+   uint16_t record_class;
    uint32_t ttl;
    uint16_t data_length;
    uint32_t ip;

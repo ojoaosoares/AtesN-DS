@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define OS
+#define DOMAIN
 
 struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -199,7 +199,8 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
         return PASS;
     }
 
-    *id = header->id;
+    // *id = header->id;
+    *id = bpf_ntohs(header->id);
 
     #ifdef FILTER
         bpf_printk("[XDP] Flags %d %d", bpf_ntohs(header->flags), header->flags);
@@ -294,7 +295,8 @@ static __always_inline __u16 getQueryId(void *data)
 {
     struct dns_header *header = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
 
-    return header->id;
+    return bpf_ntohs(header->id);
+    // return header->id;
 }
 
 static __always_inline __u16 getSourcePort(void *data)
@@ -513,7 +515,7 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
     }
 
     response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
-    response->class = bpf_htons(INTERNT_CLASS);
+    response->record_class = bpf_htons(INTERNT_CLASS);
     response->record_type = bpf_htons(A_RECORD_TYPE);
     response->ttl = bpf_htonl(ttl);
     response->data_length = bpf_htons(sizeof(ip));
@@ -627,7 +629,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             }
         }
 
-        if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+        if (bpf_ntohs(response->record_class) ^ INTERNT_CLASS)
             return ACCEPT_NO_ANSWER;
 
         if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
@@ -656,7 +658,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             return DROP;
         }
 
-        if (bpf_ntohs(response->class) ^ INTERNT_CLASS)
+        if (bpf_ntohs(response->record_class) ^ INTERNT_CLASS)
             return ACCEPT_NO_ANSWER;
 
         if(bpf_ntohs(response->record_type) ^ SOA_RECORD_TYPE)
@@ -1034,27 +1036,13 @@ static __always_inline __u8 writeQuery(void *data, __u64 *offset, void *data_end
     return ACCEPT;
 }
 
-static __always_inline void incrementID(void *data)
+static __always_inline void modifyID(void *data, __u16 id)
 {
     struct dns_header *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
     
     // Incrementa com overflow controlado
-    header->id += 1; // Mantém o valor dentro de 16 bits
-}
-
-static __always_inline void decrementID(void *data)
-{
-    struct dns_header *header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-    
-    // Decrementa com underflow controlado
-    header->id -= 1;
-}
-
-static __always_inline void hideInSourceIp(void *data, __u32 hidden)
-{   
-    struct iphdr *ipv4 = data + sizeof(struct ethhdr);
-
-    ipv4->saddr = hidden;
+    // header->id = id;
+    header->id = bpf_htons(id);
 }
 
 static __always_inline __u8 hideInDestIp(void *data, void *data_end, __u32 hidden)
@@ -2339,7 +2327,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Port  %d", dnsquery.id.port);
         #endif
 
-        incrementID(data); query->id.id = (value >> 8) & 0xFF;
+        modifyID(data, dnsquery.id.id); query->id.id = (value >> 8) & 0xFF;
 
         query->id.port = ((pointer & 0xFF) << 8) | (value & 0xFF);
 
@@ -2626,7 +2614,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 case DROP:
                     return XDP_DROP;
                 default:
-                    decrementID(data);
+                    modifyID(data, lastdomain->trash);
                     break;
             }
 
@@ -2692,7 +2680,7 @@ int dns_error(struct xdp_md *ctx) {
 
                 __u16 id = query->id.id - 1, port = query->id.port;
 
-                decrementID(data);
+                modifyID(data, id);
 
                 query = lastdomain;
             
