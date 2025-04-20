@@ -9,7 +9,6 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define OS
 #define DOMAIN
 
 struct {
