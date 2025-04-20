@@ -9,6 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
+#define OS
 #define DOMAIN
 
 struct {
@@ -701,35 +702,40 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                 
                 __u64 diff = getTTL(nsrecord->timestamp);
 
-                if (nsrecord->ip) {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Current: %llu", diff);
+                #endif
+
+                if (!nsrecord->ip && diff > 3)
+                {
+                    *pointer = domain->domain_size;
+
+                    // bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+                    
+                    break;
+                }
+
+                if (diff >  MINIMUM_TTL)
+                {
+                    *ip = nsrecord->ip;
 
                     #ifdef DOMAIN
-                        bpf_printk("[XDP] Current: %llu", diff);
+                        bpf_printk("[XDP] Cache NS record hit");
                     #endif
 
-                    if (diff >  MINIMUM_TTL)
-                    {
-                        *ip = nsrecord->ip;
+                    *pointer = index;
 
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Cache NS record hit");
-                        #endif
-
-                        *pointer = index;
-
-                        return ACCEPT;
-                    }
-                    
-                    else
-                        bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
-
+                    return ACCEPT;
                 }
                 
+                else
+                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
             }
-
+                
         }
-
+        
         index += domain->name[index] + 1;
+
     }
 
     *pointer = index;
@@ -1394,7 +1400,7 @@ int dns_process_response(struct xdp_md *ctx) {
             break;
     }
 
-    __u8 recursion_limit = 0;
+    __u8 recursion_limit = 0, aprove = 0, pointer;
 
     struct query_owner *powner = NULL; struct hop_query *lastdomain = NULL;
 
@@ -1410,7 +1416,8 @@ int dns_process_response(struct xdp_md *ctx) {
         if (powner->not_cache)
         {
             powner->not_cache = 0;
-            // TODO
+            aprove = 1;
+            pointer = powner->curr_pointer;
         }
     }
 
@@ -1430,13 +1437,14 @@ int dns_process_response(struct xdp_md *ctx) {
             if (lastdomain->trash & (1 << 8)) 
             {
                 lastdomain->trash &= ~(1 << 8);
-                // TODO
+                aprove = 1;
+                pointer = (lastdomain->pointer >> 8);
             }
         }
 
         else
         {
-            #ifdef OS
+            #ifdef DOMAIN
                 bpf_printk("[XDP] It belongs to the OS");
                 bpf_printk("[XDP] Name %s", dnsquery.query.name);
                 bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
@@ -1446,6 +1454,24 @@ int dns_process_response(struct xdp_md *ctx) {
 
             return XDP_PASS;
         }
+    }
+
+    if (aprove)
+    {
+        if ((dnsquery.query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        {
+            struct a_record *record_aprove = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name[pointer]);
+
+            if (record_aprove)
+            {
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Cache aproved");
+                #endif            
+
+                record_aprove->ip = curr.ip;    
+            }
+        }
+        
     }
 
     if (recursion_limit && query_response ^ RESPONSE_RETURN)
@@ -1684,7 +1710,7 @@ int dns_process_response(struct xdp_md *ctx) {
 
         record = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) dnsquery.query.name);
 
-        if (record && record->ip != curr.ip)
+        if (record && record->ip && record->ip != curr.ip)
         {   
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record try");
@@ -1961,10 +1987,12 @@ int dns_jump_query(struct xdp_md *ctx) {
                 break;
         }
         
-        bpf_map_delete_elem(&curr_queries, &curr);
+        bpf_map_delete_elem(&curr_queries, &curr); __u32 ip = record.ip;
 
         if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
+            record.ip = 0;
+
             if (bpf_map_update_elem(&cache_nsrecords, &query->query.name[pointer], &record, BPF_ANY) < 0)
             {
                 #ifdef DOMAIN
@@ -2006,7 +2034,7 @@ int dns_jump_query(struct xdp_md *ctx) {
                 break;
         }
 
-        switch(returnToNetwork(data, &offset_h, data_end, record.ip))
+        switch(returnToNetwork(data, &offset_h, data_end, ip))
         {
             case DROP:
                 return XDP_DROP;
@@ -2315,17 +2343,15 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         __u32 value = getDestIp(data);
 
-        #ifdef SIZE
-            bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
-            bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Last %s", query->query.name);
+            bpf_printk("[XDP] New %s", dnsquery.query.name);
+            
         #endif
 
         dnsquery.id.id += 1;
 
-        #ifdef SIZE
-            bpf_printk("[XDP] ID new %d", dnsquery.id.id);
-            bpf_printk("[XDP] Port  %d", dnsquery.id.port);
-        #endif
+        
 
         modifyID(data, dnsquery.id.id); query->id.id = (value >> 8) & 0xFF;
 
@@ -2485,6 +2511,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (lastdomain->query.domain_size - pointer <= DNS_LIMIT && pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
                 {
+                    cache_record.ip = 0;
+
                     if (bpf_map_update_elem(&cache_nsrecords, &lastdomain->query.name[pointer], &cache_record, BPF_ANY) < 0)
                     {
                         #ifdef ERROR
