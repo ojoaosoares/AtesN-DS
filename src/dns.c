@@ -727,8 +727,8 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                     return ACCEPT;
                 }
                 
-                else
-                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+                // else
+                    // bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
             }
                 
         }
@@ -944,6 +944,9 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             autho->domain_size += (query->domain_size - pointer) - 2;
 
+            if (size > MAX_DNS_NAME_LENGTH || pointer > MAX_DNS_NAME_LENGTH) 
+                return DROP;
+
             autho->name[size] = query->name[pointer];
 
             for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH; i++)
@@ -1013,6 +1016,9 @@ static __always_inline __u8 writeQuery(void *data, __u64 *offset, void *data_end
     for (size_t i = 0; i < query->domain_size; i++)
     {
         if (data + ++*(offset) > data_end)
+            return DROP;
+
+        if (i > MAX_DNS_NAME_LENGTH)
             return DROP;
 
         *(content + i) = query->name[i];
@@ -1272,8 +1278,8 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_TX;
         }
 
-        else
-            bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+        // else
+        //     bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
 
     }
 
@@ -1702,8 +1708,8 @@ int dns_process_response(struct xdp_md *ctx) {
                     return XDP_TX;
                 }
 
-                else
-                    bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+                // else
+                //     bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
             }
         }
 
@@ -1793,8 +1799,8 @@ int dns_process_response(struct xdp_md *ctx) {
                 return XDP_TX;
             }
 
-            else
-                bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
+            // else
+            //     bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
         }
     }
 
@@ -2205,8 +2211,8 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 return XDP_TX;
             }
             
-            else
-                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
+            // else
+            //     bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
         }
 
         #ifdef DOMAIN
