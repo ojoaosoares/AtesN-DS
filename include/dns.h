@@ -44,8 +44,8 @@
 #define INTERNT_CLASS 1
 
 #define DNS_POINTER_OFFSET 0xc00c
-#define MAX_DNS_NAME_LENGTH 60
-#define DNS_LIMIT 30
+#define MAX_DNS_NAME_LENGTH 50
+#define DNS_LIMIT 25
 #define MAX_DNS_LABELS 127
 #define END_DOMAIN 0x0
 
@@ -59,7 +59,7 @@
 #define NAMESERVERS 3
 #define NOTHING 0
 
-#define MINIMUM_TTL 30
+#define MINIMUM_TTL 15
 
 #define DNS_PROCESS_RESPONSE_PROG 0
 #define DNS_JUMP_QUERY_PROG 1

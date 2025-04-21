@@ -705,13 +705,17 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
                     bpf_printk("[XDP] Current: %llu", diff);
                 #endif
 
-                if (!nsrecord->ip && diff > 3)
+                if (!nsrecord->ip)
                 {
-                    *pointer = domain->domain_size;
-
-                    // bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+                    if (diff > 3)
+                    {
+                        *pointer = domain->domain_size;
                     
-                    break;
+                        break;
+                    }
+
+                    else 
+                        continue;
                 }
 
                 if (diff >  MINIMUM_TTL)
@@ -766,7 +770,7 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
     record->ip = 0;
 
     __u8 *content = data + *offset;
-    __u8 rand = (bpf_get_prandom_u32() % 3) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
+    __u8 rand = (bpf_get_prandom_u32() % 5) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
     __u32 ttl = 0;
 
     record->timestamp = (bpf_ktime_get_ns() / 1000000000);
@@ -2137,7 +2141,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 break;
         }
 
-        if (nsrecord && nsrecord->ip != curr.ip)
+        if (nsrecord && nsrecord->ip && nsrecord->ip != curr.ip)
         {
             #ifdef DOMAIN
                 bpf_printk("[XDP] Cache NS record try");
@@ -2189,6 +2193,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
+                    #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
                         break;
                 }
 
@@ -2197,6 +2204,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
+                    #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
                         break;
                 }
 
@@ -2205,8 +2215,15 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     case DROP:
                         return XDP_DROP;
                     default:
+                    #ifdef DOMAIN
+                            bpf_printk("[XDP] Headers updated");
+                        #endif  
                         break;
                 }
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Query goes by check_subdomain");
+                #endif  
 
                 return XDP_TX;
             }
