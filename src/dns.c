@@ -73,6 +73,51 @@ static __always_inline __u64 getTTL(__u64 timestamp) {
     return timestamp - now;
 }
 
+__attribute__((__always_inline__))
+static inline __u16 caludpcsum(struct iphdr *iph, struct udphdr *udph, void *data_end)
+{
+    __u32 csum_buffer = 0;
+    __u16 *buf = (void *)udph;
+
+    // Compute pseudo-header checksum
+    csum_buffer += (__u16)iph->saddr;
+    csum_buffer += (__u16)(iph->saddr >> 16);
+    csum_buffer += (__u16)iph->daddr;
+    csum_buffer += (__u16)(iph->daddr >> 16);
+    csum_buffer += (__u16)iph->protocol << 8;
+    csum_buffer += udph->len;
+
+    // Compute checksum on udp header + payload
+    for (int i = 0; i < MAX_UDP_SIZE; i += 2) 
+    {
+        if ((void *)(buf + 1) > data_end) 
+        {
+            break;
+        }
+
+        csum_buffer += *buf;
+        buf++;
+    }
+
+    if ((void *)buf + 1 <= data_end) 
+    {
+        // In case payload is not 2 bytes aligned
+        csum_buffer += *(__u8 *)buf;
+    }
+
+    __u16 csum = (__u16)csum_buffer + (__u16)(csum_buffer >> 16);
+    csum = ~csum;
+
+    return csum;
+}
+
+static __always_inline void compute_udp_checksum(void *data, void *data_end) {
+    struct iphdr *ipv4 = data + sizeof(struct ethhdr);
+    struct udphdr *udph = data + sizeof(struct ethhdr) + sizeof(struct iphdr);
+
+    udph->check = caludpcsum(ipv4, udph, data_end);
+}
+
 static inline __u16 calculate_ip_checksum(struct iphdr *ip)
 {
     __u16 *pointer = (__u16*) ip;
@@ -1280,7 +1325,9 @@ int dns_filter(struct xdp_md *ctx) {
                         break;
                 }
 
-                return XDP_TX;
+                compute_udp_checksum(data, data_end);
+
+                return  XDP_TX;
             }
 
             // else
@@ -1358,7 +1405,9 @@ int dns_filter(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        return XDP_TX;
+        compute_udp_checksum(data, data_end);
+
+        return  XDP_TX;
    
     }
 
@@ -1542,7 +1591,9 @@ int dns_filter(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Recursive response returned");
                 #endif
 
-                return XDP_TX;
+                compute_udp_checksum(data, data_end);
+
+                return  XDP_TX;
             }
 
             else if (lastdomain) 
@@ -1663,7 +1714,9 @@ int dns_filter(struct xdp_md *ctx) {
                                 break;
                         }
 
-                        return XDP_TX;
+                        compute_udp_checksum(data, data_end);
+
+                        return  XDP_TX;
                     }
 
                     // else
@@ -1754,7 +1807,9 @@ int dns_filter(struct xdp_md *ctx) {
                             break;
                     }
 
-                    return XDP_TX;
+                    compute_udp_checksum(data, data_end);
+
+                    return  XDP_TX;
                 }
 
                 // else
@@ -2029,7 +2084,9 @@ int dns_jump_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Hop query created");
         #endif
 
-        return XDP_TX;
+        compute_udp_checksum(data, data_end);
+
+        return  XDP_TX;
     }
 
     return XDP_DROP;
@@ -2183,7 +2240,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Query goes by check_subdomain");
                 #endif  
 
-                return XDP_TX;
+                compute_udp_checksum(data, data_end);
+
+                return  XDP_TX;
             }
             
             // else
@@ -2402,7 +2461,9 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        return XDP_TX;        
+        compute_udp_checksum(data, data_end);
+
+        return  XDP_TX;        
     }
 
     return XDP_PASS;
@@ -2638,7 +2699,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_printk("[XDP] New back query created");
             #endif
 
-            return XDP_TX;
+            compute_udp_checksum(data, data_end);
+
+            return  XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
@@ -2779,7 +2842,9 @@ int dns_error(struct xdp_md *ctx) {
                 }
             }
 
-            return XDP_TX;
+            compute_udp_checksum(data, data_end);
+
+            return  XDP_TX;
         }    
     }
 

@@ -10,6 +10,8 @@
 #define PASS 1
 #define ACCEPT 2
 
+#define MAX_UDP_SIZE 512
+
 #define ACCEPT_NO_ANSWER 3
 #define ACCEPT_JUST_POINTER 3
 #define ACCEPT_ERROR 4
