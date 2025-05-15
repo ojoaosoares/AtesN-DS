@@ -261,7 +261,7 @@ static __always_inline __u8 isDNSQueryOrResponse(void *data, __u64 *offset, void
 
         if (bpf_ntohs(header->name_servers))
             return QUERY_NAMESERVERS_RETURN;
-
+    
         return RESPONSE_RETURN;
     }   
 
@@ -727,7 +727,7 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
         if(domain->name[index] == 0)
         {
             *pointer = index;
-            return ACCEPT;
+            return 0;
         }
 
         if (domain->domain_size - index <= DNS_LIMIT)    
@@ -752,11 +752,11 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
                 if (!nsrecord->ip)
                 {
-                    if (diff > 3)
+                    if (diff > 3 || !nsrecord->timestamp)
                     {
                         *pointer = domain->domain_size;
                     
-                        break;
+                        return 1;
                     }
 
                     else 
@@ -773,22 +773,21 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
                     *pointer = index;
 
-                    return ACCEPT;
+                    return 0;
                 }
-                
-                // else
-                    // bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
+
+                else
+                    bpf_map_delete_elem(&cache_nsrecords, &domain->name[index]);
             }
                 
         }
         
         index += domain->name[index] + 1;
-
     }
 
     *pointer = index;
     
-    return ACCEPT;
+    return 0;
 }
 
 static __always_inline __u8 getPointer(void *data, __u64 *offset, void *data_end, __u8 *pointer) {
@@ -1139,6 +1138,69 @@ static __always_inline void hideInSourcePort(void *data, __u16 hidden)
     udp->source = hidden;
 }
 
+static __always_inline __u8 filter_dns(void *data, __u64 *offset,  void *data_end)
+{
+    switch (isIPV4(data, offset, data_end))
+    {
+        case DROP:
+            return DROP;
+        case PASS:
+            return PASS;
+        default:
+            #ifdef FILTER
+                bpf_printk("[XDP] It's IPV4");
+            #endif
+            break;
+    }
+
+    switch (isValidUDP(data, offset, data_end))
+    {
+        case DROP:
+            return DROP;
+        case PASS:
+            return PASS;
+        default:
+            #ifdef FILTER
+                bpf_printk("[XDP] It's UDP");
+            #endif
+            break;
+    }
+
+    switch (isPort53(data, offset, data_end))
+    {
+        case DROP:
+            return DROP;
+        case PASS:
+            return PASS;
+        case TO_DNS_PORT:
+            #ifdef FILTER
+                bpf_printk("[XDP] It's to Port 53");
+            #endif 
+            break;
+        case FROM_DNS_PORT:
+            #ifdef FILTER
+                bpf_printk("[XDP] It's from Port 53");
+            #endif  
+            break;
+    }
+
+    return ACCEPT;
+}
+
+static __always_inline __u8 redirect_packet_keep(void *data, __u64 *offset, void *data_end, __u32 ip)
+{
+    if (formatNetworkAcessLayer(data, offset, data_end) == DROP) 
+        return DROP;
+     
+    if (returnToNetwork(data, offset, data_end, ip) == DROP)
+        return DROP;
+
+    if (keepTransportLayer(data, offset, data_end) == DROP)
+        return DROP;
+    
+    return ACCEPT;
+}
+
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
 
@@ -1147,49 +1209,17 @@ int dns_filter(struct xdp_md *ctx) {
 
     __u64 offset_h; // Desclocamento d e bits para verificar as informações do pacote
 
-    switch (isIPV4(data, &offset_h, data_end))
+    switch (filter_dns(data, &offset_h, data_end))
     {
         case DROP:
             return XDP_DROP;
         case PASS:
             return XDP_PASS;
         default:
-            #ifdef FILTER
-                bpf_printk("[XDP] It's IPV4");
-            #endif
-            break;
-    }
-
-    switch (isValidUDP(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        default:
-            #ifdef FILTER
-                bpf_printk("[XDP] It's UDP");
-            #endif
-            break;
-    }
-
-    switch (isPort53(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        case TO_DNS_PORT:
-            #ifdef FILTER
-                bpf_printk("[XDP] It's to Port 53");
-            #endif 
-            break;
-        case FROM_DNS_PORT:
-        
-            #ifdef FILTER
-                bpf_printk("[XDP] It's from Port 53");
-            #endif  
-            break;
+        #ifdef FILTER
+            bpf_printk("[XDP] It's DNS protocol");
+        #endif
+        break;
     }
 
     struct dns_query dnsquery;
@@ -1208,7 +1238,9 @@ int dns_filter(struct xdp_md *ctx) {
             #endif
             break;
         default:
-            bpf_printk("[XDP] It's a response");
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It's a response");
+            #endif
             break;
     }
 
@@ -1281,125 +1313,60 @@ int dns_filter(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (formatNetworkAcessLayer(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
+            
+                if (swapInternetLayer(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
 
-                switch (swapInternetLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (swapTransportLayer(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
 
-                switch (swapTransportLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
-
-                switch (createDNSAnswer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Answer created");
-                        #endif  
-                        break;
-                }
+                if (createDNSAnswer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size) == DROP)
+                    return XDP_DROP;
 
                 compute_udp_checksum(data, data_end);
 
                 return  XDP_TX;
             }
 
-            // else
-            //     bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+            else
+                bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
 
         }
 
         __u32 ip = recursive_server_ip; __u8 pointer;
 
-        switch (findOwnerServer(&dnsquery.query, &ip, &pointer))
-        {
-            case DROP:
-                return XDP_DROP;
-            case PASS:
-                return XDP_PASS;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Authoritative server: %u", ip);
-                #endif
-                break;
-        }
-
+        if (findOwnerServer(&dnsquery.query, &ip, &pointer))
+            return XDP_PASS;
+        
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Authoritative server: %u", ip);
+        #endif
+        
         struct query_owner owner;
+        owner.ip_address = getSourceIp(data); owner.rec = 0;
+        owner.not_cache = 0, owner.curr_pointer = pointer;
 
-        owner.ip_address = getSourceIp(data); dnsquery.id.port = getSourcePort(data); owner.rec = 0, owner.not_cache = 0, owner.curr_pointer = pointer;
+        dnsquery.id.port = getSourcePort(data);
 
-        if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
+        if(bpf_map_update_elem(&recursive_queries, (struct dns_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
         {
             #ifdef ERROR
                 bpf_printk("[XDP] Recursive queries map error check cache");
                 bpf_printk("[XDP] Domain: %s", dnsquery.query.name);
             #endif  
 
-            return XDP_DROP;
+            return XDP_PASS;
         }
 
         offset_h = 0;
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
-                break;
-        }
-        
-        switch(returnToNetwork(data, &offset_h, data_end, ip))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+        if (redirect_packet_keep(data, &offset_h, data_end, ip) == DROP)
+            return XDP_DROP;
 
-        switch(keepTransportLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch(createDnsQuery(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+        if (createDnsQuery(data, &offset_h, data_end) == DROP)
+            return XDP_DROP;
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Recursive Query created");
@@ -1459,10 +1426,10 @@ int dns_filter(struct xdp_md *ctx) {
             {
                 #ifdef DOMAIN
                     bpf_printk("[XDP] It belongs to the OS");
-                    bpf_printk("[XDP] Name %s", dnsquery.query.name);
-                    bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
-                    bpf_printk("[XDP] OS error %d", dnsquery.id.id);
-                    bpf_printk("[XDP] Port %d", dnsquery.id.port);
+                    // bpf_printk("[XDP] Name %s", dnsquery.query.name);
+                    // bpf_printk("[XDP] size %d", dnsquery.query.domain_size);
+                    // bpf_printk("[XDP] OS error %d", dnsquery.id.id);
+                    // bpf_printk("[XDP] Port %d", dnsquery.id.port);
                 #endif
 
                 return XDP_PASS;
@@ -1812,8 +1779,8 @@ int dns_filter(struct xdp_md *ctx) {
                     return  XDP_TX;
                 }
 
-                // else
-                //     bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
+                else
+                    bpf_map_delete_elem(&cache_nsrecords, dnsquery.query.name);
             }
         }
 
@@ -2353,7 +2320,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                         break;
                 }
                 
-                return XDP_DROP;
+                return XDP_DROP;                
             default:
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Authoritative %s", dnsquery.query.name);
@@ -2367,18 +2334,12 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         __u32 ip = recursive_server_ip; __u8 pointer;
 
-        switch (findOwnerServer(&dnsquery.query, &ip, &pointer))
-        {
-            case DROP:
-                return XDP_DROP;
-            case PASS:
-                return XDP_PASS;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Authoritative server: %u", ip);
-                #endif
-                break;
-        }
+        findOwnerServer(&dnsquery.query, &ip, &pointer);
+        
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Authoritative server: %u", ip);
+        #endif
+
 
         __u32 value = getDestIp(data);
 
