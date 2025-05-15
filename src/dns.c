@@ -769,9 +769,14 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     record->ip = 0;
 
+    __u8 additional_off = bpf_ntohs(header->name_servers) * 14;
+
+    if (additional_off > 512)
+        return DROP;
+
+    *offset += additional_off;
+
     __u8 *content = data + *offset;
-    __u8 rand = (bpf_get_prandom_u32() % 5) % ((bpf_ntohs(header->additional_records) + 1) / 2) ;
-    __u32 ttl = 0;
 
     record->timestamp = (bpf_ktime_get_ns() / 1000000000);
 
@@ -785,24 +790,13 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
             if (data + (*offset) + 15 > data_end)
                 return DROP;
 
-            ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
+            __u32 ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
             
             record->ip = *((__u32 *) (content + size + 12));            
 
-            if (!rand)
-            {
-                record->timestamp += ttl;
-                return ACCEPT;
-            }
-
-            rand--;
+            record->timestamp += ttl;
+            return ACCEPT;           
         }
-    }
-
-    if (record->ip)
-    {
-        record->timestamp += ttl;
-        return ACCEPT;
     }
 
     return ACCEPT_NO_ANSWER;
@@ -1428,7 +1422,7 @@ int dns_filter(struct xdp_md *ctx) {
 
         if (aprove)
         {
-            if ((dnsquery.query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+            if ((dnsquery.query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
             {
                 struct a_record *record_aprove = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name[pointer]);
 
@@ -1962,7 +1956,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         
         bpf_map_delete_elem(&curr_queries, &curr); __u32 ip = record.ip;
 
-        if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
             record.ip = 0;
 
@@ -2098,7 +2092,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Subpointer %d", pointer);
                 #endif 
 
-                if ((query->query.domain_size - pointer < DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
 
             default:        
