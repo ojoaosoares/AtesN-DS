@@ -487,7 +487,7 @@ static __always_inline __u8 setDNSHeader(void *data, __u64 *offset, void *data_e
     return ACCEPT;
 }
 
-static __always_inline __u8 createNoDNSAnswer(void *data, __u64 *offset, void *data_end)
+static __always_inline __u8 createNoDNSAnswer(void *data, __u64 *offset, void *data_end, __u8 status)
 {
     struct dns_header *header = data + *offset;
 
@@ -502,7 +502,7 @@ static __always_inline __u8 createNoDNSAnswer(void *data, __u64 *offset, void *d
         return DROP;
     }
 
-    __u16 flags = 0x8180 + 2;
+    __u16 flags = 0x8180 + status;
 
     header->name_servers = bpf_htons(0);
     header->additional_records = bpf_htons(0);
@@ -1201,6 +1201,20 @@ static __always_inline __u8 redirect_packet_keep(void *data, __u64 *offset, void
     return ACCEPT;
 }
 
+static __always_inline __u8 redirect_packet_swap(void *data, __u64 *offset, void *data_end, __u32 ip)
+{
+    if (formatNetworkAcessLayer(data, offset, data_end) == DROP) 
+        return DROP;
+     
+    if (returnToNetwork(data, offset, data_end, ip) == DROP)
+        return DROP;
+
+    if (swapTransportLayer(data, offset, data_end) == DROP)
+        return DROP;
+    
+    return ACCEPT;
+}
+
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
 
@@ -1327,7 +1341,7 @@ int dns_filter(struct xdp_md *ctx) {
 
                 compute_udp_checksum(data, data_end);
 
-                return  XDP_TX;
+                return XDP_TX;
             }
 
             else
@@ -1374,7 +1388,7 @@ int dns_filter(struct xdp_md *ctx) {
 
         compute_udp_checksum(data, data_end);
 
-        return  XDP_TX;
+        return XDP_TX;
    
     }
 
@@ -1475,84 +1489,30 @@ int dns_filter(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+                    return XDP_DROP;
+
+                if (setDNSHeader(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
                 
-                switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                switch(keepTransportLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
-
-                __u64 off_temp = offset_h;
-
-                switch(setDNSHeader(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
 
                 offset_h += dnsquery.query.domain_size + 5;
                 
                 struct a_record cache_record;
+                cache_record.ip = 0;
+                cache_record.timestamp = 0;
 
-                switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+                if (getDNSAnswer(data, &offset_h, data_end, &cache_record) == DROP)
+                    return XDP_DROP;
+
+                if (cache_record.timestamp && dnsquery.query.domain_size <= DNS_LIMIT)
                 {
-                    case DROP:
-                        return XDP_DROP;
-                    case ACCEPT_ERROR:
+                    bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, BPF_ANY);
 
-                        switch (createNoDNSAnswer(data, &off_temp, data_end))
-                        {
-                            case DROP:
-                                return XDP_DROP;
-                            default:
-                                #ifdef DOMAIN
-                                    bpf_printk("[XDP] Answer created");
-                                #endif  
-                                break;
-                        }
-
-                        break;
-
-                    case ACCEPT_NO_ANSWER:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] No DNS answer");
-                        #endif 
-
-                        break;
-                    default:
-
-                        if (dnsquery.query.domain_size <= DNS_LIMIT)
-                        {
-                            bpf_map_update_elem(&cache_arecords, dnsquery.query.name, &cache_record, BPF_ANY);
-
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] A cache updated");
-                            #endif  
-                        }
-                        break;
-                }   
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] A cache updated");
+                    #endif  
+                }
 
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Recursive response returned");
@@ -1560,7 +1520,7 @@ int dns_filter(struct xdp_md *ctx) {
 
                 compute_udp_checksum(data, data_end);
 
-                return  XDP_TX;
+                return XDP_TX;
             }
 
             else if (lastdomain) 
@@ -1637,57 +1597,19 @@ int dns_filter(struct xdp_md *ctx) {
 
                         offset_h = 0;
 
-                        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                        {
-                            case DROP:
-                                return XDP_DROP;
-                            default:
-                                #ifdef DOMAIN
-                                    bpf_printk("[XDP] Headers updated");
-                                #endif  
-                                break;
-                        }
+                        if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+                            return XDP_DROP;
 
-                        switch (returnToNetwork(data, &offset_h, data_end, powner->ip_address))
-                        {
-                            case DROP:
-                                return XDP_DROP;
-                            default:
-                                #ifdef DOMAIN
-                                    bpf_printk("[XDP] Headers updated");
-                                #endif  
-                                break;
-                        }
-
-                        switch (keepTransportLayer(data, &offset_h, data_end))
-                        {
-                            case DROP:
-                                return XDP_DROP;
-                            default:
-                                #ifdef DOMAIN
-                                    bpf_printk("[XDP] Headers updated");
-                                #endif  
-                                break;
-                        }
-
-                        switch (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size))
-                        {
-                            case DROP:
-                                return XDP_DROP;
-                            default:
-                                #ifdef DOMAIN
-                                    bpf_printk("[XDP] Answer created");
-                                #endif  
-                                break;
-                        }
+                        if (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size) == DROP)
+                            return XDP_DROP;
 
                         compute_udp_checksum(data, data_end);
 
-                        return  XDP_TX;
+                        return XDP_TX;
                     }
 
-                    // else
-                    //     bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+                    else
+                        bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
                 }
             }
 
@@ -1733,50 +1655,15 @@ int dns_filter(struct xdp_md *ctx) {
 
                     offset_h = 0;
 
-                    switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
+                    if (redirect_packet_swap(data, &offset_h, data_end, record->ip) == DROP)
+                        return XDP_DROP;
 
-                    switch (returnToNetwork(data, &offset_h, data_end, record->ip))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch (swapTransportLayer(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            #ifdef DOMAIN
-                                bpf_printk("[XDP] Headers updated");
-                            #endif  
-                            break;
-                    }
-
-                    switch(createDnsQuery(data, &offset_h, data_end))
-                    {
-                        case DROP:
-                            return XDP_DROP;
-                        default:
-                            break;
-                    }
+                    if (createDnsQuery(data, &offset_h, data_end) == DROP)
+                        return XDP_DROP;
 
                     compute_udp_checksum(data, data_end);
 
-                    return  XDP_TX;
+                    return XDP_TX;
                 }
 
                 else
@@ -2012,40 +1899,11 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         offset_h = 0;
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
-                break;
-        }
+        if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+            return XDP_DROP;
 
-        switch(returnToNetwork(data, &offset_h, data_end, ip))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch (swapTransportLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch(createDnsQuery(data, &offset_h, data_end))
-        {   
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
+        if (createDnsQuery(data, &offset_h, data_end) == DROP)
+            return XDP_DROP;
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Hop query created");
@@ -2053,7 +1911,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         compute_udp_checksum(data, data_end);
 
-        return  XDP_TX;
+        return XDP_TX;
     }
 
     return XDP_DROP;
@@ -2209,11 +2067,11 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
                 compute_udp_checksum(data, data_end);
 
-                return  XDP_TX;
+                return XDP_TX;
             }
             
-            // else
-            //     bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
+            else
+                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
         }
 
         #ifdef DOMAIN
@@ -2340,7 +2198,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Authoritative server: %u", ip);
         #endif
 
-
         __u32 value = getDestIp(data);
 
         #ifdef DOMAIN
@@ -2350,8 +2207,6 @@ int dns_create_new_query(struct xdp_md *ctx) {
         #endif
 
         dnsquery.id.id += 1;
-
-        
 
         modifyID(data, dnsquery.id.id); query->id.id = (value >> 8) & 0xFF;
 
@@ -2383,48 +2238,19 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         offset_h = 0;
 
-        switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] Headers updated");
-                #endif  
-                break;
-        }
+        if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+            return XDP_DROP;
+
+        if (createDnsQuery(data, &offset_h, data_end) == DROP)
+            return XDP_DROP;
         
-        switch(returnToNetwork(data, &offset_h, data_end, ip))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch (swapTransportLayer(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
-        switch(createDnsQuery(data, &offset_h, data_end))
-        {
-            case DROP:
-                return XDP_DROP;
-            default:
-                break;
-        }
-
         #ifdef DOMAIN
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
         compute_udp_checksum(data, data_end);
 
-        return  XDP_TX;        
+        return XDP_TX;        
     }
 
     return XDP_PASS;
@@ -2470,33 +2296,18 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             {
                 struct a_record cache_record;
                 cache_record.ip = 0;
+                cache_record.timestamp = 0;
 
-                switch (getDNSAnswer(data, &offset_h, data_end, &cache_record))
+                if (getDNSAnswer(data, &offset_h, data_end, &cache_record) == DROP)
+                    return XDP_DROP;
+            
+                if (cache_record.timestamp && query->query.domain_size <= DNS_LIMIT)
                 {
-                    case DROP:
-                        return XDP_DROP;
+                    bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
-                    case ACCEPT_ERROR:
-                    case ACCEPT_NO_ANSWER:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] No DNS answer");
-                        #endif 
-                        break;
-                    default:
-
-                        if (query->query.domain_size <= DNS_LIMIT)
-                        {
-                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
-
-                            #ifdef ERRO
-                                bpf_printk("[XDP] A cache updated");
-                            #endif   
-                        }
-
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] A cache updated");
-                        #endif   
-                        break;
+                    #ifdef ERRO
+                        bpf_printk("[XDP] A cache updated");
+                    #endif   
                 }
 
                 if (cache_record.ip == 0)
@@ -2609,52 +2420,16 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             offset_h = 0;      
 
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
+            if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+                return XDP_DROP;
 
-            switch (returnToNetwork(data, &offset_h, data_end, ip))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
+            if (createDnsQuery(data, &offset_h, data_end) == DROP)
+                return XDP_DROP;
 
-            switch (swapTransportLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
+            modifyID(data, lastdomain->trash);
 
-            switch(createDnsQuery(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    modifyID(data, lastdomain->trash);
-                    break;
-            }
-
-            switch(writeQuery(data, &offset_h, data_end, &lastdomain->query))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
+            if (writeQuery(data, &offset_h, data_end, &lastdomain->query) == DROP)
+                return XDP_DROP;
 
             #ifdef DOMAIN
                 bpf_printk("[XDP] New back query created");
@@ -2662,7 +2437,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             compute_udp_checksum(data, data_end);
 
-            return  XDP_TX;
+            return XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
@@ -2712,8 +2487,6 @@ int dns_error(struct xdp_md *ctx) {
 
                 __u16 id = query->id.id - 1, port = query->id.port;
 
-                modifyID(data, id);
-
                 query = lastdomain;
             
                 query->id.id = id; query->id.port = port;
@@ -2729,6 +2502,8 @@ int dns_error(struct xdp_md *ctx) {
         
         if (powner)
         {
+            modifyID(data, query->id.id);
+
             bpf_map_delete_elem(&recursive_queries, query);
 
             #ifdef DOMAIN
@@ -2754,58 +2529,21 @@ int dns_error(struct xdp_md *ctx) {
 
             offset_h = 0;
 
-            switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Headers updated");
-                    #endif  
-                    break;
-            }
-            
-            switch(returnToNetwork(data, &offset_h, data_end, powner->ip_address))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
+            if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+                return XDP_DROP;
 
-            switch(keepTransportLayer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    break;
-            }
-
-            switch (createNoDNSAnswer(data, &offset_h, data_end))
-            {
-                case DROP:
-                    return XDP_DROP;
-                default:
-                    #ifdef DOMAIN
-                        bpf_printk("[XDP] Answer created");
-                    #endif  
-                    break;
-            }
+            if (createNoDNSAnswer(data, &offset_h, data_end, status) == DROP)
+                return XDP_DROP;
 
             if (inter)
             {
-                switch(writeQuery(data, &offset_h, data_end, &query->query))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        break;
-                }
+                if (writeQuery(data, &offset_h, data_end, &query->query) == DROP)
+                    return XDP_DROP;
             }
 
             compute_udp_checksum(data, data_end);
 
-            return  XDP_TX;
+            return XDP_TX;
         }    
     }
 
