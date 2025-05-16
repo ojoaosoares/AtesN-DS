@@ -813,12 +813,12 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     record->ip = 0;
 
-    __u8 additional_off = bpf_ntohs(header->name_servers) * 14;
-
-    if (additional_off > 512)
-        return DROP;
+    __u16 additional_off = bpf_ntohs(header->name_servers) * 14;
 
     *offset += additional_off;
+
+    if (*offset > 512)
+        return DROP;
 
     __u8 *content = data + *offset;
 
@@ -857,7 +857,7 @@ static __always_inline __u8 getAuthoritativePointer(void *data, __u64 *offset, v
 
     if (*content == 0)
     {
-        (*offset)++; *off++;
+        (*offset)++;
 
         return ACCEPT_JUST_POINTER;
     }
@@ -963,7 +963,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
     content += 2;
 
-    if (type + 2 > data_end)
+    if (((void *) type + 2) > data_end)
         return DROP;
 
     if (*((__u16 *) type) == SOA_RECORD_TYPE)
@@ -2012,8 +2012,8 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     return XDP_DROP;
                 }
 
-                data = (void*) ctx->data;
-                data_end = (void*) ctx->data_end;
+                data = (void*) (long) ctx->data;
+                data_end = (void*) (long) ctx->data_end;
 
                 offset_h = 0;
 
@@ -2159,7 +2159,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                         break;
                     default:
 
-                        if (query->query.name <= DNS_LIMIT)
+                        if (query->query.domain_size <= DNS_LIMIT)
                         {
                             bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
@@ -2487,7 +2487,7 @@ int dns_error(struct xdp_md *ctx) {
 
                 __u16 id = query->id.id - 1, port = query->id.port;
 
-                query = lastdomain;
+                query = (struct dns_query *) lastdomain;
             
                 query->id.id = id; query->id.port = port;
             }
