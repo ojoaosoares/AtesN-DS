@@ -118,17 +118,26 @@ static __always_inline void compute_udp_checksum(void *data, void *data_end) {
     udph->check = caludpcsum(ipv4, udph, data_end);
 }
 
+static inline __u16 csum_fold_neg(__u32 csum)
+{
+    __u32 sum;
+    sum = (csum >> 16) + (csum & 0xffff);
+    sum += (sum >> 16);
+    return ~((__u16)sum);
+}
+
+static inline __u32 csum_unfold(__u16 csum)
+{
+    return ~((uint32_t)csum);
+}
+
+
 static inline __u16 calculate_ip_checksum(struct iphdr *ip)
 {
-    __u16 *pointer = (__u16*) ip;
-    __u32 accumulator = 0;
-
     ip->check = 0;
-
-    for (int i = 0; i < (sizeof(*ip) >> 1); i++)
-        accumulator += *pointer++;
+    __u32 csum = bpf_csum_diff(0, 0, (unsigned int *) ip, sizeof(struct iphdr), 0);
     
-    return ~((accumulator & 0xffff) + (accumulator >> 16));
+    return csum_fold_neg(csum);
 }
 
 static __always_inline __u8 isIPV4(void *data, __u64 *offset, void *data_end)
@@ -608,14 +617,30 @@ static __always_inline __u8 returnToNetwork(void *data, __u64 *offset, void *dat
         return DROP;
     }
 
-	ipv4->saddr = serverip;
+    __u32 csum = csum_unfold(ipv4->check);
+
+    __u32 old_saddr = ipv4->saddr;
+    __u32 old_daddr = ipv4->daddr;
+
+    ipv4->saddr = serverip;
     ipv4->daddr = ip_dest;
 
-    ipv4->ttl = 255;
+    csum = bpf_csum_diff(&old_saddr, sizeof(__u32), &ipv4->saddr, sizeof(__u32), csum);
+    csum = bpf_csum_diff(&old_daddr, sizeof(__u32), &ipv4->daddr, sizeof(__u32), csum);
 
-    ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
+    __u32 new_ttl = 255;
+    __u32 old_ttl = ipv4->ttl;
+    ipv4->ttl = new_ttl;
 
-    ipv4->check = calculate_ip_checksum(ipv4);
+    csum = bpf_csum_diff(&old_ttl, sizeof(__u32), &new_ttl, sizeof(__u32), csum);
+
+    __u32 old_len = ipv4->tot_len;
+    __u32 new_len = bpf_htons((data_end - data) - sizeof(struct ethhdr));
+    ipv4->tot_len = new_len;
+
+    csum = bpf_csum_diff(&old_len, sizeof(__u32), &new_len, sizeof(__u32), csum);
+
+    ipv4->check = csum_fold_neg(csum);
 
     return ACCEPT;
 }
@@ -1824,6 +1849,8 @@ int dns_jump_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 pointer = getDestIp(data);
+
+    hideInDestIp(data, data_end, serverip);
 
     struct curr_query curr;
     
