@@ -414,11 +414,21 @@ static __always_inline __u8 swapInternetLayer(void *data, __u64 *offset, void *d
 	ipv4->saddr = ipv4->daddr;
 	ipv4->daddr = tmp_ip;
 
-    ipv4->ttl = 255;
+    __u32 csum = csum_unfold(ipv4->check);
 
-    ipv4->tot_len = (__u16) bpf_htons((data_end - data) - sizeof(struct ethhdr));
+    __u32 new_ttl = 255;
+    __u32 old_ttl = ipv4->ttl;
+    ipv4->ttl = new_ttl;
 
-    ipv4->check = calculate_ip_checksum(ipv4);
+    csum = bpf_csum_diff(&old_ttl, sizeof(__u32), &new_ttl, sizeof(__u32), csum);
+
+    __u32 old_len = ipv4->tot_len;
+    __u32 new_len = bpf_htons((data_end - data) - sizeof(struct ethhdr));
+    ipv4->tot_len = new_len;
+
+    csum = bpf_csum_diff(&old_len, sizeof(__u32), &new_len, sizeof(__u32), csum);
+
+    ipv4->check = csum_fold_neg(csum);
 
     return ACCEPT;
 }
@@ -1849,7 +1859,6 @@ int dns_jump_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 pointer = getDestIp(data);
-
     hideInDestIp(data, data_end, serverip);
 
     struct curr_query curr;
@@ -1960,6 +1969,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 deep = getDestIp(data);
+    hideInDestIp(data, data_end, serverip);
 
     struct curr_query curr;
     
@@ -2044,49 +2054,18 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
                 offset_h = 0;
 
-                switch (formatNetworkAcessLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                        #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (formatNetworkAcessLayer(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
                 
-                switch(returnToNetwork(data, &offset_h, data_end, nsrecord->ip))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                    #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                
+                if (returnToNetwork(data, &offset_h, data_end, nsrecord->ip) == DROP)
+                    return XDP_DROP;
 
-                switch(swapTransportLayer(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                    #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (swapTransportLayer(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
 
-                switch(createDnsQuery(data, &offset_h, data_end))
-                {
-                    case DROP:
-                        return XDP_DROP;
-                    default:
-                    #ifdef DOMAIN
-                            bpf_printk("[XDP] Headers updated");
-                        #endif  
-                        break;
-                }
+                if (createDnsQuery(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
 
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Query goes by check_subdomain");
@@ -2226,6 +2205,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         #endif
 
         __u32 value = getDestIp(data);
+        hideInDestIp(data, data_end, serverip);
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Last %s", query->query.name);
@@ -2316,6 +2296,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
         if (lastdomain && lastdomain->query.domain_size <= MAX_DNS_NAME_LENGTH)
         {
             __u32 ip = getDestIp(data);
+            hideInDestIp(data, data_end, serverip);
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + lastdomain->query.domain_size + 5;
 
@@ -2485,6 +2466,7 @@ int dns_error(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 status = getDestIp(data);
+    hideInDestIp(data, data_end, serverip);
 
     struct curr_query curr;
     
