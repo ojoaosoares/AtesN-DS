@@ -1374,9 +1374,9 @@ int dns_filter(struct xdp_md *ctx) {
                 if (createDNSAnswer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size) == DROP)
                     return XDP_DROP;
 
-                compute_udp_checksum(data, data_end);
+            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-                return XDP_TX;
+            return XDP_DROP;
             }
 
             else
@@ -1553,9 +1553,9 @@ int dns_filter(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Recursive response returned");
                 #endif
 
-                compute_udp_checksum(data, data_end);
+            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-                return XDP_TX;
+            return XDP_DROP;
             }
 
             else if (lastdomain) 
@@ -2557,6 +2557,22 @@ int dns_error(struct xdp_md *ctx) {
     }
 
     return XDP_DROP;
+}
+
+SEC("xdp")
+int dns_udp_csum(struct xdp_md *ctx) {
+
+    void *data_end = (void*) (long) ctx->data_end;
+    void *data = (void*) (long) ctx->data;
+
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
+    compute_udp_checksum(data, data_end);
+
+    return XDP_TX;
 }
 
 char _license[] SEC("license") = "GPL";
