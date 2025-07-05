@@ -2625,55 +2625,64 @@ int dns_send_event(struct xdp_md *ctx) {
 
         bpf_map_delete_elem(&curr_queries, &curr);
 
-        struct event *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event), 0);
+        __u8 *remainder = data + remainder_offset;
 
-        if (myevent) {
+        __u32 ips[4];
+        
+        int count = 0;
 
-            __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+        for (int i = 0; i < 20; i++)
+        {
+            if (remainder + 6 > data_end)
+                break;
 
-            __u8 *remainder = data + remainder_offset;
-
-            int count = 0;
-
-            for (int i = 0; i < 20; i++)
-            {
-                if (remainder + 6 > data_end)
-                    break;
-
-                else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
-                {        
-                    if (remainder + 16 > data_end)
-                        break;
-                    
-                    __u32 ip = *((__u32 *) (remainder + 12));
-
-                    bpf_printk("[XDP] Event IP %d: %u", count, ip);
-                
-                    myevent->ips[count++] = *((__u32 *) (remainder + 12));
-
-                    remainder += (4 + 12);
-
-                    if (count == 4)
-                        break;
-                }
-
-                else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == AAA_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
-                {
-                    remainder += (16 + 12);
-                }
-                
-                else
+            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+            {        
+                if (remainder + 16 > data_end)
                     break;
                 
+                __u32 ip = *((__u32 *) (remainder + 12));
+
+                bpf_printk("[XDP] Event IP %d: %u", count, ip);
+            
+                ips[count++] = *((__u32 *) (remainder + 12));
+
+                remainder += (4 + 12);
+
+                if (count == 4)
+                    break;
             }
 
-            myevent->id = getQueryId(data);
-            myevent->port = getDestPort(data);
-
-            myevent->len = count;
-
-            bpf_ringbuf_submit(myevent, 0);
+            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == AAA_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+            {
+                remainder += (16 + 12);
+            }
+            
+            else
+                break;
         }
+
+
+        if (count)
+        {
+            struct event *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event), 0);
+
+            if (myevent) {
+
+                __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+
+                myevent->id = getQueryId(data);
+                myevent->port = getDestPort(data);
+                myevent->len = count;
+                
+                for (size_t i = 0; i < 4; i++)
+                    myevent->ips[i] = ips[i];
+
+                bpf_ringbuf_submit(myevent, 0);
+            }
+        }
+
+        
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5) - data_end);
 
