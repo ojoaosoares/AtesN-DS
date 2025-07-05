@@ -99,21 +99,9 @@ static int build_dns_query(char *buf, size_t buf_size, uint16_t id, const char *
     size_t offset = 12;
 
     // --- Encode domain name ---
-    const char *label_start = domain;
-    while (*label_start) {
-        const char *label_end = strchr(label_start, '.');
-        size_t label_len = label_end ? (size_t)(label_end - label_start) : strlen(label_start);
-
-        if (label_len > 63 || offset + 1 + label_len >= buf_size) {
-            return -1;
-        }
-
-        buf[offset++] = (uint8_t)label_len;
-        memcpy(&buf[offset], label_start, label_len);
-        offset += label_len;
-
-        if (!label_end) break;
-        label_start = label_end + 1;
+    int i = 0;
+    while (i < 256 && domain[i]) {
+        buf[offset++] = domain[i++];
     }
 
     if (offset + 1 + 4 > buf_size) return -1;
@@ -141,7 +129,7 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
 
     struct sockaddr_in src_addr = {
         .sin_family = AF_INET,
-        .sin_port = src_port,
+        .sin_port = htons(src_port),
         .sin_addr.s_addr = src_ip
     };
 
