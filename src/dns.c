@@ -841,39 +841,34 @@ static __always_inline __u8 getPointer(void *data, __u64 *offset, void *data_end
 }
 
 
-static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, struct a_record *record, __u8 domainsize) {
+static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_end, struct a_record *record, __u8 domainsize, __u8 **remainder) {
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
 
     record->ip = 0;
 
-    __u16 additional_off = bpf_ntohs(header->name_servers) * 14;
-
-    *offset += additional_off;
-
-    if (*offset > 512)
-        return DROP;
-
     __u8 *content = data + *offset;
 
     record->timestamp = (bpf_ktime_get_ns() / 1000000000);
 
-    for (size_t size = 0; size < 500 - domainsize; size++)
-    {
-        if (data + ++(*offset) + 5 > data_end)
+    for (size_t size = 0; size < 500 - domainsize; size++) {
+        
+        if (content + size + 6 > data_end)
             break;
 
-        else if ((*(content + size) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (content + size + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (content + size + 4))) == INTERNT_CLASS)
+        if ((*((__u16 *)(content + size)) & 0xC0) == 0xC0 &&
+            bpf_ntohs(*((__u16 *)(content + size + 2))) == A_RECORD_TYPE &&
+            bpf_ntohs(*((__u16 *)(content + size + 4))) == INTERNT_CLASS)
         {        
-            if (data + (*offset) + 15 > data_end)
+            if (content + size + 16 > data_end)
                 return DROP;
 
-            __u32 ttl = bpf_ntohl(*((__u32 *) (content + size + 6)));
-            
-            record->ip = *((__u32 *) (content + size + 12));            
-
+            __u32 ttl = bpf_ntohl(*((__u32 *)(content + size + 6)));
+            record->ip = *((__u32 *)(content + size + 12));            
             record->timestamp += ttl;
+
+            *remainder = content + size + 16;
             return ACCEPT;           
         }
     }
@@ -1923,7 +1918,9 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         struct a_record record;
         
-        switch (getAdditional(data, &offset_h, data_end, &record, query->query.domain_size))
+        __u8 *remainder;
+        
+        switch (getAdditional(data, &offset_h, data_end, &record, query->query.domain_size, &remainder))
         {
             case DROP:
                 return XDP_DROP;
@@ -1943,7 +1940,12 @@ int dns_jump_query(struct xdp_md *ctx) {
                 break;
         }
         
-        bpf_map_delete_elem(&curr_queries, &curr); __u32 ip = record.ip;
+        bpf_map_delete_elem(&curr_queries, &curr);
+         
+
+        __u16 remainder_off = ((long) ((void*) remainder) - (long) data);
+
+        bpf_printk("Remainder :%d", remainder_off);
 
         if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
@@ -2209,7 +2211,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                         break;
                     default:
 
-                            bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
+                        bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
 
                         if (hideInDestIp(data, data_end, RCODE_NXDOMAIN) == DROP)
