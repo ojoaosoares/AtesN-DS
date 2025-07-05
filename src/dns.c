@@ -1680,9 +1680,9 @@ int dns_response(struct xdp_md *ctx)
                 if (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size) == DROP)
                     return XDP_DROP;
 
-                compute_udp_checksum(data, data_end);
+                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-                return XDP_TX;
+                return XDP_DROP;
             }
 
             else
@@ -1737,9 +1737,9 @@ int dns_response(struct xdp_md *ctx)
                 if (createDnsQuery(data, &offset_h, data_end) == DROP)
                     return XDP_DROP;
 
-                compute_udp_checksum(data, data_end);
+                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-                return XDP_TX;
+                return XDP_DROP;
             }
 
             else
@@ -1900,9 +1900,11 @@ int dns_jump_query(struct xdp_md *ctx) {
     __u8 pointer = getDestIp(data);
     hideInDestIp(data, data_end, serverip);
 
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -2017,9 +2019,11 @@ int dns_check_subdomain(struct xdp_md *ctx) {
     __u8 deep = getDestIp(data);
     hideInDestIp(data, data_end, serverip);
 
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -2117,9 +2121,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Query goes by check_subdomain");
                 #endif  
 
-                compute_udp_checksum(data, data_end);
+                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-                return XDP_TX;
+                return XDP_DROP;
             }
             
             else
@@ -2169,11 +2173,13 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
     if (off > MAX_DNS_NAME_LENGTH)
         return XDP_DROP;
-    
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
 
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
+    
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
     if (query) {
@@ -2295,9 +2301,9 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        compute_udp_checksum(data, data_end);
+        bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-        return XDP_TX;        
+        return XDP_DROP;
     }
 
     return XDP_PASS;
@@ -2318,9 +2324,11 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
@@ -2483,9 +2491,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_printk("[XDP] New back query created");
             #endif
 
-            compute_udp_checksum(data, data_end);
+            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-            return XDP_TX;
+            return XDP_DROP;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
@@ -2508,9 +2516,11 @@ int dns_error(struct xdp_md *ctx) {
     __u8 status = getDestIp(data);
     hideInDestIp(data, data_end, serverip);
 
-    struct curr_query curr;
-    
-    curr.ip = getSourceIp(data); curr.id.port = getDestPort(data); curr.id.id = getQueryId(data);
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
 
     struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
 
