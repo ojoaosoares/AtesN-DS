@@ -792,14 +792,14 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
                 if (!nsrecord->ip)
                 {
-                    if (diff > 3 || !nsrecord->timestamp)
-                    {
-                        *pointer = domain->domain_size;
+                    // if (diff > 3 || !nsrecord->timestamp)
+                    // {
+                    //     *pointer = domain->domain_size;
                     
-                        return 1;
-                    }
+                    //     return 1;
+                    // }
 
-                    else 
+                    // else 
                         continue;
                 }
 
@@ -1386,8 +1386,8 @@ int dns_filter(struct xdp_md *ctx) {
     __u32 ip = recursive_server_ip;
     __u8 pointer = dnsquery.query.domain_size;
 
-    // if (findOwnerServer(&dnsquery.query, &ip, &pointer))
-    //     return XDP_PASS;
+    if (findOwnerServer(&dnsquery.query, &ip, &pointer))
+        return XDP_PASS;
     
     #ifdef DOMAIN
         bpf_printk("[XDP] Authoritative server: %u", ip);
@@ -2220,7 +2220,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
         __u32 ip = recursive_server_ip; __u8 pointer;
 
-        // findOwnerServer(&dnsquery.query, &ip, &pointer);
+        findOwnerServer(&dnsquery.query, &ip, &pointer);
         
         #ifdef DOMAIN
             bpf_printk("[XDP] Authoritative server: %u", ip);

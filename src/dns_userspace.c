@@ -17,7 +17,7 @@
 static const char *standard_recursive_server = "8.8.8.8";
 
 struct event_send_packets {
-    char domain[256];
+    char domain[255];
     __u32 len;
     __u32 ips[4];
     __u16 id;
@@ -100,7 +100,7 @@ static int build_dns_query(char *buf, size_t buf_size, uint16_t id, const char *
 
     // --- Encode domain name ---
     int i = 0;
-    while (i < 256 && domain[i]) {
+    while (i < 255 && domain[i]) {
         buf[offset++] = domain[i++];
     }
 
