@@ -37,6 +37,7 @@
 #define DNS_RD_SHIFT 8
 
 #define A_RECORD_TYPE 1
+#define AAA_RECORD_TYPE 28
 #define NS_RECORD_TYPE 2
 #define CNAME_RECORD_TYPE 5
 #define SOA_RECORD_TYPE 6 
@@ -68,6 +69,7 @@
 #define DNS_BACK_TO_LAST_QUERY 2
 #define DNS_CHECK_SUBDOMAIN_PROG 3
 #define DNS_ERROR_PROG 4
+#define DNS_SEND_EVENT_PROG 5
 #define DNS_UDP_CSUM_PROG 6
 #define DNS_RESPONSE_PROG 7
 
@@ -177,6 +179,14 @@ struct curr_query
 {
     struct id id;
     __u32 ip;
+};
+
+struct event {
+    char domain[MAX_DNS_NAME_LENGTH];
+    __u32 len;
+    __u32 ips[4];
+    __u16 id;
+    __u16 port;
 };
 
 #endif

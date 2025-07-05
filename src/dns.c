@@ -12,6 +12,11 @@
 #define DOMAIN
 
 struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);  // 16MB buffer, você escolhe o tamanho
+} ringbuf_send_packet SEC(".maps");
+
+struct {
         __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
         __uint(max_entries, 8);                
         __uint(key_size, sizeof(__u32)); 
@@ -1941,13 +1946,12 @@ int dns_jump_query(struct xdp_md *ctx) {
                 #endif
                 break;
         }
-        
-        bpf_map_delete_elem(&curr_queries, &curr);
          
-
         __u16 remainder_off = ((long) ((void*) remainder) - (long) data);
 
         bpf_printk("Remainder :%d", remainder_off);
+
+        hideInSourcePort(data, bpf_htons(remainder_off)); hideInDestIp(data, data_end, record.ip);
 
         if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
@@ -1967,35 +1971,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
         }
 
-        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5) - data_end);
-
-        if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-        {
-            #ifdef DOMAIN
-                bpf_printk("[XDP] It was't possible to resize the packet");
-            #endif
-            
-            return XDP_DROP;
-        }
-
-        data = (void*) (long) ctx->data;
-        data_end = (void*) (long) ctx->data_end;
-
-        offset_h = 0;
-
-        if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
-            return XDP_DROP;
-
-        if (createDnsQuery(data, &offset_h, data_end) == DROP)
-            return XDP_DROP;
-
-        #ifdef DOMAIN
-            bpf_printk("[XDP] Hop query created");
-        #endif
-
-        compute_udp_checksum(data, data_end);
-
-        return XDP_TX;
+        bpf_tail_call(ctx, &tail_programs, DNS_SEND_EVENT_PROG);
     }
 
     return XDP_DROP;
@@ -2600,10 +2576,134 @@ int dns_error(struct xdp_md *ctx) {
                     return XDP_DROP;
             }
 
-            compute_udp_checksum(data, data_end);
+            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
 
-            return XDP_TX;
+            return XDP_DROP;
         }    
+    }
+
+    return XDP_DROP;
+}
+
+SEC("xdp")
+int dns_send_event(struct xdp_md *ctx) {
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Send event program");
+    #endif    
+
+    void *data_end = (void*) (long) ctx->data_end;
+    void *data = (void*) (long) ctx->data;
+
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
+    __u32 ip = getDestIp(data);
+    
+    hideInDestIp(data, data_end, serverip);
+
+    __u16 remainder_offset = getSourcePort(data);
+
+    hideInSourcePort(data, bpf_htons(DNS_PORT));
+
+    if (remainder_offset > 512)
+        return XDP_DROP;
+
+    hideInSourcePort(data, bpf_htons(DNS_PORT));
+
+    struct curr_query curr = {
+        .id.id = getQueryId(data),
+        .id.port = getDestPort(data),
+        .ip = getSourceIp(data)
+    };
+
+    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+
+    if (query) {
+
+        bpf_map_delete_elem(&curr_queries, &curr);
+
+        struct event *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event), 0);
+
+        if (myevent) {
+
+            __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+
+            __u8 *remainder = data + remainder_offset;
+
+            int count = 0;
+
+            for (int i = 0; i < 20; i++)
+            {
+                if (remainder + 6 > data_end)
+                    break;
+
+                else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+                {        
+                    if (remainder + 16 > data_end)
+                        break;
+                    
+                    __u32 ip = *((__u32 *) (remainder + 12));
+
+                    bpf_printk("[XDP] Event IP %d: %u", count, ip);
+                
+                    myevent->ips[count++] = *((__u32 *) (remainder + 12));
+
+                    remainder += (4 + 12);
+
+                    if (count == 4)
+                        break;
+                }
+
+                else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == AAA_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+                {
+                    remainder += (16 + 12);
+                }
+                
+                else
+                    break;
+                
+            }
+
+            myevent->id = getQueryId(data);
+            myevent->port = getDestPort(data);
+
+            myevent->len = count;
+
+            bpf_ringbuf_submit(myevent, 0);
+        }
+
+        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5) - data_end);
+
+        if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+        {
+            #ifdef DOMAIN
+                bpf_printk("[XDP] It was't possible to resize the packet");
+            #endif
+            
+            return XDP_DROP;
+        }
+
+        data = (void*) (long) ctx->data;
+        data_end = (void*) (long) ctx->data_end;
+
+        offset_h = 0;
+
+        if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+            return XDP_DROP;
+
+        if (createDnsQuery(data, &offset_h, data_end) == DROP)
+            return XDP_DROP;
+
+        #ifdef DOMAIN
+            bpf_printk("[XDP] Hop query created");
+        #endif
+
+        bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
+
+        return XDP_DROP;
     }
 
     return XDP_DROP;
