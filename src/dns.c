@@ -1949,6 +1949,8 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         bpf_printk("Remainder :%d", remainder_off);
 
+        __u32 ip = record.ip;
+
         if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
             record.ip = 0;
