@@ -115,6 +115,54 @@ static int build_dns_query(char *buf, size_t buf_size, uint16_t id, const char *
     return (int)offset;
 }
 
+static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
+                                  __u32 dst_ip, uint16_t id,
+                                  const char *domain) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    struct sockaddr_in src_addr = {
+        .sin_family = AF_INET,
+        .sin_port = src_port,
+        .sin_addr.s_addr = src_ip
+    };
+
+    if (bind(sock, (struct sockaddr*)&src_addr, sizeof(src_addr)) < 0) {
+        perror("bind");
+        close(sock);
+        return -1;
+    }
+
+    char query[271];
+    int query_len = build_dns_query(query, sizeof(query), id, domain);
+    if (query_len < 0) {
+        fprintf(stderr, "failed to build query\n");
+        close(sock);
+        return -1;
+    }
+
+    
+    struct sockaddr_in dst_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(53),
+        .sin_addr.s_addr = dst_ip
+    };
+
+    
+    if (sendto(sock, query, query_len, 0,
+               (struct sockaddr*)&dst_addr, sizeof(dst_addr)) < 0) {
+        perror("sendto");
+        close(sock);
+        return -1;
+    }
+
+    close(sock);
+    return 0;
+}
+
 
 void tutorial() {
     printf("AtesN-DS\n");
