@@ -9,10 +9,25 @@
 #include <regex.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <netinet/ip.h>
+
 
 #define MAX_IP_STRING_LENGTH 16
 
 static const char *standard_recursive_server = "8.8.8.8";
+
+struct event_send_packets {
+    char domain[256];
+    __u32 len;
+    __u32 ips[4];
+    __u16 id;
+    __u16 port;
+};
+
+struct send_packets_context {
+    __u32 saddr;
+};
+
 
 void convert_mac_to_bytes(const char *mac_str, unsigned char mac_bytes[6]) {
 
@@ -163,6 +178,41 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
     return 0;
 }
 
+static int handle_ringbuf_event(void *ctx, void *data, size_t len) {
+    struct send_packets_context *myctx = ctx;
+    struct event_send_packets *e = data;
+
+    if (len < sizeof(*e)) {
+        fprintf(stderr, "Invalid event size: %zu (expected %zu)\n", len, sizeof(*e));
+        return 0;
+    }
+
+    printf("[EVENT] Received domain: %s\n", e->domain);
+    printf("[EVENT] Sending to %u IPs\n", e->len);
+
+    for (__u32 i = 0; i < e->len; i++) {
+        struct in_addr dst = { .s_addr = e->ips[i] };
+        printf(" -> %s\n", inet_ntoa(dst));
+
+        int ret = send_dns_query_from_ip(
+            myctx->saddr,
+            e->port,
+            e->ips[i],
+            e->id,
+            e->domain
+        );
+
+        if (ret == 0) {
+            printf("[SEND] Sent to %s\n", inet_ntoa(dst));
+        } else {
+            fprintf(stderr, "[ERROR] Failed sending to %s\n", inet_ntoa(dst));
+        }
+    }
+
+    return 0;
+}
+
+
 
 void tutorial() {
     printf("AtesN-DS\n");
@@ -201,6 +251,7 @@ int main(int argc, char *argv[]) {
     while ((opt = getopt(argc, argv, "a:i:s:m:h")) != -1) {
         switch (opt) {
         case 'a':
+            inet_pton(AF_INET, optarg, &myip);
             inet_pton(AF_INET, optarg, &skel->bss->serverip);
             break;
         case 'i':
@@ -249,6 +300,7 @@ int main(int argc, char *argv[]) {
         {2, skel->progs.dns_back_to_last_query},
         {3, skel->progs.dns_check_subdomain},
         {4, skel->progs.dns_error},
+        {5, skel->progs.dns_send_event},
         {6, skel->progs.dns_udp_csum},
         {7, skel->progs.dns_response}
     };
@@ -272,9 +324,23 @@ int main(int argc, char *argv[]) {
     printf("CTRL + C to stop\n");
 
 
+    struct send_packets_context ctx = {
+        .saddr = myip
+    };
+
+    struct ring_buffer *rb;
+
+    rb = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf_send_packet), handle_ringbuf_event, &ctx, NULL);
+    if (!rb) {
+        fprintf(stderr, "Failed to create ring buffer\n");
+        return 1;
+    }
+
+
     for ( ; ; )
     {
-        sleep(1);
+        ring_buffer__poll(rb, 100);
+        // sleep(1);
     }
     
 cleanup: 
