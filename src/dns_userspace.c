@@ -63,6 +63,58 @@ int validate_ipv4(const char *ip_str) {
     return 0;
 }
 
+static int build_dns_query(char *buf, size_t buf_size, uint16_t id, const char *domain) {
+    if (buf_size < 12 + strlen(domain) + 2 + 4) {
+        // Minimum DNS header + domain labels + null + QTYPE/QCLASS
+        return -1;
+    }
+
+    memset(buf, 0, buf_size);
+
+    // --- DNS Header (12 bytes) ---
+    buf[0] = (id >> 8) & 0xFF;
+    buf[1] = id & 0xFF;
+    buf[2] = 0x01;  // QR=0 (query), Opcode=0, RD=1
+    buf[3] = 0x00;
+    buf[4] = 0x00; buf[5] = 0x01; // QDCOUNT = 1
+    buf[6] = 0x00; buf[7] = 0x00; // ANCOUNT = 0
+    buf[8] = 0x00; buf[9] = 0x00; // NSCOUNT = 0
+    buf[10] = 0x00; buf[11] = 0x00; // ARCOUNT = 0
+
+    size_t offset = 12;
+
+    // --- Encode domain name ---
+    const char *label_start = domain;
+    while (*label_start) {
+        const char *label_end = strchr(label_start, '.');
+        size_t label_len = label_end ? (size_t)(label_end - label_start) : strlen(label_start);
+
+        if (label_len > 63 || offset + 1 + label_len >= buf_size) {
+            return -1;
+        }
+
+        buf[offset++] = (uint8_t)label_len;
+        memcpy(&buf[offset], label_start, label_len);
+        offset += label_len;
+
+        if (!label_end) break;
+        label_start = label_end + 1;
+    }
+
+    if (offset + 1 + 4 > buf_size) return -1;
+    buf[offset++] = 0x00;  // End of QNAME
+
+    // --- QTYPE (A record) ---
+    buf[offset++] = 0x00;
+    buf[offset++] = 0x01;
+
+    // --- QCLASS (IN) ---
+    buf[offset++] = 0x00;
+    buf[offset++] = 0x01;
+
+    return (int)offset;
+}
+
 
 void tutorial() {
     printf("AtesN-DS\n");
