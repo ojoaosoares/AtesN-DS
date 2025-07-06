@@ -1397,7 +1397,7 @@ int dns_filter(struct xdp_md *ctx) {
         .ip_address = getSourceIp(data),
         .rec = 0,
         .not_cache = 0,
-        owner.curr_pointer = pointer
+        .curr_pointer = pointer
     };
 
     if(bpf_map_update_elem(&recursive_queries, (struct dns_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
