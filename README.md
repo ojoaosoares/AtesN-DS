@@ -1,73 +1,85 @@
 # AtesN-DS
 
-## Introduction
+AtesN-DS is a high-performance, recursive DNS server built on eBPF that runs directly in the Linux kernel. By attaching to the XDP (eXpress Data Path) hook, it processes DNS queries at the network interface level, bypassing the kernel's network stack entirely. This approach avoids context switches and significantly reduces latency.
 
-AtesN-DS is a recursive DNS server built on eBPF that runs directly in the Linux kernel, specifically within the XDP hook, without any interaction with userspace. Essentially, AtesN-DS processes DNS queries at the network interface level, generating requests to root servers, TLD servers, and authoritative servers, while caching their responses in eBPF maps. If a query arrives and its response is already cached, AtesN-DS directly returns the response to the client. All packets handled by AtesN-DS bypass the network stack and avoid context switches, significantly reducing latency.
+The server handles the full recursion process, sending requests to root, TLD, and authoritative servers, while caching their responses in efficient eBPF maps. When a cached response is available, it's returned directly to the client at line rate.
 
-## Features
+***
 
-- **Recursion**: Efficiently resolves queries with recursion, leveraging cache maps for records and servers that can fulfill the request.
-- **Caching**: AtesN-DS caches DNS records, TLDs and authoritative servers to improve perfomance.
-- **Context Switch Avoidance**: AtesN-DS operates directly in the kernel, specifically within the XDP hook. Since DNS packets never reach the network stack, context switches are significantly reduced.
+## Key Features
+
+-   **High-Performance Recursion**: Efficiently resolves DNS queries by performing the full recursive lookup process in-kernel.
+-   **Kernel-Level Caching**: Uses eBPF maps for lightning-fast caching of DNS records, TLDs, and authoritative server information, dramatically improving performance for repeated queries.
+-   **Zero Context Switch Overhead**: Operates entirely at the XDP hook, meaning handled DNS packets never touch the traditional network stack, eliminating performance penalties.
+
+***
 
 ## Prerequisites
 
+### System Requirements
+
+AtesN-DS was developed and tested on the following environment. This is the recommended setup for optimal performance and compatibility.
+
+-   **Operating System:** Ubuntu 22.04.1 (64-bit)
+-   **Linux Kernel:** `6.8.0-60-generic` or newer
+-   **Compiler:** Clang `18.1.8` or newer
+
 ### Dependencies
-**Installation Script** Run install.sh to install dependencies automatically
 
-#### 1. Grant Execution Permission
-Before running `install.sh`, ensure it has the correct permissions:
+The project includes an installation script (`install.sh`) to automatically set up all required dependencies.
 
-```bash
-chmod +x install.sh
-```
+1.  **Grant Execution Permission**
+    First, make the installation script executable:
+    ```bash
+    chmod +x install.sh
+    ```
 
-#### 2. Execute the Script
+2.  **Execute the Script**
+    Run the script with `sudo` to install the dependencies:
+    ```bash
+    sudo ./install.sh
+    ```
 
-Run the script using:
-
-```bash
-sudo ./install.sh
-```
-
-Alternatively, you can execute it with bash:
-
-```bash
-sudo bash install.sh
-```
+***
 
 ## How to Compile and Run
 
-### Using Makefile
+### Compilation
 
-The project includes a `Makefile` to simplify the compilation process. Below are the available commands:
+The project includes a `Makefile` to simplify the build process.
 
-1. **Compile the Program**:  
-To compile the program, run:
-```bash
-make
-```
+-   **Compile the program**:
+    ```bash
+    make
+    ```
+    This will create the `atesn_ds` executable in the `./bin/` directory.
 
-This will generate the executable in the ./bin/ folder.
-
-2. **Clean Build Files**:
-To remove all compiled object files and the executable, run:
-
-```bash
-make clean
-```
+-   **Clean build files**:
+    ```bash
+    make clean
+    ```
+    This removes all compiled object files and the executable.
 
 ### Execution
 
-After compiling, run the program using:
-```bash
-./bin/atesn_ds [-h] [-a your_ip] [-i bind_interface] [-s root_server_ip] [-m gateway_mac]
-```
+You need superuser privileges to run AtesN-DS because it must attach the eBPF program to a network interface.
 
-where
+-   **General Usage**:
+    ```bash
+    sudo ./bin/atesn_ds -a <your_ip> -i <interface> -s <root_server_ip> -m <gateway_mac>
+    ```
 
-- **-m [your_ip]**: The ip address the server will run
-- **-i [bind_interface]**: The interface where the program will be attached in the XDP hook
-- **-s [root_server_ip]**: The ip address of a root dns server
-- **-m [gateway_mac]**: The mac address of the proxy
-- **-h**: Outputs usage
+-   **Example**:
+    ```bash
+    sudo ./bin/atesn_ds -a 192.168.1.100 -i eth0 -s 198.41.0.4 -m 00:1A:2B:3C:4D:5E
+    ```
+
+#### Command-Line Options
+
+| Flag | Argument | Description |
+| :--- | :--- | :--- |
+| `-h` | | Display the help and usage information. |
+| `-a` | `[your_ip]` | The IP address the server will bind to. |
+| `-i` | `[interface]` | The network interface to attach the XDP hook to. |
+| `-s` | `[root_server_ip]` | The IP address of a root DNS server to start recursion. |
+| `-m` | `[gateway_mac]` | The MAC address of the network gateway or proxy. |
