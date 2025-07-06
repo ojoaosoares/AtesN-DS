@@ -58,7 +58,7 @@ struct {
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 250000);
-        __uint(key_size, sizeof(char[DNS_LIMIT]));
+        __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
         __uint(value_size, sizeof(struct a_record));
 
 } cache_nsrecords SEC(".maps");
@@ -186,7 +186,7 @@ static __always_inline __u8 isValidUDP(void *data, __u64 *offset, void *data_end
         return DROP;
     }
     
-    if (ipv4->frag_off & IP_FRAGMENTET)
+    if (ipv4->frag_off & IP_FRAGMENTED_MASK)
     {
         #ifdef FILTER
             bpf_printk("[PASS] Frame fragmented");
@@ -338,7 +338,7 @@ static __always_inline __u8 getDomain(void *data, __u64 *offset, void *data_end,
 
     content += 2;
 
-    if (bpf_ntohs(*((__u16 *) content)) ^ INTERNT_CLASS)
+    if (bpf_ntohs(*((__u16 *) content)) ^ DNS_CLASS_IN)
     {
         #ifdef DOMAIN
             bpf_printk("[PASS] It's not a DNS query class IN");
@@ -584,7 +584,7 @@ static __always_inline __u8 createDNSAnswer(void *data, __u64 *offset, void *dat
     }
 
     response->query_pointer = bpf_htons(DNS_POINTER_OFFSET);
-    response->record_class = bpf_htons(INTERNT_CLASS);
+    response->record_class = bpf_htons(DNS_CLASS_IN);
     response->record_type = bpf_htons(A_RECORD_TYPE);
     response->ttl = bpf_htonl(ttl);
     response->data_length = bpf_htons(sizeof(ip));
@@ -714,7 +714,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             }
         }
 
-        if (bpf_ntohs(response->record_class) ^ INTERNT_CLASS)
+        if (bpf_ntohs(response->record_class) ^ DNS_CLASS_IN)
             return ACCEPT_NO_ANSWER;
 
         if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
@@ -743,7 +743,7 @@ static __always_inline __u8 getDNSAnswer(void *data, __u64 *offset, void *data_e
             return DROP;
         }
 
-        if (bpf_ntohs(response->record_class) ^ INTERNT_CLASS)
+        if (bpf_ntohs(response->record_class) ^ DNS_CLASS_IN)
             return ACCEPT_NO_ANSWER;
 
         if(bpf_ntohs(response->record_type) ^ SOA_RECORD_TYPE)
@@ -762,7 +762,7 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
 
     __u64 index = 0;
 
-    for (size_t i = 0; i < 10 && (index < MAX_DNS_NAME_LENGTH) && (index + DNS_LIMIT <= MAX_DNS_NAME_LENGTH); i++)
+    for (size_t i = 0; i < MAX_LABELS_CHECK && (index < MAX_DNS_NAME_LENGTH) && (index + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH); i++)
     {
         if(domain->name[index] == 0)
         {
@@ -770,7 +770,7 @@ static __always_inline __u8 findOwnerServer(struct dns_domain *domain, __u32 *ip
             return 0;
         }
 
-        if (domain->domain_size - index <= DNS_LIMIT)    
+        if (domain->domain_size - index <= MAX_SUBDOMAIN_LENGTH)    
         {
             struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
 
@@ -857,14 +857,14 @@ static __always_inline __u8 getAdditional(void *data, __u64 *offset, void *data_
 
     record->timestamp = (bpf_ktime_get_ns() / 1000000000);
 
-    for (size_t size = 0; size < 500 - domainsize; size++) {
+    for (size_t size = 0; size < MAX_DNS_PAYLOAD - domainsize; size++) {
         
         if (content + size + 6 > data_end)
             break;
 
         if ((*((__u16 *)(content + size)) & 0xC0) == 0xC0 &&
             bpf_ntohs(*((__u16 *)(content + size + 2))) == A_RECORD_TYPE &&
-            bpf_ntohs(*((__u16 *)(content + size + 4))) == INTERNT_CLASS)
+            bpf_ntohs(*((__u16 *)(content + size + 4))) == DNS_CLASS_IN)
         {        
             if (content + size + 16 > data_end)
                 return DROP;
@@ -1057,7 +1057,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
             domain += 2;
 
-            *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
+            *((__u16 *) domain) = bpf_htons(DNS_CLASS_IN);
 
             return ACCEPT;
         }
@@ -1081,7 +1081,7 @@ static __always_inline __u8 getAuthoritative(void *data, __u64 *offset, void *da
 
     domain += 2;
 
-    *((__u16 *) domain) = bpf_htons(INTERNT_CLASS);
+    *((__u16 *) domain) = bpf_htons(DNS_CLASS_IN);
 
     return ACCEPT;
 }
@@ -1119,7 +1119,7 @@ static __always_inline __u8 writeQuery(void *data, __u64 *offset, void *data_end
 
     content += 2;
 
-    (* (__u16 *) content) = bpf_htons(INTERNT_CLASS);
+    (* (__u16 *) content) = bpf_htons(DNS_CLASS_IN);
 
     return ACCEPT;
 }
@@ -1394,7 +1394,7 @@ int dns_filter(struct xdp_md *ctx) {
     #endif
     
     struct query_owner owner = {
-        .ip_address = getSourceIp(data),
+        .ip = getSourceIp(data),
         .rec = 0,
         .not_cache = 0,
         .curr_pointer = pointer
@@ -1509,16 +1509,15 @@ int dns_response(struct xdp_md *ctx)
 
         if (lastdomain)
         {
-            lastdomain->trash++;
 
-            __u8 rec = lastdomain->trash++;
+            __u8 rec = ++lastdomain->recursion_state;
 
             if (rec >= 16)
                 recursion_limit = 1;
 
-            if (lastdomain->trash & (1 << 8)) 
+            if (lastdomain->recursion_state & (1 << 8)) 
             {
-                lastdomain->trash &= ~(1 << 8);
+                lastdomain->recursion_state &= ~(1 << 8);
                 aprove = 1;
                 pointer = (lastdomain->pointer >> 8);
             }
@@ -1536,7 +1535,7 @@ int dns_response(struct xdp_md *ctx)
 
     if (aprove)
     {
-        if ((dnsquery.query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        if ((dnsquery.query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
             struct a_record *record_aprove = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name[pointer]);
 
@@ -1573,7 +1572,7 @@ int dns_response(struct xdp_md *ctx)
 
             offset_h = 0;
 
-            if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+            if (redirect_packet_keep(data, &offset_h, data_end, powner->ip) == DROP)
                 return XDP_DROP;
 
             if (setDNSHeader(data, &offset_h, data_end) == DROP)
@@ -1679,7 +1678,7 @@ int dns_response(struct xdp_md *ctx)
 
                 offset_h = 0;
 
-                if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+                if (redirect_packet_keep(data, &offset_h, data_end, powner->ip) == DROP)
                     return XDP_DROP;
 
                 if (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size) == DROP)
@@ -1823,7 +1822,7 @@ int dns_response(struct xdp_md *ctx)
 
         else if (lastdomain)
         {
-            lastdomain->trash |= (1 << 8);
+            lastdomain->recursion_state |= (1 << 8);
             lastdomain->pointer &= 0x00FF;
             lastdomain->pointer |= (pointer << 8);
         }
@@ -1858,7 +1857,7 @@ int dns_response(struct xdp_md *ctx)
 
         else if (lastdomain)
         {
-            if (hideInDestIp(data, data_end, lastdomain->trash) == DROP)
+            if (hideInDestIp(data, data_end, lastdomain->recursion_state) == DROP)
                 return XDP_DROP;
 
             lastdomain->pointer &= 0x00FF;
@@ -1953,7 +1952,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
         hideInSourcePort(data, bpf_htons(remainder_off)); hideInDestIp(data, data_end, record.ip);
 
-        if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
         {
             record.ip = 0;
 
@@ -2028,7 +2027,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Subdomain %s", subdomain.name);
                 #endif 
 
-                if (subdomain.domain_size <= DNS_LIMIT)
+                if (subdomain.domain_size <= MAX_SUBDOMAIN_LENGTH)
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
 
                 break;
@@ -2037,7 +2036,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Subpointer %d", pointer);
                 #endif 
 
-                if ((query->query.domain_size - pointer <= DNS_LIMIT) && (pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
 
             default:        
@@ -2352,9 +2351,9 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     return XDP_PASS;
                 }
 
-                __u8 deep = lastdomain->trash, pointer = lastdomain->pointer; ip = cache_record.ip;
+                __u8 deep = lastdomain->recursion_state, pointer = lastdomain->pointer; ip = cache_record.ip;
 
-                if (lastdomain->query.domain_size - pointer <= DNS_LIMIT && pointer + DNS_LIMIT <= MAX_DNS_NAME_LENGTH)
+                if (lastdomain->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH && pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH)
                 {
                     cache_record.ip = 0;
 
@@ -2372,18 +2371,18 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     #endif
                 }
 
-                lastdomain->trash = curr.id.id - 1;
+                lastdomain->recursion_state = curr.id.id - 1;
                 lastdomain->pointer = curr.id.port;
 
                 struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) lastdomain);
 
                 if (last_of_last)
                 {
-                    last_of_last->trash = deep;
-                    last_of_last->trash |= (1 << 8);
+                    last_of_last->recursion_state = deep;
+                    last_of_last->recursion_state |= (1 << 8);
 
                     #ifdef DEEP
-                        bpf_printk("curr %d", last_of_last->trash);
+                        bpf_printk("curr %d", last_of_last->recursion_state);
                     #endif
                 }
 
@@ -2405,19 +2404,19 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             else
             {
-                __u8 deep = lastdomain->trash;
+                __u8 deep = lastdomain->recursion_state;
 
-                lastdomain->trash = curr.id.id - 1;
+                lastdomain->recursion_state = curr.id.id - 1;
                 lastdomain->pointer = curr.id.port;
 
                 struct hop_query *last_of_last = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) lastdomain);
 
                 if (last_of_last)
                 {
-                    last_of_last->trash = deep;
+                    last_of_last->recursion_state = deep;
 
                     #ifdef DEEP
-                        bpf_printk("curr %d", last_of_last->trash);
+                        bpf_printk("curr %d", last_of_last->recursion_state);
                     #endif
                 }
 
@@ -2458,7 +2457,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
             if (createDnsQuery(data, &offset_h, data_end) == DROP)
                 return XDP_DROP;
 
-            modifyID(data, lastdomain->trash);
+            modifyID(data, lastdomain->recursion_state);
 
             if (writeQuery(data, &offset_h, data_end, &lastdomain->query) == DROP)
                 return XDP_DROP;
@@ -2564,7 +2563,7 @@ int dns_error(struct xdp_md *ctx) {
 
             offset_h = 0;
 
-            if (redirect_packet_keep(data, &offset_h, data_end, powner->ip_address) == DROP)
+            if (redirect_packet_keep(data, &offset_h, data_end, powner->ip) == DROP)
                 return XDP_DROP;
 
             if (createNoDNSAnswer(data, &offset_h, data_end, status) == DROP)
@@ -2608,7 +2607,7 @@ int dns_send_event(struct xdp_md *ctx) {
 
     hideInSourcePort(data, bpf_htons(DNS_PORT));
 
-    if (remainder_offset > 512)
+    if (remainder_offset > MAX_UDP_SIZE)
         return XDP_DROP;
 
     hideInSourcePort(data, bpf_htons(DNS_PORT));
@@ -2636,7 +2635,7 @@ int dns_send_event(struct xdp_md *ctx) {
             if (remainder + 6 > data_end)
                 break;
 
-            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == A_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == DNS_CLASS_IN)
             {        
                 if (remainder + 16 > data_end)
                     break;
@@ -2653,7 +2652,7 @@ int dns_send_event(struct xdp_md *ctx) {
                     break;
             }
 
-            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == AAA_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == INTERNT_CLASS)
+            else if ((*(remainder) & 0xC0) == 0xC0 && bpf_ntohs(*((__u16 *) (remainder + 2))) == AAA_RECORD_TYPE && bpf_ntohs(*((__u16 *) (remainder + 4))) == DNS_CLASS_IN)
             {
                 remainder += (16 + 12);
             }
