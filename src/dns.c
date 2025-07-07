@@ -9,7 +9,7 @@
 #include <bpf/bpf_helpers.h>
 #include "dns.h"
 
-#define DOMAIN
+// #define DOMAIN
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -902,6 +902,8 @@ static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset,
 
     if ((*(content) & 0xC0) == 0xC0)
     {
+        // subdomain->domain_size = 0;
+
         *offset += 2;
 
         *pointer = (__u16) (bpf_ntohs(*(__u16 *) content) & 0x3FFF) - sizeof(struct dns_header);
@@ -944,22 +946,11 @@ static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset,
 
             (*off) += size + 2;
 
+            // subdomain->domain_size = size;
+
+            // return ACCEPT_JUST_POINTER;
+
             subdomain->domain_size = size + (domain->domain_size - *pointer);
-
-            // for (size_t size2 = 0; size2 < MAX_DNS_NAME_LENGTH; size2++)
-            // {
-            //     if (*pointer + size2 >= domain->domain_size)
-            //         break;
-                
-            //     if (size + size2  >= MAX_DNS_NAME_LENGTH)
-            //         break;
-
-            //     subdomain->name[size + size2] = domain->name[*pointer + size2];
-            // }
-
-            // __builtin_memcpy(&subdomain->name[size], &domain->name[*pointer], domain->domain_size - *pointer);
-
-            // return ACCEPT;   
 
             return ACCEPT;
         }
@@ -1935,11 +1926,10 @@ int dns_jump_query(struct xdp_md *ctx) {
          
         __u16 remainder_off = ((long) ((void*) remainder) - (long) data);
 
-        bpf_printk("Remainder :%d", remainder_off);
+        hide_in_source_port(data, bpf_htons(remainder_off)); 
+        hide_in_dest_ip(data, data_end, record.ip);
 
-        hide_in_source_port(data, bpf_htons(remainder_off)); hide_in_dest_ip(data, data_end, record.ip);
-
-        if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH))
         {
             record.ip = 0;
 
@@ -1951,7 +1941,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
                 return XDP_PASS;
             }
-
+        
             #ifdef DOMAIN
                 bpf_printk("[XDP] NS Cache Updated");
             #endif
@@ -2022,6 +2012,17 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 #ifdef DOMAIN
                     bpf_printk("[XDP] Subpointer %d", pointer);
                 #endif 
+
+                // if (subdomain.domain_size)
+                // {
+
+                //     for (size_t i = subdomain.domain_size, j = pointer; i < MAX_DNS_NAME_LENGTH && j < query->query.domain_size; i++, j++)
+                //         subdomain.name[i] = query->query.name[j];
+
+                    
+                //     if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                //         nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
+                // }
 
                 if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
