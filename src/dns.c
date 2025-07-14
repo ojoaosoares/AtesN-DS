@@ -1351,9 +1351,27 @@ int dns_filter(struct xdp_md *ctx) {
             if (create_dns_answer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size) == DROP)
                 return XDP_DROP;
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
+            if (diff - 3 <= MINIMUM_TTL && !arecord->prefetch)
+            {
+                arecord->prefetch = 1;
 
-            return XDP_DROP;
+                struct curr_query curr = {
+                    .id.id = dnsquery.id.id,
+                    .id.port = get_dest_port(data),
+                    .ip = get_dest_ip(data),
+                };
+
+                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) >= 0)
+                {
+                
+                    bpf_tail_call(ctx, &tail_programs, DNS_PRE_FETCH_PROG);
+
+                    return XDP_DROP;
+                }
+                
+            }
+
+            return XDP_TX;
         }
 
         else
@@ -1400,9 +1418,7 @@ int dns_filter(struct xdp_md *ctx) {
         bpf_printk("[XDP] Recursive Query created");
     #endif  
 
-    bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-    return XDP_DROP;
+    return XDP_TX;
 }
 
 
@@ -1460,7 +1476,7 @@ int dns_response(struct xdp_md *ctx)
             break;
     }
 
-    __u8 recursion_limit = 0, aprove = 0, pointer = dnsquery.query.domain_size;
+    __u8 recursion_limit = 0, aprove = 0, ignore = 0, pointer = dnsquery.query.domain_size;
 
     struct query_owner *powner = NULL; struct hop_query *lastdomain = NULL;
 
@@ -1472,6 +1488,9 @@ int dns_response(struct xdp_md *ctx)
 
         if (powner->rec >= 16)
             recursion_limit = 1;
+
+        if (!powner->ip)
+            ignore = 1;
 
         if (powner->not_cache)
         {
@@ -1562,6 +1581,7 @@ int dns_response(struct xdp_md *ctx)
             struct a_record cache_record;
             cache_record.ip = 0;
             cache_record.timestamp = 0;
+            cache_record.prefetch = 0;
 
             if (get_dns_answer(data, &offset_h, data_end, &cache_record) == DROP)
                 return XDP_DROP;
@@ -1579,9 +1599,7 @@ int dns_response(struct xdp_md *ctx)
                 bpf_printk("[XDP] Recursive response returned");
             #endif
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }
 
         else if (lastdomain) 
@@ -1609,7 +1627,7 @@ int dns_response(struct xdp_md *ctx)
     
     struct a_record *record = NULL;
 
-    if (powner)
+    if (powner && powner->ip)
     {
         record = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
@@ -1662,9 +1680,7 @@ int dns_response(struct xdp_md *ctx)
                 if (create_dns_answer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size) == DROP)
                     return XDP_DROP;
 
-                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-                return XDP_DROP;
+                return XDP_TX;
             }
 
             else
@@ -1719,9 +1735,11 @@ int dns_response(struct xdp_md *ctx)
                 if (create_dns_query(data, &offset_h, data_end) == DROP)
                     return XDP_DROP;
 
-                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
+                
 
-                return XDP_DROP;
+                return XDP_TX;
+
+
             }
 
             else
@@ -1947,7 +1965,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             #endif
         }
 
-        bpf_tail_call(ctx, &tail_programs, DNS_SEND_EVENT_PROG);
+        bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PREVENTION_PROG);
     }
 
     return XDP_DROP;
@@ -2013,16 +2031,6 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Subpointer %d", pointer);
                 #endif 
 
-                // if (subdomain.domain_size)
-                // {
-
-                //     for (size_t i = subdomain.domain_size, j = pointer; i < MAX_DNS_NAME_LENGTH && j < query->query.domain_size; i++, j++)
-                //         subdomain.name[i] = query->query.name[j];
-
-                    
-                //     if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
-                //         nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
-                // }
 
                 if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
@@ -2083,9 +2091,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                     bpf_printk("[XDP] Query goes by check_subdomain");
                 #endif  
 
-                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-                return XDP_DROP;
+                return XDP_TX;
             }
             
             else
@@ -2262,9 +2268,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-        return XDP_DROP;
+        return XDP_TX;
     }
 
     return XDP_PASS;
@@ -2452,9 +2456,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_printk("[XDP] New back query created");
             #endif
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
@@ -2522,6 +2524,10 @@ int dns_error(struct xdp_md *ctx) {
         
         if (powner)
         {
+
+            if (!powner->ip)
+                return XDP_DROP;
+
             modify_id(data, query->id.id);
 
             bpf_map_delete_elem(&recursive_queries, query);
@@ -2561,9 +2567,7 @@ int dns_error(struct xdp_md *ctx) {
                     return XDP_DROP;
             }
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }    
     }
 
@@ -2571,7 +2575,7 @@ int dns_error(struct xdp_md *ctx) {
 }
 
 SEC("xdp")
-int dns_send_event(struct xdp_md *ctx) {
+int dns_error_prevention(struct xdp_md *ctx) {
 
     #ifdef DOMAIN
         bpf_printk("[XDP] Send event program");
@@ -2625,9 +2629,11 @@ int dns_send_event(struct xdp_md *ctx) {
                     break;
                 
                 __u32 ip = *((__u32 *) (remainder + 12));
-
-                bpf_printk("[XDP] Event IP %d: %u", count, ip);
-            
+                
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] Event IP %d: %u", count, ip);
+                #endif
+                
                 ips[count++] = *((__u32 *) (remainder + 12));
 
                 remainder += (4 + 12);
@@ -2648,7 +2654,7 @@ int dns_send_event(struct xdp_md *ctx) {
 
         if (count)
         {
-            struct event *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event), 0);
+            struct event_error_p *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event_error_p), 0);
 
             if (myevent) {
 
@@ -2693,28 +2699,71 @@ int dns_send_event(struct xdp_md *ctx) {
             bpf_printk("[XDP] Hop query created");
         #endif
 
-        bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-        return XDP_DROP;
+        return XDP_TX;
     }
 
     return XDP_DROP;
 }
 
+
 SEC("xdp")
-int dns_udp_csum(struct xdp_md *ctx) {
+int dns_pre_fetch(struct xdp_md *ctx) {
+
+    #ifdef DOMAIN
+        bpf_printk("[XDP] Send pre fetch program");
+    #endif
 
     void *data_end = (void*) (long) ctx->data_end;
     void *data = (void*) (long) ctx->data;
 
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
+    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header); // Desclocamento d e bits para verificar as informações do pacote
 
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    compute_udp_checksum(data, data_end);
+    struct curr_query curr = {
+        .id.id = get_query_id(data),
+        .id.port = get_dest_port(data),
+        .ip = get_dest_ip(data)
+    };
+
+    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+
+    if (query) {
+
+        bpf_map_delete_elem(&curr_queries, &curr);
+
+
+        struct event_prefetch *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event_prefetch), 0);
+
+        if (myevent) {
+
+            __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+
+            myevent->id = curr.id.id;
+            myevent->port = curr.id.port;
+            myevent->ip = serverip;
+
+            bpf_ringbuf_submit(myevent, 0);
+
+            __u32 rand32 = bpf_get_prandom_u32();
+            __u16 rand16 = (__u16)(rand32 & 0xFFFF);
+
+            query->id.id = rand16;
+
+            struct query_owner owner = {
+                .ip = 0,
+                .rec = 0,
+                .not_cache = 0,
+                .curr_pointer = 0
+            };
+
+            bpf_map_update_elem(&recursive_queries, (struct dns_query_key *) query, &owner, BPF_ANY);
+        }
+    }
 
     return XDP_TX;
 }
+
 
 char _license[] SEC("license") = "GPL";

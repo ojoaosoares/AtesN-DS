@@ -10,7 +10,8 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <netinet/ip.h>
-
+#include <linux/if_link.h>
+#include <bpf/bpf.h>
 
 #define MAX_IP_STRING_LENGTH 16
 
@@ -20,6 +21,13 @@ struct event_send_packets {
     char domain[255];
     __u32 len;
     __u32 ips[4];
+    __u16 id;
+    __u16 port;
+};
+
+struct event_prefetch {
+    char domain[255];
+    __u32 ip;
     __u16 id;
     __u16 port;
 };
@@ -168,30 +176,57 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
 
 static int handle_ringbuf_event(void *ctx, void *data, size_t len) {
     struct send_packets_context *myctx = ctx;
-    struct event_send_packets *e = data;
 
-    if (len < sizeof(*e)) {
-        fprintf(stderr, "Invalid event size: %zu (expected %zu)\n", len, sizeof(*e));
-        return 0;
+    if (len == sizeof(struct event_send_packets))
+    {
+        struct event_send_packets *e = data;
+
+        printf("[EVENT] Received domain: %s\n", e->domain);        
+
+        for (__u32 i = 0; i < e->len; i++) {
+            struct in_addr dst = { .s_addr = e->ips[i] };
+            printf(" -> %s\n", inet_ntoa(dst));
+
+            int ret = send_dns_query_from_ip(
+                myctx->saddr,
+                e->port,
+                e->ips[i],
+                e->id,
+                e->domain
+            );
+
+            if (ret == 0) {
+                printf("[SEND] Sent to %s\n", inet_ntoa(dst));
+            } else {
+                fprintf(stderr, "[ERROR] Failed sending to %s\n", inet_ntoa(dst));
+            }
+        }
     }
 
-    printf("[EVENT] Received domain: %s\n", e->domain);
-    printf("[EVENT] Sending to %u IPs\n", e->len);
+    else {
 
-    for (__u32 i = 0; i < e->len; i++) {
-        struct in_addr dst = { .s_addr = e->ips[i] };
+        struct event_prefetch *e = data;
+
+        if (len < sizeof(*e)) {
+            fprintf(stderr, "Invalid event size: %zu (expected %zu)\n", len, sizeof(*e));
+            return 0;
+        }
+
+        printf("[EVENT] Received domain: %s\n", e->domain);
+
+        struct in_addr dst = { .s_addr = e->ip };
         printf(" -> %s\n", inet_ntoa(dst));
 
         int ret = send_dns_query_from_ip(
             myctx->saddr,
             e->port,
-            e->ips[i],
+            e->ip,
             e->id,
             e->domain
         );
 
         if (ret == 0) {
-            printf("[SEND] Sent to %s\n", inet_ntoa(dst));
+            printf("[SEND] Sent pretech query to %s\n", inet_ntoa(dst));
         } else {
             fprintf(stderr, "[ERROR] Failed sending to %s\n", inet_ntoa(dst));
         }
@@ -288,9 +323,9 @@ int main(int argc, char *argv[]) {
         {2, skel->progs.dns_back_to_last_query},
         {3, skel->progs.dns_check_subdomain},
         {4, skel->progs.dns_error},
-        {5, skel->progs.dns_send_event},
-        {6, skel->progs.dns_udp_csum},
-        {7, skel->progs.dns_response}
+        {5, skel->progs.dns_error_prevention},
+        {6, skel->progs.dns_response},
+        {7, skel->progs.dns_pre_fetch}
     };
     
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
@@ -300,11 +335,26 @@ int main(int argc, char *argv[]) {
 
     printf("%s\n", recursive);
 
-    if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
-    {
-        printf("it was not possiblle to attach the program \n");
+    int fd = bpf_program__fd(skel->progs.dns_filter);
+
+    struct bpf_link_create_opts opts = {};
+    opts.sz = sizeof(opts);
+    opts.flags = XDP_FLAGS_DRV_MODE;  // THIS is the hardware offload flag
+    
+
+    int link_fd = bpf_link_create(fd, index, BPF_XDP, &opts);
+    if (link_fd < 0) {
+        perror("bpf_link_create");
         goto cleanup;
     }
+
+
+
+    // if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
+    // {
+    //     printf("it was not possiblle to attach the program \n");
+    //     goto cleanup;
+    // }
 
     printf("attached\n");
 

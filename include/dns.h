@@ -85,9 +85,10 @@
 #define DNS_BACK_TO_LAST_QUERY 2
 #define DNS_CHECK_SUBDOMAIN_PROG 3
 #define DNS_ERROR_PROG 4
-#define DNS_SEND_EVENT_PROG 5
-#define DNS_UDP_CSUM_PROG 6
-#define DNS_RESPONSE_PROG 7
+#define DNS_ERROR_PREVENTION_PROG 5
+#define DNS_RESPONSE_PROG 6
+#define DNS_PRE_FETCH_PROG 7
+
 
 // -----------------------------------------------------------------------------
 // DNS Response Codes (RCODE)
@@ -160,8 +161,10 @@ struct dns_authoritative {
  * @brief Represents a cached A record with its expiration timestamp.
  */
 struct a_record {
-    __u32 ip;
     __u64 timestamp;
+    __u32 ip;
+    __u8 prefetch;
+    
 };
 
 /**
@@ -239,10 +242,17 @@ struct curr_query
 /**
  * @brief Represents an event sent from the eBPF program to the userspace application.
  */
-struct event {
+struct event_error_p {
     char domain[MAX_DNS_NAME_LENGTH];
     __u32 len;
     __u32 ips[4];
+    __u16 id;
+    __u16 port;
+};
+
+struct event_prefetch {
+    char domain[MAX_DNS_NAME_LENGTH];
+    __u32 ip;
     __u16 id;
     __u16 port;
 };
