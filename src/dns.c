@@ -2589,7 +2589,7 @@ int dns_error_prevention(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    __u32 ip = get_dest_ip(data);
+    __u32 dest_ip = get_dest_ip(data);
     
     hide_in_dest_ip(data, data_end, serverip);
 
@@ -2689,7 +2689,7 @@ int dns_error_prevention(struct xdp_md *ctx) {
 
         offset_h = 0;
 
-        if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+        if (redirect_packet_swap(data, &offset_h, data_end, dest_ip) == DROP)
             return XDP_DROP;
 
         if (create_dns_query(data, &offset_h, data_end) == DROP)
@@ -2698,11 +2698,9 @@ int dns_error_prevention(struct xdp_md *ctx) {
         #ifdef DOMAIN
             bpf_printk("[XDP] Hop query created");
         #endif
-
-        return XDP_TX;
     }
 
-    return XDP_DROP;
+    return XDP_TX;
 }
 
 
