@@ -149,8 +149,7 @@ int main(int argc, char *argv[]) {
         {2, skel->progs.dns_back_to_last_query},
         {3, skel->progs.dns_check_subdomain},
         {4, skel->progs.dns_error},
-        {6, skel->progs.dns_udp_csum},
-        {7, skel->progs.dns_response}
+        {5, skel->progs.dns_response}
     };
     
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {

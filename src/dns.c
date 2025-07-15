@@ -1289,9 +1289,7 @@ int dns_filter(struct xdp_md *ctx) {
             if (createDNSAnswer(data, &offset_h, data_end, arecord->ip, diff, status, dnsquery.query.domain_size) == DROP)
                 return XDP_DROP;
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }
 
         else
@@ -1335,9 +1333,7 @@ int dns_filter(struct xdp_md *ctx) {
         bpf_printk("[XDP] Recursive Query created");
     #endif  
 
-    bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-    return XDP_DROP;
+    return XDP_TX;
 }
 
 
@@ -1502,9 +1498,7 @@ int dns_response(struct xdp_md *ctx)
                 bpf_printk("[XDP] Recursive response returned");
             #endif
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }
 
         else if (lastdomain) 
@@ -1585,9 +1579,7 @@ int dns_response(struct xdp_md *ctx)
                 if (createDNSAnswer(data, &offset_h, data_end, record->ip, diff, status, dnsquery.query.domain_size) == DROP)
                     return XDP_DROP;
 
-                bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-                return XDP_DROP;
+                return XDP_TX;
             }
 
             else
@@ -1825,8 +1817,6 @@ int dns_jump_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Hop query created");
         #endif
 
-        compute_udp_checksum(data, data_end);
-
         return XDP_TX;
     }
 
@@ -2063,9 +2053,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
             bpf_printk("[XDP] Recursive Query created");
         #endif  
 
-        bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-        return XDP_DROP;
+        return XDP_TX;
     }
 
     return XDP_PASS;
@@ -2235,9 +2223,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 bpf_printk("[XDP] New back query created");
             #endif
 
-            bpf_tail_call(ctx, &tail_programs, DNS_UDP_CSUM_PROG);
-
-            return XDP_DROP;
+            return XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
@@ -2344,29 +2330,11 @@ int dns_error(struct xdp_md *ctx) {
                     return XDP_DROP;
             }
 
-            compute_udp_checksum(data, data_end);
-
             return XDP_TX;
         }    
     }
 
     return XDP_DROP;
-}
-
-SEC("xdp")
-int dns_udp_csum(struct xdp_md *ctx) {
-
-    void *data_end = (void*) (long) ctx->data_end;
-    void *data = (void*) (long) ctx->data;
-
-    __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-    if (data + offset_h > data_end)
-        return XDP_DROP;
-
-    compute_udp_checksum(data, data_end);
-
-    return XDP_TX;
 }
 
 char _license[] SEC("license") = "GPL";
