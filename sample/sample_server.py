@@ -21,12 +21,8 @@ def sample(duration):
 
     return cpu_user_samples, cpu_system_samples, mem_used_samples
 
-
 def summarize(samples):
-    mean = statistics.mean(samples)
-    std = statistics.stdev(samples) if len(samples) > 1 else 0.0
-    return round(mean, 2)
-
+    return statistics.mean(samples)
 
 def main():
     if len(sys.argv) != 4:
@@ -37,33 +33,42 @@ def main():
     duration = int(sys.argv[2])
     num_runs = int(sys.argv[3])
 
+    # Store the *mean* of each run for aggregation
+    user_means = []
+    system_means = []
+    mem_means = []
+
+    print(f"Starting {num_runs} runs, each {duration} seconds...")
+    for run in range(1, num_runs + 1):
+        print(f"  Run {run} of {num_runs}...")
+        user_samples, system_samples, mem_samples = sample(duration)
+
+        user_means.append(summarize(user_samples))
+        system_means.append(summarize(system_samples))
+        mem_means.append(summarize(mem_samples))
+
+    # Compute mean and std across runs
+    summary = []
+    for label, values in [
+        ("mean_cpu_user", user_means),
+        ("mean_cpu_system", system_means),
+        ("mean_mem_used_percent", mem_means)
+    ]:
+        mean_val = statistics.mean(values)
+        std_val = statistics.stdev(values) if len(values) > 1 else 0.0
+        summary.append({
+            "metric": label,
+            "mean": round(mean_val, 2),
+            "std": round(std_val, 2)
+        })
+
+    # Write single summary CSV
     with open(output_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "run",
-            "mean_cpu_user",
-            "mean_cpu_system",
-            "mean_mem_used_percent"
-        ])
+        writer = csv.DictWriter(f, fieldnames=["metric", "mean", "std"])
+        writer.writeheader()
+        writer.writerows(summary)
 
-        for run in range(1, num_runs + 1):
-            print(f"Starting test run {run}...")
-            user_samples, system_samples, mem_samples = sample(duration)
-
-            mean_user = summarize(user_samples)
-            mean_system = summarize(system_samples)
-            mean_mem = summarize(mem_samples)
-
-            writer.writerow([
-                run,
-                mean_user,
-                mean_system,
-                mean_mem
-            ])
-
-    print(f"All {num_runs} runs complete. Results saved to {output_file}")
-
+    print(f"Summary (mean and std) written to {output_file}")
 
 if __name__ == "__main__":
     main()
-

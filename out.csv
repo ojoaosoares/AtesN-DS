@@ -1,0 +1,4 @@
+metric,mean,std
+mean_cpu_user,0.22,0.01
+mean_cpu_system,0.13,0.01
+mean_mem_used_percent,14.1,0.0
