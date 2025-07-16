@@ -12,7 +12,7 @@ def run_dnspyre(server, duration, concurrency):
         "-c", concurrency,
         "--server", server,
         "--json",
-        "https://raw.githubusercontent.com/opendns/public-domain-lists/refs/heads/master/opendns-top-domains.txt"
+        "https://raw.githubusercontent.com/zer0h/top-1000000-domains/refs/heads/master/top-10000-domains"
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -50,6 +50,7 @@ def main():
     print("Starting tests...")
     for run in range(1, num_runs + 1):
         print(f"  Run {run} of {num_runs}...")
+        data = run_dnspyre(server, duration,  str(256))
         data = run_dnspyre(server, duration, concurrency)
         extracted = extract_principal_fields(data)
         results.append(extracted)
