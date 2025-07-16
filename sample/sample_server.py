@@ -41,6 +41,7 @@ def main():
     print(f"Starting {num_runs} runs, each {duration} seconds...")
     for run in range(1, num_runs + 1):
         print(f"  Run {run} of {num_runs}...")
+        time.sleep(60)
         user_samples, system_samples, mem_samples = sample(duration)
 
         user_means.append(summarize(user_samples))
