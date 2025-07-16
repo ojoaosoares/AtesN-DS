@@ -17,7 +17,7 @@ def sample(duration):
         cpu_system_samples.append(cpu_times.system)
 
         mem = psutil.virtual_memory()
-        mem_used_samples.append(mem.used / (1024 * 1024))  # MB
+        mem_used_samples.append(mem.percent)
 
     return cpu_user_samples, cpu_system_samples, mem_used_samples
 
@@ -25,7 +25,7 @@ def sample(duration):
 def summarize(samples):
     mean = statistics.mean(samples)
     std = statistics.stdev(samples) if len(samples) > 1 else 0.0
-    return round(mean, 2), round(std, 2)
+    return round(mean, 2)
 
 
 def main():
@@ -41,24 +41,24 @@ def main():
         writer = csv.writer(f)
         writer.writerow([
             "run",
-            "mean_cpu_user", "std_cpu_user",
-            "mean_cpu_system", "std_cpu_system",
-            "mean_mem_used_mb", "std_mem_used_mb"
+            "mean_cpu_user",
+            "mean_cpu_system",
+            "mean_mem_used_percent"
         ])
 
         for run in range(1, num_runs + 1):
             print(f"Starting test run {run}...")
             user_samples, system_samples, mem_samples = sample(duration)
 
-            mean_user, std_user = summarize(user_samples)
-            mean_system, std_system = summarize(system_samples)
-            mean_mem, std_mem = summarize(mem_samples)
+            mean_user = summarize(user_samples)
+            mean_system = summarize(system_samples)
+            mean_mem = summarize(mem_samples)
 
             writer.writerow([
                 run,
-                mean_user, std_user,
-                mean_system, std_system,
-                mean_mem, std_mem
+                mean_user,
+                mean_system,
+                mean_mem
             ])
 
     print(f"All {num_runs} runs complete. Results saved to {output_file}")
