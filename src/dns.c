@@ -25,7 +25,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_HASH);
-        __uint(max_entries, 2000000);
+        __uint(max_entries, 65536);
         __uint(key_size, sizeof(struct curr_query));
         __uint(value_size, sizeof(struct dns_query));
 
@@ -33,7 +33,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 2000000);
+        __uint(max_entries, 65536);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct query_owner));
 
@@ -41,7 +41,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 7000000);
+        __uint(max_entries, 655368*7);
         __uint(key_size, sizeof(struct rec_query_key));
         __uint(value_size, sizeof(struct hop_query));
 
@@ -49,7 +49,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 400000);
+        __uint(max_entries, 65536);
         __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
         __uint(value_size, sizeof(struct a_record));
 
@@ -57,7 +57,7 @@ struct {
 
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
-        __uint(max_entries, 250000);
+        __uint(max_entries, 655368);
         __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
         __uint(value_size, sizeof(struct a_record));
 
@@ -696,7 +696,7 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
             #endif
 
             if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
-                return ACCEPT_NO_ANSWER;
+            return ACCEPT_NO_ANSWER;
 
             *offset += bpf_ntohs(response->data_length) - 4;
 
@@ -714,10 +714,10 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
             }
         }
 
-        if (bpf_ntohs(response->record_class) ^ DNS_CLASS_IN)
+        if (bpf_ntohs(response->record_type) != A_RECORD_TYPE)
             return ACCEPT_NO_ANSWER;
 
-        if (bpf_ntohs(response->record_type) ^ A_RECORD_TYPE)
+        if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
             return ACCEPT_NO_ANSWER;
 
         record->ip = response->ip;
@@ -730,7 +730,7 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
         return ACCEPT;
     }
 
-    if (bpf_ntohs(header->name_servers))
+    else if (bpf_ntohs(header->name_servers))
     {
         *offset += sizeof(struct dns_response);
 
@@ -743,10 +743,10 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
             return DROP;
         }
 
-        if (bpf_ntohs(response->record_class) ^ DNS_CLASS_IN)
+        if (bpf_ntohs(response->record_type) != SOA_RECORD_TYPE)
             return ACCEPT_NO_ANSWER;
 
-        if(bpf_ntohs(response->record_type) ^ SOA_RECORD_TYPE)
+        if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
             return ACCEPT_NO_ANSWER;
 
         record->ip = 0;
@@ -2340,7 +2340,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                     return XDP_PASS;
                 }
-
+                
                 __u8 deep = lastdomain->recursion_state, pointer = lastdomain->pointer; ip = cache_record.ip;
 
                 if (lastdomain->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH && pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH)
@@ -2425,38 +2425,38 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 }
             }
 
-            bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
+                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
 
-            if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-            {
+                if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+                {
+                    #ifdef DOMAIN
+                        bpf_printk("[XDP] It was't possible to resize the packet");
+                    #endif
+                    
+                    return XDP_DROP;
+                }
+
+                data = (void*) (long) ctx->data;
+                data_end = (void*) (long) ctx->data_end;
+
+                offset_h = 0;      
+
+                if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
+                    return XDP_DROP;
+
+                if (create_dns_query(data, &offset_h, data_end) == DROP)
+                    return XDP_DROP;
+
+                modify_id(data, lastdomain->recursion_state);
+
+                if (write_query(data, &offset_h, data_end, &lastdomain->query) == DROP)
+                    return XDP_DROP;
+
                 #ifdef DOMAIN
-                    bpf_printk("[XDP] It was't possible to resize the packet");
+                    bpf_printk("[XDP] New back query created");
                 #endif
-                
-                return XDP_DROP;
-            }
 
-            data = (void*) (long) ctx->data;
-            data_end = (void*) (long) ctx->data_end;
-
-            offset_h = 0;      
-
-            if (redirect_packet_swap(data, &offset_h, data_end, ip) == DROP)
-                return XDP_DROP;
-
-            if (create_dns_query(data, &offset_h, data_end) == DROP)
-                return XDP_DROP;
-
-            modify_id(data, lastdomain->recursion_state);
-
-            if (write_query(data, &offset_h, data_end, &lastdomain->query) == DROP)
-                return XDP_DROP;
-
-            #ifdef DOMAIN
-                bpf_printk("[XDP] New back query created");
-            #endif
-
-            return XDP_TX;
+                return XDP_TX;
         }
 
         bpf_map_delete_elem(&curr_queries, &curr);
