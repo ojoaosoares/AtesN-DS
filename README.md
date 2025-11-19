@@ -14,6 +14,12 @@ The server handles the full recursion process, sending requests to root, TLD, an
 
 ***
 
+## Another Features
+
+- **Proactive Cache Renewal**: Frequently accessed or critical entries are refreshed before their TTL expires. This avoids disruptive cache misses and ensures stable latency, especially during peak traffic.
+- **Fault-Resilient Query Strategy**: To avoid delays caused by unreachable or slow upstream servers, the resolver can issue redundant parallel queries. The first valid response is accepted, improving resilience against timeouts and partial network failures.
+- **Authoritative Server Intelligence**: In addition to caching responses, the resolver stores the most frequently and fastest DNS server the resolver interacts with. This allows dynamic upstream selection, prioritizing the fastest and most stable servers over time.
+
 ## Prerequisites
 
 ### System Requirements
