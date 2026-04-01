@@ -17,7 +17,7 @@ static __always_inline __u16 csum_fold_neg(__u32 csum)
 
 static __always_inline __u32 csum_unfold(__u16 csum)
 {
-    return ~((uint32_t)csum);
+    return (__u32)csum;
 }
 
 static __always_inline __u16 cal_udp_csum(struct iphdr *iph, struct udphdr *udph, void *data_end)
