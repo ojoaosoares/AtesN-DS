@@ -50,8 +50,8 @@ struct {
 struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 65536);
-        __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
-        __uint(value_size, sizeof(struct a_record));
+        __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH_SW]));
+        __uint(value_size, sizeof(struct a_record_sw));
 
 } cache_arecords SEC(".maps");
 
@@ -59,7 +59,7 @@ struct {
         __uint(type, BPF_MAP_TYPE_LRU_HASH);
         __uint(max_entries, 655368);
         __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
-        __uint(value_size, sizeof(struct a_record));
+        __uint(value_size, sizeof(struct a_record_sw));
 
 } cache_nsrecords SEC(".maps");
 
@@ -288,7 +288,7 @@ static __always_inline __u8 is_dns_query_or_response(void *data, __u64 *offset, 
     return QUERY_RETURN;
 }
 
-static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end, struct dns_domain *query)
+static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end, struct dns_domain_sw *query)
 {
     __u8 *content = (data + *offset);
 
@@ -306,11 +306,11 @@ static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end
         return DROP;
     }
 
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH_SW);
 
     size_t size;
 
-    for (size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
+    for (size = 0; (size < MAX_DNS_NAME_LENGTH_SW && *(content + size) != 0); size++)
     {
         query->name[size] =  *(char *)(content + size);
     
@@ -660,7 +660,7 @@ static __always_inline __u8 return_to_network(void *data, __u64 *offset, void *d
     return ACCEPT;
 }
 
-static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data_end, struct a_record_sw *record) {
     
     struct dns_header *header;
     
@@ -695,7 +695,7 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
                 bpf_printk("[DROP] CNAME record");
             #endif
 
-            if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
+            if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH_SW)
             return ACCEPT_NO_ANSWER;
 
             *offset += bpf_ntohs(response->data_length) - 4;
@@ -721,7 +721,7 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
             return ACCEPT_NO_ANSWER;
 
         record->ip = response->ip;
-        record->timestamp = (bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl);
+        record->timestamp = (__u32)((bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl));
 
         #ifdef DOMAIN
             bpf_printk("[XDP] Answer IP: %u", record->ip);
@@ -758,11 +758,11 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 find_owner_server(struct dns_domain *domain, __u32 *ip, __u8 *pointer) { 
+static __always_inline __u8 find_owner_server(struct dns_domain_sw *domain, __u32 *ip, __u8 *pointer) { 
 
     __u64 index = 0;
 
-    for (size_t i = 0; i < MAX_LABELS_CHECK && (index < MAX_DNS_NAME_LENGTH) && (index + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH); i++)
+    for (size_t i = 0; i < MAX_LABELS_CHECK && (index < MAX_DNS_NAME_LENGTH_SW) && (index + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW); i++)
     {
         if(domain->name[index] == 0)
         {
@@ -772,7 +772,7 @@ static __always_inline __u8 find_owner_server(struct dns_domain *domain, __u32 *
 
         if (domain->domain_size - index <= MAX_SUBDOMAIN_LENGTH)    
         {
-            struct a_record *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
+            struct a_record_sw *nsrecord = bpf_map_lookup_elem(&cache_nsrecords, &domain->name[index]);
 
             if (nsrecord)
             {
@@ -846,7 +846,7 @@ static __always_inline __u8 get_pointer(void *data, __u64 *offset, void *data_en
 }
 
 
-static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data_end, struct a_record *record, __u8 domainsize, __u8 **remainder) {
+static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data_end, struct a_record_sw *record, __u8 domainsize, __u8 **remainder) {
 
     struct dns_header *header;    
     header = data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr);
@@ -881,9 +881,9 @@ static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain *domain, struct dns_domain *subdomain)
+static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain_sw *domain, struct dns_domain_sw *subdomain)
 {
-    __builtin_memset(&subdomain->name, 0, MAX_DNS_NAME_LENGTH);
+    __builtin_memset(&subdomain->name, 0, MAX_DNS_NAME_LENGTH_SW);
 
     __u8 *content = data + *offset;
 
@@ -923,7 +923,7 @@ static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset,
         bpf_printk("[XDP] It's no pointer");
     #endif
 
-    for (size = 0; size < MAX_DNS_NAME_LENGTH; size++)
+    for (size = 0; size < MAX_DNS_NAME_LENGTH_SW; size++)
     {
         if (data + ++(*offset) > data_end)
             return DROP;
@@ -961,9 +961,9 @@ static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset,
     return DROP;
 }
 
-static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *data_end, struct dns_domain *autho, struct dns_domain *query, __u16 off) {
+static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *data_end, struct dns_domain_sw *autho, struct dns_domain_sw *query, __u16 off) {
 
-    __builtin_memset(autho->name, 0, MAX_DNS_NAME_LENGTH);
+    __builtin_memset(autho->name, 0, MAX_DNS_NAME_LENGTH_SW);
 
     __u64 newoff = *offset;
 
@@ -984,7 +984,7 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
 
     autho->domain_size = (__u8) bpf_ntohs(*((__u16 *) (content)));
 
-    if (autho->domain_size > MAX_DNS_NAME_LENGTH)
+    if (autho->domain_size > MAX_DNS_NAME_LENGTH_SW)
         return DROP;
 
     content += 2;
@@ -1012,12 +1012,12 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
 
             autho->domain_size += (query->domain_size - pointer) - 2;
 
-            if (size > MAX_DNS_NAME_LENGTH || pointer > MAX_DNS_NAME_LENGTH) 
+            if (size > MAX_DNS_NAME_LENGTH_SW || pointer > MAX_DNS_NAME_LENGTH_SW) 
                 return DROP;
 
             autho->name[size] = query->name[pointer];
 
-            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH; i++)
+            for (size_t i = 0; pointer + i < MAX_DNS_NAME_LENGTH_SW; i++)
             {
                 if (data + ++newoff > data_end)
                     return DROP;
@@ -1077,7 +1077,7 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
     return ACCEPT;
 }
 
-static __always_inline __u8 write_query(void *data, __u64 *offset, void *data_end, struct dns_domain *query) {
+static __always_inline __u8 write_query(void *data, __u64 *offset, void *data_end, struct dns_domain_sw *query) {
 
     __u8 *content = data + *offset;
 
@@ -1086,7 +1086,7 @@ static __always_inline __u8 write_query(void *data, __u64 *offset, void *data_en
         if (data + ++*(offset) > data_end)
             return DROP;
 
-        if (i > MAX_DNS_NAME_LENGTH)
+        if (i > MAX_DNS_NAME_LENGTH_SW)
             return DROP;
 
         *(content + i) = query->name[i];
@@ -1295,7 +1295,7 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    struct a_record *arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
+    struct a_record_sw *arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
 
     if (arecord)
     {   
@@ -1532,9 +1532,9 @@ int dns_response(struct xdp_md *ctx)
 
     if (aprove)
     {
-        if ((dnsquery.query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+        if ((dnsquery.query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW) && (pointer < MAX_DNS_NAME_LENGTH_SW))
         {
-            struct a_record *record_aprove = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name[pointer]);
+            struct a_record_sw *record_aprove = bpf_map_lookup_elem(&cache_nsrecords, (struct rec_query_key *) &dnsquery.query.name[pointer]);
 
             if (record_aprove)
             {
@@ -1578,7 +1578,7 @@ int dns_response(struct xdp_md *ctx)
 
             offset_h += dnsquery.query.domain_size + 5;
             
-            struct a_record cache_record;
+            struct a_record_sw cache_record;
             cache_record.ip = 0;
             cache_record.timestamp = 0;
             cache_record.prefetch = 0;
@@ -1625,7 +1625,7 @@ int dns_response(struct xdp_md *ctx)
         else return XDP_PASS;        
     }
     
-    struct a_record *record = NULL;
+    struct a_record_sw *record = NULL;
 
     if (powner && powner->ip)
     {
@@ -1910,7 +1910,7 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     if (query)
     {
-        if (query->query.domain_size >= MAX_DNS_NAME_LENGTH)
+        if (query->query.domain_size >= MAX_DNS_NAME_LENGTH_SW)
             return XDP_DROP;
 
         offset_h += query->query.domain_size + 5;
@@ -1918,7 +1918,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         if (data + offset_h > data_end)
             return XDP_DROP;
 
-        struct a_record record;
+        struct a_record_sw record;
         
         __u8 *remainder;
         
@@ -1947,7 +1947,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         hide_in_source_port(data, bpf_htons(remainder_off)); 
         hide_in_dest_ip(data, data_end, record.ip);
 
-        if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH))
+        if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW))
         {
             record.ip = 0;
 
@@ -2001,7 +2001,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
         __u8 pointer = 0, off = 0;
 
-        if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
+        if (query->query.domain_size > MAX_DNS_NAME_LENGTH_SW)
             return XDP_DROP;
 
         offset_h += query->query.domain_size + 5;
@@ -2009,9 +2009,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         if (data + offset_h > data_end)
             return XDP_DROP;
 
-        struct dns_domain subdomain;
+        struct dns_domain_sw subdomain;
 
-        struct a_record *nsrecord = NULL;
+        struct a_record_sw *nsrecord = NULL;
 
         switch (get_authoritative_pointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
         {
@@ -2032,7 +2032,7 @@ int dns_check_subdomain(struct xdp_md *ctx) {
                 #endif 
 
 
-                if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH) && (pointer < MAX_DNS_NAME_LENGTH))
+                if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW) && (pointer < MAX_DNS_NAME_LENGTH_SW))
                     nsrecord = bpf_map_lookup_elem(&cache_nsrecords, query->query.name);            
 
             default:        
@@ -2139,7 +2139,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         bpf_printk("[XDP] off %d", off);
     #endif
 
-    if (off > MAX_DNS_NAME_LENGTH)
+    if (off > MAX_DNS_NAME_LENGTH_SW)
         return XDP_DROP;
 
     struct curr_query curr = {
@@ -2165,7 +2165,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5 + off - 2;
 
-                struct a_record cache_record;
+                struct a_record_sw cache_record;
 
                 switch (get_dns_answer(data, &offset_h, data_end, &cache_record))
                 {
@@ -2306,7 +2306,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
         struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, query);
 
-        if (lastdomain && lastdomain->query.domain_size <= MAX_DNS_NAME_LENGTH)
+        if (lastdomain && lastdomain->query.domain_size <= MAX_DNS_NAME_LENGTH_SW)
         {
             __u32 ip = get_dest_ip(data);
             hide_in_dest_ip(data, data_end, serverip);
@@ -2315,7 +2315,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             if (ip == serverip)
             {
-                struct a_record cache_record;
+                struct a_record_sw cache_record;
                 cache_record.ip = 0;
                 cache_record.timestamp = 0;
 
@@ -2343,7 +2343,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 
                 __u8 deep = lastdomain->recursion_state, pointer = lastdomain->pointer; ip = cache_record.ip;
 
-                if (lastdomain->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH && pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH)
+                if (lastdomain->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH && pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW)
                 {
                     cache_record.ip = 0;
 
@@ -2536,7 +2536,7 @@ int dns_error(struct xdp_md *ctx) {
                 bpf_printk("[XDP] Cleaning recursive query");
             #endif
 
-            if (query->query.domain_size > MAX_DNS_NAME_LENGTH)
+            if (query->query.domain_size > MAX_DNS_NAME_LENGTH_SW)
                 return XDP_DROP;
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + query->query.domain_size + 5;
@@ -2658,7 +2658,7 @@ int dns_error_prevention(struct xdp_md *ctx) {
 
             if (myevent) {
 
-                __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+                __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH_SW);
 
                 myevent->id = get_query_id(data);
                 myevent->port = get_dest_port(data);
@@ -2736,7 +2736,7 @@ int dns_pre_fetch(struct xdp_md *ctx) {
 
         if (myevent) {
 
-            __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH);
+            __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH_SW);
 
             myevent->id = curr.id.id;
             myevent->port = curr.id.port;

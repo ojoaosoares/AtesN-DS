@@ -12,10 +12,10 @@
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 8192);
-    __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH]));
+    __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH_HW]));
     __uint(map_flags, 0);
-    __uint(value_size, sizeof(struct a_record));
- } cache_arecords SEC(".maps");
+    __uint(value_size, sizeof(struct a_record_hw));
+ } level_one_cache SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -24,6 +24,14 @@ struct {
     __uint(value_size, 4);
     __uint(map_flags, 0);
 } time_cache SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10);
+    __uint(key_size, sizeof(struct rec_query_key));
+    __uint(value_size, sizeof(struct query_owner));
+
+} recursive_queries SEC(".maps");
 
 #define EDNS0_OPT_SIZE      11
 #define ETH_HDR_SIZE        14
@@ -34,6 +42,7 @@ struct {
 
 #define MAX_DNS_QUERY_SIZE  (DNS_HDR_SIZE + MAX_DNS_NAME_LENGTH + 1 + 2 + 2 + EDNS0_OPT_SIZE)
 #define MAX_PACKET_SIZE     (ETH_HDR_SIZE + IP_HDR_SIZE + UDP_HDR_SIZE + MAX_DNS_QUERY_SIZE)
+
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
 
@@ -69,6 +78,7 @@ int dns_filter(struct xdp_md *ctx) {
         case PASS:
             return XDP_PASS;
         case QUERY_RETURN:
+        case RESPONSE_RETURN:
             break;
         default:
             return XDP_DROP;
@@ -89,8 +99,56 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    volatile struct a_record *arecord;
-    arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
+    if (RESPONSE_RETURN == query_response)
+    {
+        struct rec_query_key curr = {0};
+        __builtin_memset(&curr, 0, sizeof(curr));
+
+        curr.id.id            = dnsquery.id.id;
+        curr.id.port          = get_dest_port(data);
+        curr.query.domain_size = domain_size;
+                struct query_owner *powner = NULL;
+
+        powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &curr);
+
+        if (powner)
+        {
+            offset_h = ETH_HDR_SIZE + IP_HDR_SIZE + UDP_HDR_SIZE + DNS_HDR_SIZE + domain_size + 5;
+
+            if (data + offset_h > data_end)
+                return XDP_DROP;
+            
+            struct a_record_hw cache_record;
+            cache_record.ip = 0;
+            cache_record.timestamp = 0;
+
+            __u32 key = 0;
+            __u32 *now;
+
+            now = bpf_map_lookup_elem(&time_cache, &key);
+
+            if (!now)
+                return XDP_DROP;
+                
+            __u32 now_value = *now;
+
+            if (get_dns_answer(data, &offset_h, data_end, &cache_record, *now) == DROP)
+                return XDP_DROP;
+
+            if (cache_record.timestamp)
+            {
+                bpf_map_update_elem(&level_one_cache, dnsquery.query.name, &cache_record, BPF_ANY);
+
+                #ifdef DOMAIN
+                    bpf_printk("[XDP] A cache updated");
+                #endif  
+            }
+
+        }
+    }
+
+    volatile struct a_record_hw *arecord;
+    arecord = bpf_map_lookup_elem(&level_one_cache, dnsquery.query.name);
 
     if (arecord)
     {      

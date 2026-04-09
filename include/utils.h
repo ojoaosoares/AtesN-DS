@@ -12,7 +12,7 @@
 #include "csum.h"
 #include "dns.h"
 
-static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end, struct dns_domain *query, __u8 *domain_size)
+static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end, struct dns_domain_hw *query, __u8 *domain_size)
 {
     __u8 *content = (__u8 *)(data + *offset);
 
@@ -26,12 +26,12 @@ static __always_inline __u8 get_domain(void *data, __u64 *offset, void *data_end
         return DROP;
     }
 
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH);
+    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH_HW);
 
     size_t size;
 
     #pragma unroll
-    for (size = 0; (size < MAX_DNS_NAME_LENGTH && *(content + size) != 0); size++)
+    for (size = 0; (size < MAX_DNS_NAME_LENGTH_HW && *(content + size) != 0); size++)
     {
         query->name[size] =  *(char *)(content + size);
     
@@ -216,12 +216,12 @@ static __always_inline __u8 create_dns_answer(void *data, __u64 *offset, void *d
      return ACCEPT;
 }
 
-static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data_end, struct a_record *record) {
+static __always_inline __u8 get_dns_answer_hw(void *data, __u64 *offset, void *data_end, struct a_record_hw *record, __u32 now) {
   
-     struct dns_header *header;
-  
+    struct dns_header *header;
+    struct dns_response *response;
      header = (struct dns_header *)(data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
-     struct dns_response *response;
+     
 
      response = (struct dns_response *)(data + *offset);
 
@@ -244,50 +244,10 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
              return DROP;
          }
 
-	 if(bpf_ntohs(response->record_type) == CNAME_RECORD_TYPE && bpf_ntohs(header->answer_count) > 1)
-         {
-             #ifdef DOMAIN
-                 bpf_printk("[DROP] CNAME record");
-             #endif
-
-             if (bpf_ntohs(response->data_length) > MAX_DNS_NAME_LENGTH)
-	             return ACCEPT_NO_ANSWER;
-
-	     *offset += bpf_ntohs(response->data_length) - 4;
-             response = (struct dns_response *)(data + *offset);
-
-             *offset += sizeof(struct dns_response);
-
-             if (data + *offset > data_end)
-             {
-                 #ifdef DOMAIN
-                     bpf_printk("[DROP] No DNS answer");
-                 #endif
-                 return DROP;
-             }
-         }
-
          if (bpf_ntohs(response->record_type) != A_RECORD_TYPE)
              return ACCEPT_NO_ANSWER;
 
-         if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
-             return ACCEPT_NO_ANSWER;
-
-         record->ip = response->ip;
-         record->timestamp = (bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl);
-
-         #ifdef DOMAIN
-             bpf_printk("[XDP] Answer IP: %u", record->ip);
-         #endif
-        
-         return ACCEPT;
-     }
-
-     else if (bpf_ntohs(header->name_servers))
-     {
-         *offset += sizeof(struct dns_response);
-
-         if (data + *offset > data_end)
+             if (data + *offset > data_end)
          {
              #ifdef DOMAIN
                  bpf_printk("[DROP] No DNS answer");
@@ -296,17 +256,21 @@ static __always_inline __u8 get_dns_answer(void *data, __u64 *offset, void *data
              return DROP;
          }
 
-         if (bpf_ntohs(response->record_type) != SOA_RECORD_TYPE)
-             return ACCEPT_NO_ANSWER;
 
          if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
              return ACCEPT_NO_ANSWER;
 
-         record->ip = 0;
-         record->timestamp = (bpf_ktime_get_ns() / 1000000000) + bpf_ntohl(response->ttl);
+         record->ip = response->ip;
+         record->timestamp = now + bpf_ntohl(response->ttl);
+
+         #ifdef DOMAIN
+             bpf_printk("[XDP] Answer IP: %u", record->ip);
+         #endif
         
-         return ACCEPT;  
+         return ACCEPT;
      }
+
+
     
      return ACCEPT_NO_ANSWER;
  }

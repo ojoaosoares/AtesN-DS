@@ -13,6 +13,10 @@
 #include <linux/if_link.h>
 #include <bpf/bpf.h>
 
+#ifndef BPF_XDP
+#define BPF_XDP 3
+#endif
+
 #define MAX_IP_STRING_LENGTH 16
 
 static const char *standard_recursive_server = "8.8.8.8";

@@ -5,6 +5,10 @@
 #include <string.h>
 #include <linux/in.h>
 
+
+#ifndef BPF_MAP_TYPE_RINGBUF
+#define BPF_MAP_TYPE_RINGBUF 27
+#endif
 // -----------------------------------------------------------------------------
 // Packet Processing Results
 // -----------------------------------------------------------------------------
@@ -56,7 +60,8 @@
 
 // -- DNS Message Format --
 #define DNS_POINTER_OFFSET 0xc00c
-#define MAX_DNS_NAME_LENGTH 255
+#define MAX_DNS_NAME_LENGTH_HW 56
+#define MAX_DNS_NAME_LENGTH_SW 255
 #define MAX_SUBDOMAIN_LENGTH 127
 #define MAX_DNS_LABELS 127
 
@@ -160,20 +165,32 @@ struct dns_authoritative {
 /**
  * @brief Represents a cached A record with its expiration timestamp.
  */
-struct a_record {
+struct a_record_sw {
     __u64 timestamp;
     __u32 ip;
     __u8 prefetch;
     
 };
 
+struct a_record_hw {
+    __u32 timestamp;
+    __u32 ip;
+    
+} __attribute__((aligned(8)));
+
+
 /**
  * @brief Represents a DNS domain name.
  */
-struct dns_domain {
+struct dns_domain_sw {
     __u8 domain_size;
-    char name[MAX_DNS_NAME_LENGTH];
+    char name[MAX_DNS_NAME_LENGTH_SW];
 };
+
+struct dns_domain_hw {
+    char name[MAX_DNS_NAME_LENGTH_HW];
+} __attribute__((aligned(8)));;
+
 
 /**
  * @brief Represents a hop in the recursive query process, tracking the query state.
@@ -185,7 +202,7 @@ struct hop_query
     // as a known authoritative nameserver.
     __u16 recursion_state;
     __u16 pointer;
-    struct dns_domain query;
+    struct dns_domain_sw query;
 };
 
 /**
@@ -194,15 +211,15 @@ struct hop_query
 struct id {
     __u16 id;
     __u16 port;
-};
+} __attribute__((aligned(8)));;
 
 /**
  * @brief Represents a full DNS query, including its ID and the domain name.
  */
 struct dns_query {
     struct id id;
-    struct dns_domain query;
-};
+    struct dns_domain_sw query;
+} __attribute__((aligned(8)));;
 
 /**
  * @brief Represents a small, partial domain name for recursive queries.
@@ -243,7 +260,7 @@ struct curr_query
  * @brief Represents an event sent from the eBPF program to the userspace application.
  */
 struct event_error_p {
-    char domain[MAX_DNS_NAME_LENGTH];
+    char domain[MAX_DNS_NAME_LENGTH_SW];
     __u32 len;
     __u32 ips[4];
     __u16 id;
@@ -251,7 +268,7 @@ struct event_error_p {
 };
 
 struct event_prefetch {
-    char domain[MAX_DNS_NAME_LENGTH];
+    char domain[MAX_DNS_NAME_LENGTH_SW];
     __u32 ip;
     __u16 id;
     __u16 port;
