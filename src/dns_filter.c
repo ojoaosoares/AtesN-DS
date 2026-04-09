@@ -1,9 +1,11 @@
 #include "dns.h"
-#include "utils.h"
 #include "csum.h"
 #include "gets.h"
 #include "ttl.h"
-#include "csum.h"
+#include "net_format.h"
+#include "dns_headers.h"
+#include "dns_query.h"
+#include "dns_answer.h"
 #include "dns_filter.h"
 #include <linux/bpf.h>
 #include <bpf/bpf_endian.h>
@@ -12,7 +14,7 @@
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 8192);
-    __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH_HW]));
+    __uint(key_size, MAX_DNS_NAME_LENGTH_HW);
     __uint(map_flags, 0);
     __uint(value_size, sizeof(struct a_record_hw));
  } level_one_cache SEC(".maps");
@@ -88,8 +90,9 @@ int dns_filter(struct xdp_md *ctx) {
     dnsquery.id.port = get_source_port(data);
 
     uint8_t domain_size = 0;
+    struct dns_domain_hw domain_hw = {0};
 
-    switch (get_domain(data, &offset_h, data_end, &dnsquery.query, &domain_size))
+    switch (get_domain_hw(data, &offset_h, data_end, &domain_hw, &domain_size))
     {
         case DROP:
             return XDP_DROP;
@@ -107,7 +110,7 @@ int dns_filter(struct xdp_md *ctx) {
         curr.id.id            = dnsquery.id.id;
         curr.id.port          = get_dest_port(data);
         curr.query.domain_size = domain_size;
-                struct query_owner *powner = NULL;
+        struct query_owner *powner = NULL;
 
         powner = bpf_map_lookup_elem(&recursive_queries, (struct rec_query_key *) &curr);
 
@@ -130,25 +133,19 @@ int dns_filter(struct xdp_md *ctx) {
             if (!now)
                 return XDP_DROP;
                 
-            __u32 now_value = *now;
-
-            if (get_dns_answer(data, &offset_h, data_end, &cache_record, *now) == DROP)
+            if (get_dns_answer_hw(data, &offset_h, data_end, &cache_record, *now) == DROP)
                 return XDP_DROP;
 
             if (cache_record.timestamp)
             {
-                bpf_map_update_elem(&level_one_cache, dnsquery.query.name, &cache_record, BPF_ANY);
-
-                #ifdef DOMAIN
-                    bpf_printk("[XDP] A cache updated");
-                #endif  
+                bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
             }
 
         }
     }
 
     volatile struct a_record_hw *arecord;
-    arecord = bpf_map_lookup_elem(&level_one_cache, dnsquery.query.name);
+    arecord = bpf_map_lookup_elem(&level_one_cache, domain_hw.name);
 
     if (arecord)
     {      
@@ -156,12 +153,11 @@ int dns_filter(struct xdp_md *ctx) {
         __u32 *now;
 
         now = bpf_map_lookup_elem(&time_cache, &key);
-        // __u32 now = (__u32)(clock_gettime_ns() / 1000000000ULL);
 
         __u32 diff = 0;
         
         if (now)
-            diff = get_ttl(arecord->timestamp, *now);
+            diff = get_ttl_hw(arecord->timestamp, *now);
 
         if (diff >  MINIMUM_TTL)
         {
@@ -185,10 +181,10 @@ int dns_filter(struct xdp_md *ctx) {
 
             offset_h = 0;
 
-            if (format_network_acess_layer(data, &offset_h, data_end) == DROP)
+            if (format_network_access_layer_hw(data, &offset_h, data_end) == DROP)
                  return XDP_DROP;
         
-            if (swap_internet_layer(data, &offset_h, data_end) == DROP)
+            if (swap_internet_layer_hw(data, &offset_h, data_end) == DROP)
                  return XDP_DROP;
 
             if (swap_transport_layer(data, &offset_h, data_end) == DROP)
