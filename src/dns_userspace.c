@@ -11,6 +11,7 @@
 #include <getopt.h>
 #include <netinet/ip.h>
 #include <linux/if_link.h>
+#include <stdlib.h>
 #include <bpf/bpf.h>
 
 #ifndef BPF_XDP
@@ -334,7 +335,7 @@ int main(int argc, char *argv[]) {
     
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
         int fd = bpf_program__fd(programs[i].prog);
-        bpf_map__update_elem(skel->maps.tail_programs, &programs[i].key, sizeof(programs[i].key), &fd, sizeof(fd), 0);
+        bpf_map_update_elem(bpf_map__fd(skel->maps.tail_programs), &programs[i].key, &fd, 0);
     }
 
     printf("%s\n", recursive);
