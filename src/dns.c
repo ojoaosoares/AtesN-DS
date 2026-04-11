@@ -1036,11 +1036,10 @@ int dns_error(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
-
-        bpf_map_delete_elem(&curr_queries, &curr);
 
         struct hop_query *lastdomain = bpf_map_lookup_elem(&new_queries, (struct rec_query_key *) query);
 
