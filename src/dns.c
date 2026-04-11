@@ -887,7 +887,8 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
 
@@ -907,9 +908,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
             if (ip == serverip)
             {
-                struct a_record_sw cache_record;
-                cache_record.ip = 0;
-                cache_record.timestamp = 0;
+                struct a_record_sw cache_record = {0};
 
                 if (get_dns_answer_sw(data, &offset_h, data_end, &cache_record) == DROP)
                     return XDP_DROP;
@@ -988,9 +987,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                     }
                 }
             }
-
-                bpf_map_delete_elem(&curr_queries, &curr); bpf_map_delete_elem(&new_queries, query);
-
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
                 {
                     return XDP_DROP;
@@ -1015,7 +1011,6 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 return XDP_TX;
         }
 
-        bpf_map_delete_elem(&curr_queries, &curr);
     }
 
     return XDP_PASS;
