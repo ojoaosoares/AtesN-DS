@@ -16,7 +16,6 @@ static __always_inline __u8 get_domain_sw(void *data, __u64 *offset, void *data_
     if (*(content) == 0)
         return DROP;
 
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH_SW);
     size_t size;
     for (size = 0; (size < MAX_DNS_NAME_LENGTH_SW && *(content + size) != 0); size++)
     {

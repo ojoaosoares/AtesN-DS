@@ -95,22 +95,26 @@ int dns_filter(struct xdp_md *ctx) {
 
     __u64 offset_h = 0;
 
-    switch (filter_dns(data, &offset_h, data_end))
+    __u16 is_dns_port = filter_dns(data, &offset_h, data_end);
+    switch (is_dns_port)
     {
         case DROP:
             return XDP_DROP;
         case PASS:
             return XDP_PASS;
-        case FROM_DNS_PORT:
-            bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
-            return XDP_DROP;
         default:
             break;
     }
 
-    struct dns_query dnsquery;
+    __u32 zero = 0;
+    struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
 
-    __u8 query_response = is_dns_query_or_response(data, &offset_h, data_end, &dnsquery.id.id);
+    if (!dnsquery)
+        return XDP_DROP;
+
+    memset(dnsquery, 0, sizeof(struct dns_query));
+
+    __u8 query_response = is_dns_query_or_response(data, &offset_h, data_end, &dnsquery->id.id);
 
     switch (query_response)
     {
@@ -123,10 +127,11 @@ int dns_filter(struct xdp_md *ctx) {
         default:
             return XDP_DROP;
     }
-    
-    dnsquery.id.port = get_source_port(data);
 
-    switch (get_domain_sw(data, &offset_h, data_end, &dnsquery.query))
+    if (is_dns_port != query_response)
+        return XDP_DROP;
+
+    switch (get_domain_sw(data, &offset_h, data_end, &dnsquery->query))
     {
         case DROP:
             return XDP_DROP;
@@ -136,7 +141,17 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    struct a_record_sw *arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery.query.name);
+    if (is_dns_query_or_response == RESPONSE_RETURN) {
+
+        dnsquery->id.port = get_dest_port(data);
+
+        bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
+        return XDP_DROP;
+    }
+
+    dnsquery->id.port = get_source_port(data);
+
+    struct a_record_sw *arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery->query.name);
 
     if (arecord)
     {   
@@ -172,45 +187,36 @@ int dns_filter(struct xdp_md *ctx) {
             if (swap_transport_layer(data, &offset_h, data_end) == DROP)
                 return XDP_DROP;
 
-            if (create_dns_answer(data, &offset_h, data_end, arecord->ip, (uint32_t)diff, status, dnsquery.query.domain_size) == DROP)
+            if (create_dns_answer(data, &offset_h, data_end, arecord->ip, (uint32_t)diff, status, dnsquery->query.domain_size) == DROP)
                 return XDP_DROP;
 
             if (diff - 3 <= MINIMUM_TTL && !arecord->prefetch)
             {
                 arecord->prefetch = 1;
 
-                struct curr_query curr = {
-                    .id.id = dnsquery.id.id,
-                    .id.port = get_dest_port(data),
-                    .ip = get_dest_ip(data),
-                };
-
-                if (bpf_map_update_elem(&curr_queries, &curr, &dnsquery, BPF_ANY) >= 0)
-                {
-                    bpf_tail_call(ctx, &tail_programs, DNS_PRE_FETCH_PROG);
-                    return XDP_DROP;
-                }
+                bpf_tail_call(ctx, &tail_programs, DNS_PRE_FETCH_PROG);
+                return XDP_DROP;
             }
 
             return XDP_TX;
         }
         else {
-            bpf_map_delete_elem(&cache_arecords, dnsquery.query.name);
+            bpf_map_delete_elem(&cache_arecords, dnsquery->query.name);
         }
     }
 
     __u32 ip = recursive_server_ip;
-    __u8 pointer = dnsquery.query.domain_size;
+    __u8 pointer = dnsquery->query.domain_size;
 
-    if (find_owner_server(&dnsquery.query, &ip, &pointer))
+    if (find_owner_server(&dnsquery->query, &ip, &pointer))
         return XDP_PASS;
     
-    struct query_owner owner = {
-        .ip = get_source_ip(data),
-        .rec = 0,
-        .not_cache = 0,
-        .curr_pointer = pointer
-    };
+    struct query_owner owner = {0};
+    
+    owner.ip = get_source_ip(data);
+    owner.rec = 0;
+    owner.not_cache = 0;
+    owner.curr_pointer = pointer;
 
     if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
     {
