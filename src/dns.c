@@ -35,13 +35,6 @@ struct {
 } tail_programs SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 65536);
-    __uint(key_size, sizeof(struct curr_query));
-    __uint(value_size, sizeof(struct dns_query));
-} curr_queries SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);
     __uint(key_size, sizeof(struct rec_query_key));
@@ -68,6 +61,14 @@ struct {
     __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_nsrecords SEC(".maps");
+
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct dns_query);
+} tmp_key_buf SEC(".maps");
 
 // Include recursive logic AFTER maps so it can access them
 #include "dns_owner.h"
