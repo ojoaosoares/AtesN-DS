@@ -20,27 +20,38 @@ static __always_inline __u8 get_pointer(void *data, __u64 *offset, void *data_en
 
 static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data_end, struct a_record_sw *record, __u8 domainsize, __u8 **remainder) {
     record->ip = 0;
-    __u8 *content = (__u8 *)data + *offset;
-    record->timestamp = (bpf_ktime_get_ns() / 1000000000);
+    record->timestamp = 0;
 
-    for (size_t size = 0; size < MAX_DNS_PAYLOAD - domainsize; size++) {
-        if ((void *)(content + size + 6) > data_end)
+    __u8 *content = (__u8 *)data + *offset;
+
+    #pragma unroll
+    for (size_t size = 0; size < MAX_DNS_PAYLOAD; size++) {
+
+        if (size >= MAX_DNS_PAYLOAD  - domainsize)
             break;
 
-        if ((*((__u16 *)(content + size)) & 0xC0) == 0xC0 &&
-            bpf_ntohs(*((__u16 *)(content + size + 2))) == A_RECORD_TYPE &&
-            bpf_ntohs(*((__u16 *)(content + size + 4))) == DNS_CLASS_IN)
-        {        
-            if ((void *)(content + size + 16) > data_end)
-                return DROP;
+        if ((void *)(content + size + 16) > data_end)
+            break;
 
-            __u32 ttl = bpf_ntohl(*((__u32 *)(content + size + 6)));
-            record->ip = *((__u32 *)(content + size + 12));            
-            record->timestamp += ttl;
-            *remainder = content + size + 16;
-            return ACCEPT;           
-        }
+        __u16 marker = *((__u16 *)(content + size));
+
+        if ((marker & 0xC0C0) != 0xC000)
+            continue;
+
+        __u16 rtype = bpf_ntohs(*((__u16 *)(content + size + 2)));
+        __u16 rclass = bpf_ntohs(*((__u16 *)(content + size + 4)));
+
+        if (rtype != A_RECORD_TYPE || rclass != DNS_CLASS_IN)
+            continue;
+
+        __u32 ttl = bpf_ntohl(*((__u32 *)(content + size + 6)));
+        record->ip = *((__u32 *)(content + size + 12));
+        *remainder = content + size + 16;
+
+        record->timestamp = (bpf_ktime_get_ns() / 1000000000) + ttl;
+        return ACCEPT;
     }
+
     return ACCEPT_NO_ANSWER;
 }
 

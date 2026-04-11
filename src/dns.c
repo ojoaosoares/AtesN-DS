@@ -580,7 +580,8 @@ int dns_jump_query(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_key_buf, &curr);
 
     if (query)
     {
@@ -592,7 +593,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         if (data + offset_h > data_end)
             return XDP_DROP;
 
-        struct a_record_sw record;
+        struct a_record_sw record = {0};
         __u8 *remainder;
         
         switch (get_additional(data, &offset_h, data_end, &record, query->query.domain_size, &remainder))
