@@ -1,5 +1,5 @@
 # cc and flags
-CC = clang
+CC = clang-15
 CXXFLAGS = -g -target bpf -O2
 # LIBBPF = /usr/lib64/libbpf.so
 
