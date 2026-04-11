@@ -1251,12 +1251,10 @@ int dns_pre_fetch(struct xdp_md *ctx) {
         .ip = get_dest_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
-
-        bpf_map_delete_elem(&curr_queries, &curr);
-
 
         struct event_prefetch *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event_prefetch), 0);
 
