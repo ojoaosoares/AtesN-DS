@@ -648,7 +648,9 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 deep = (uint8_t)get_dest_ip(data);
-    hide_in_dest_ip(data, data_end, serverip);
+    
+    if (hide_in_dest_ip_safe(data, data_end, serverip) == DROP)
+        return XDP_DROP;
 
     struct curr_query curr = {
         .id.id = get_query_id(data),
@@ -656,7 +658,8 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
 
@@ -670,17 +673,20 @@ int dns_check_subdomain(struct xdp_md *ctx) {
         if (data + offset_h > data_end)
             return XDP_DROP;
 
-        struct dns_domain_sw subdomain;
+        struct dns_query *subdomain = bpf_map_lookup_elem(&tmp_new_query_buf, &zero);
+
+        if (!subdomain)
+            return XDP_DROP;
 
         struct a_record_sw *nsrecord = NULL;
 
-        switch (get_authoritative_pointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain))
+        switch (get_authoritative_pointer(data, &offset_h, data_end, &pointer, &off, &query->query, &subdomain->query))
         {
             case DROP:
                 return XDP_DROP;   
             case ACCEPT:
-                if (subdomain.domain_size <= MAX_SUBDOMAIN_LENGTH)
-                    nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain.name);
+                if (subdomain->query.domain_size <= MAX_SUBDOMAIN_LENGTH)
+                    nsrecord = bpf_map_lookup_elem(&cache_nsrecords, subdomain->query.name);
 
                 break;
             case ACCEPT_JUST_POINTER:
@@ -697,8 +703,6 @@ int dns_check_subdomain(struct xdp_md *ctx) {
 
             if (diff >  MINIMUM_TTL)
             {
-                bpf_map_delete_elem(&curr_queries, &curr);
-
                 __s16 newsize = (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5 - data_end);
 
                 if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
@@ -727,13 +731,13 @@ int dns_check_subdomain(struct xdp_md *ctx) {
             }
             
             else
-                bpf_map_delete_elem(&cache_nsrecords, subdomain.name);
+                bpf_map_delete_elem(&cache_nsrecords, subdomain->query.name);
         }
 
         if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) > data_end)
             return XDP_DROP;
 
-        if (hide_in_dest_ip(data, data_end, (uint32_t)(deep << 8 | pointer)) == DROP)
+        if (hide_in_dest_ip_safe(data, data_end, (uint32_t)(deep << 8 | pointer)) == DROP)
             return XDP_DROP;
         
         hide_in_source_port(data, bpf_htons(off));
