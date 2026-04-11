@@ -148,7 +148,7 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
-    if (is_dns_query_or_response == RESPONSE_RETURN) {
+    if (query_response != QUERY_RETURN) {
 
         dnsquery->id.port = get_dest_port(data);
 

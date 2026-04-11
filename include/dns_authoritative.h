@@ -115,9 +115,11 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
     if (*((__u16 *)type) == SOA_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
-    autho->domain_size = (__u8)bpf_ntohs(*((__u16 *)content));
-    if (autho->domain_size > MAX_DNS_NAME_LENGTH_SW)
+    __u16 temp_size = bpf_ntohs(*((__u16 *)content));
+    if (temp_size > MAX_DNS_NAME_LENGTH_SW)
         return DROP;
+
+    autho->domain_size = temp_size;
 
     content += 2;
 

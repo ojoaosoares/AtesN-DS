@@ -85,7 +85,7 @@ enum packet_action {
 
 // DNS Length Limits
 #define MAX_DNS_NAME_LENGTH_HW 56
-#define MAX_DNS_NAME_LENGTH_SW 256
+#define MAX_DNS_NAME_LENGTH_SW 255
 #define MAX_SUBDOMAIN_LENGTH   127
 #define MAX_DNS_LABELS         127
 
