@@ -11,7 +11,7 @@
 #include "csum.h"
 #include "net_format.h"
 
-static __always_inline __u8 hide_in_dest_ip(void *data, void *data_end, __u32 hidden)
+static __always_inline __u8 hide_in_dest_ip_safe(void *data, void *data_end, __u32 hidden)
 {   
     struct iphdr *ipv4 = (struct iphdr *)((__u8 *)data + sizeof(struct ethhdr));
     if ((void *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr)) > data_end)
@@ -24,6 +24,17 @@ static __always_inline void hide_in_source_port(void *data, __u16 hidden)
 {   
     struct udphdr *udp = (struct udphdr *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr));
     udp->source = hidden;
+}
+
+static __always_inline __u8 hide_in_source_port_safe(void *data, void *data_end, __u16 hidden)
+{   
+    struct udphdr *udp = (struct udphdr *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr));
+
+    if ((void *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr)) > data_end)
+        return DROP;
+
+    udp->source = hidden;
+    return ACCEPT;
 }
 
 static __always_inline __u8 return_to_network(void *data, __u64 *offset, void *data_end, __u32 ip_dest, __u32 serverip) {

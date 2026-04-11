@@ -343,7 +343,7 @@ int dns_response(struct xdp_md *ctx)
 
     if (recursion_limit && query_response != RESPONSE_RETURN)
     {    
-        if (hide_in_dest_ip(data, data_end, RCODE_SERVERFAIL) == DROP)
+        if (hide_in_dest_ip_safe(data, data_end, RCODE_SERVERFAIL) == DROP)
             return XDP_DROP;
 
         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -491,7 +491,7 @@ int dns_response(struct xdp_md *ctx)
         {
             if (*content == 0)
             {
-                if (hide_in_dest_ip(data, data_end, RCODE_SERVERFAIL) == DROP)
+                if (hide_in_dest_ip_safe(data, data_end, RCODE_SERVERFAIL) == DROP)
                     return XDP_DROP;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -512,7 +512,7 @@ int dns_response(struct xdp_md *ctx)
                 break;
         }
 
-        if (hide_in_dest_ip(data, data_end, (uint32_t)pointer) == DROP)
+        if (hide_in_dest_ip_safe(data, data_end, (uint32_t)pointer) == DROP)
             return XDP_DROP;
 
         if (powner)
@@ -545,14 +545,14 @@ int dns_response(struct xdp_md *ctx)
 
         if (powner)
         {
-            if (hide_in_dest_ip(data, data_end, (uint32_t)powner->rec) == DROP)
+            if (hide_in_dest_ip_safe(data, data_end, (uint32_t)powner->rec) == DROP)
                 return XDP_DROP;    
 
             powner->curr_pointer = pointer;
         }
         else if (lastdomain)
         {
-            if (hide_in_dest_ip(data, data_end, (uint32_t)lastdomain->recursion_state) == DROP)
+            if (hide_in_dest_ip_safe(data, data_end, (uint32_t)lastdomain->recursion_state) == DROP)
                 return XDP_DROP;
 
             lastdomain->pointer &= 0x00FF;
@@ -579,7 +579,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 pointer = (uint8_t)get_dest_ip(data);
-    hide_in_dest_ip(data, data_end, serverip);
+    hide_in_dest_ip_safe(data, data_end, serverip);
 
     struct curr_query curr = {
         .id.id = get_query_id(data),
@@ -608,7 +608,7 @@ int dns_jump_query(struct xdp_md *ctx) {
             case DROP:
                 return XDP_DROP;
             case ACCEPT_NO_ANSWER:
-                if (hide_in_dest_ip(data, data_end, RCODE_SERVERFAIL) == DROP)
+                if (hide_in_dest_ip_safe(data, data_end, RCODE_SERVERFAIL) == DROP)
                     return XDP_DROP;
                 bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
                 return XDP_DROP;
@@ -619,7 +619,7 @@ int dns_jump_query(struct xdp_md *ctx) {
         __u16 remainder_off = (uint16_t)((long) ((void*) remainder) - (long) data);
 
         hide_in_source_port(data, bpf_htons(remainder_off)); 
-        hide_in_dest_ip(data, data_end, record.ip);
+        hide_in_dest_ip_safe(data, data_end, record.ip);
 
         if ((query->query.domain_size - pointer <= MAX_SUBDOMAIN_LENGTH) && (pointer + MAX_SUBDOMAIN_LENGTH <= MAX_DNS_NAME_LENGTH_SW))
         {
@@ -801,7 +801,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     case ACCEPT_ERROR:
                     case ACCEPT_NO_ANSWER:
 
-                        if (hide_in_dest_ip(data, data_end, RCODE_SERVERFAIL) == DROP)
+                        if (hide_in_dest_ip_safe(data, data_end, RCODE_SERVERFAIL) == DROP)
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -813,7 +813,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                         bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
 
-                        if (hide_in_dest_ip(data, data_end, RCODE_NXDOMAIN) == DROP)
+                        if (hide_in_dest_ip_safe(data, data_end, RCODE_NXDOMAIN) == DROP)
                             return XDP_DROP;
 
                         bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -833,7 +833,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
         find_owner_server(&newquery->query, &ip, &pointer);
         
         __u32 value = get_dest_ip(data);
-        hide_in_dest_ip(data, data_end, serverip);
+        hide_in_dest_ip_safe(data, data_end, serverip);
 
         newquery->id.id += 1;
 
@@ -902,7 +902,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
         if (lastdomain && lastdomain->query.domain_size <= MAX_DNS_NAME_LENGTH_SW)
         {
             __u32 ip = get_dest_ip(data);
-            hide_in_dest_ip(data, data_end, serverip);
+            hide_in_dest_ip_safe(data, data_end, serverip);
 
             __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) - data_end) + lastdomain->query.domain_size + 5;
 
@@ -920,7 +920,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
 
                 if (cache_record.ip == 0)
                 {   
-                    if (hide_in_dest_ip(data, data_end, RCODE_NXDOMAIN) == DROP)
+                    if (hide_in_dest_ip_safe(data, data_end, RCODE_NXDOMAIN) == DROP)
                         return XDP_DROP;
                     
                     bpf_tail_call(ctx, &tail_programs, DNS_ERROR_PROG);
@@ -1028,7 +1028,7 @@ int dns_error(struct xdp_md *ctx) {
         return XDP_DROP;
 
     __u8 status = (uint8_t)get_dest_ip(data);
-    hide_in_dest_ip(data, data_end, serverip);
+    hide_in_dest_ip_safe(data, data_end, serverip);
 
     struct curr_query curr = {
         .id.id = get_query_id(data),
@@ -1123,15 +1123,29 @@ int dns_error_prevention(struct xdp_md *ctx) {
     if (data + offset_h > data_end)
         return XDP_DROP;
 
-    __u32 dest_ip = get_dest_ip(data);
-    
-    hide_in_dest_ip(data, data_end, serverip);
+    __s64 dest_ip = get_dest_ip_safe(data, data_end);
 
-    __u16 remainder_offset = get_source_port(data);
+    if (dest_ip == -1)
+        return XDP_DROP;
 
-    hide_in_source_port(data, bpf_htons(DNS_PORT));
+    if (hide_in_dest_ip_safe(data, data_end, serverip) == DROP)
+        return XDP_DROP;
+
+    __s64 remainder_offset = get_source_port_safe(data, data_end);
+
+    if (remainder_offset == -1)
+        return XDP_DROP;
+
+    if (data + offset_h > data_end)
+        return XDP_DROP;
+
+    if (hide_in_source_port_safe(data, data_end, bpf_htons(DNS_PORT)) == DROP)
+        return XDP_DROP;
 
     if (remainder_offset > MAX_UDP_SIZE)
+        return XDP_DROP;
+
+    if (data + offset_h > data_end)
         return XDP_DROP;
 
     struct curr_query curr = {
@@ -1140,15 +1154,14 @@ int dns_error_prevention(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
 
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
 
-        bpf_map_delete_elem(&curr_queries, &curr);
-
         __u8 *remainder = (__u8 *)data + remainder_offset;
 
-        __u32 ips[4];
+        __u32 ips[4] = {0};
         
         int count = 0;
 
@@ -1179,7 +1192,6 @@ int dns_error_prevention(struct xdp_md *ctx) {
                 break;
         }
 
-
         if (count)
         {
             struct event_error_p *myevent = bpf_ringbuf_reserve(&ringbuf_send_packet, sizeof(struct event_error_p), 0);
@@ -1198,8 +1210,6 @@ int dns_error_prevention(struct xdp_md *ctx) {
                 bpf_ringbuf_submit(myevent, 0);
             }
         }
-
-        
 
         __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5) - data_end);
 
