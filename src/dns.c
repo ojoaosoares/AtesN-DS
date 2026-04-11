@@ -68,7 +68,14 @@ struct {
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, struct dns_query);
-} tmp_key_buf SEC(".maps");
+} tmp_query_buf SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct dns_query);
+} tmp_new_query_buf SEC(".maps");
 
 // Include recursive logic AFTER maps so it can access them
 #include "dns_owner.h"
@@ -107,7 +114,7 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     __u32 zero = 0;
-    struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
+    struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (!dnsquery)
         return XDP_DROP;
@@ -245,7 +252,7 @@ int dns_response(struct xdp_md *ctx)
 
 
     __u32 zero = 0;
-    struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
+    struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
     if (!dnsquery)
         return XDP_DROP;
 
@@ -369,7 +376,7 @@ int dns_response(struct xdp_md *ctx)
 
             if (cache_record.timestamp)
             {
-                dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
+                dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
                 if (!dnsquery)
                     return XDP_DROP;
 
@@ -396,7 +403,7 @@ int dns_response(struct xdp_md *ctx)
         {   
             __u64 diff = get_ttl_sw(record->timestamp);
 
-            dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
+            dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
             if (!dnsquery)
                 return XDP_DROP;
 
@@ -438,7 +445,7 @@ int dns_response(struct xdp_md *ctx)
 
         if (record && record->ip && record->ip != curr.ip)
         {   
-            dnsquery = bpf_map_lookup_elem(&tmp_key_buf, &zero);
+            dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
             if (!dnsquery)
                 return XDP_DROP;
 
@@ -581,7 +588,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     };
 
     __u32 zero = 0;
-    struct dns_query *query = bpf_map_lookup_elem(&tmp_key_buf, &curr);
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &curr);
 
     if (query)
     {
@@ -761,16 +768,22 @@ int dns_create_new_query(struct xdp_md *ctx) {
         .ip = get_source_ip(data)
     };
     
-    struct dns_query *query = bpf_map_lookup_elem(&curr_queries, &curr);
+    __u32 zero = 0;
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query) {
 
-        struct dns_query dnsquery; 
-        
-        dnsquery.id.port = curr.id.port;
-        dnsquery.id.id = curr.id.id;
+        struct dns_query *newquery = bpf_map_lookup_elem(&tmp_new_query_buf, &zero); 
 
-        switch(get_authoritative(data, &offset_h, data_end, &dnsquery.query, &query->query, off))
+        if (!newquery)
+            return XDP_DROP;
+
+        memset(newquery, 0, sizeof(struct dns_query));
+        
+        newquery->id.port = curr.id.port;
+        newquery->id.id = curr.id.id;
+
+        switch(get_authoritative(data, &offset_h, data_end, &newquery->query, &query->query, off))
         {
             case DROP:
                 return XDP_DROP;
@@ -778,7 +791,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
 
                 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) + query->query.domain_size + 5 + off - 2;
 
-                struct a_record_sw cache_record;
+                struct a_record_sw cache_record = {0};
 
                 switch (get_dns_answer_sw(data, &offset_h, data_end, &cache_record))
                 {
@@ -815,27 +828,25 @@ int dns_create_new_query(struct xdp_md *ctx) {
                 break;
         }
 
-        bpf_map_delete_elem(&curr_queries, &curr);
-
         __u32 ip = recursive_server_ip; __u8 pointer;
 
-        find_owner_server(&dnsquery.query, &ip, &pointer);
+        find_owner_server(&newquery->query, &ip, &pointer);
         
         __u32 value = get_dest_ip(data);
         hide_in_dest_ip(data, data_end, serverip);
 
-        dnsquery.id.id += 1;
+        newquery->id.id += 1;
 
-        modify_id(data, dnsquery.id.id); query->id.id = (uint16_t)((value >> 8) & 0xFF);
+        modify_id(data, newquery->id.id); query->id.id = (uint16_t)((value >> 8) & 0xFF);
 
         query->id.port = (uint16_t)(((pointer & 0xFF) << 8) | (value & 0xFF));
 
-	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &dnsquery, (struct hop_query *) query, BPF_ANY) < 0)
+	    if (bpf_map_update_elem(&new_queries, (struct rec_query_key *) &newquery->id, (struct hop_query *) query, BPF_ANY) < 0)
         {
             return XDP_DROP;
         }
 
-        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  dnsquery.query.domain_size + 5) - data_end);
+        __s16 newsize = (__s16) ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header) +  newquery->query.domain_size + 5) - data_end);
 
         if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
         {
