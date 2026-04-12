@@ -283,7 +283,7 @@ int dns_response(struct xdp_md *ctx)
         .ip = get_source_ip(data),
     };
 
-    __u8 recursion_limit = 0, aprove = 0, ignore = 0, pointer = domain_size;
+    __u8 recursion_limit = 0, aprove = 0, pointer = domain_size;
 
     struct query_owner *powner = NULL; struct hop_query *lastdomain = NULL;
 
@@ -295,9 +295,6 @@ int dns_response(struct xdp_md *ctx)
 
         if (powner->rec >= 16)
             recursion_limit = 1;
-
-        if (!powner->ip)
-            ignore = 1;
 
         if (powner->not_cache)
         {
@@ -385,6 +382,10 @@ int dns_response(struct xdp_md *ctx)
 
                 bpf_map_update_elem(&cache_arecords, dnsquery->query.name, &cache_record, BPF_ANY);
             }
+
+            if (!powner->ip)
+                return XDP_DROP;
+            
 
             return XDP_TX;
         }
@@ -582,12 +583,6 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     __u8 pointer = (uint8_t)get_dest_ip(data);
     hide_in_dest_ip_safe(data, data_end, serverip);
-
-    struct curr_query curr = {
-        .id.id = get_query_id(data),
-        .id.port = get_dest_port(data),
-        .ip = get_source_ip(data)
-    };
 
     __u32 zero = 0;
     struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
@@ -1036,12 +1031,6 @@ int dns_error(struct xdp_md *ctx) {
     __u8 status = (uint8_t)get_dest_ip(data);
     hide_in_dest_ip_safe(data, data_end, serverip);
 
-    struct curr_query curr = {
-        .id.id = get_query_id(data),
-        .id.port = get_dest_port(data),
-        .ip = get_source_ip(data)
-    };
-
     __u32 zero = 0;
     struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
@@ -1153,12 +1142,6 @@ int dns_error_prevention(struct xdp_md *ctx) {
 
     if (data + offset_h > data_end)
         return XDP_DROP;
-
-    struct curr_query curr = {
-        .id.id = get_query_id(data),
-        .id.port = get_dest_port(data),
-        .ip = get_source_ip(data)
-    };
 
     __u32 zero = 0;
     struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
