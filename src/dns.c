@@ -339,7 +339,7 @@ int dns_response(struct xdp_md *ctx)
 
             if (record_aprove)
             {
-                record_aprove->ip = curr.ip;    
+                record_aprove->ip = curr.ip;
             }
         }
     }
@@ -575,7 +575,6 @@ int dns_jump_query(struct xdp_md *ctx) {
 
     void *data = (void*) (long) ctx->data;
     void *data_end = (void*) (long) ctx->data_end;
-    
     __u64 offset_h = sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header);
 
     if (data + offset_h > data_end)
@@ -591,7 +590,7 @@ int dns_jump_query(struct xdp_md *ctx) {
     };
 
     __u32 zero = 0;
-    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &curr);
+    struct dns_query *query = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
     if (query)
     {

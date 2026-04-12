@@ -21,33 +21,28 @@ static __always_inline __u8 get_pointer(void *data, __u64 *offset, void *data_en
 static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data_end, struct a_record_sw *record, __u8 domainsize, __u8 **remainder) {
     record->ip = 0;
     record->timestamp = 0;
-
     __u8 *content = (__u8 *)data + *offset;
 
     #pragma unroll
     for (size_t size = 0; size < MAX_DNS_PAYLOAD; size++) {
-
-        if (size >= MAX_DNS_PAYLOAD  - domainsize)
+        if (size >= MAX_DNS_PAYLOAD - domainsize)
             break;
-
         if ((void *)(content + size + 16) > data_end)
             break;
 
-        __u16 marker = *((__u16 *)(content + size));
-
-        if ((marker & 0xC0C0) != 0xC000)
+        if ((*((__u8 *)(content + size)) & 0xC0) != 0xC0)
             continue;
 
         __u16 rtype = bpf_ntohs(*((__u16 *)(content + size + 2)));
         __u16 rclass = bpf_ntohs(*((__u16 *)(content + size + 4)));
-
         if (rtype != A_RECORD_TYPE || rclass != DNS_CLASS_IN)
             continue;
 
+        __u32 ip = *((__u32 *)(content + size + 12));
         __u32 ttl = bpf_ntohl(*((__u32 *)(content + size + 6)));
-        record->ip = *((__u32 *)(content + size + 12));
-        *remainder = content + size + 16;
 
+        record->ip = ip;
+        *remainder = content + size + 16;
         record->timestamp = (bpf_ktime_get_ns() / 1000000000) + ttl;
         return ACCEPT;
     }
