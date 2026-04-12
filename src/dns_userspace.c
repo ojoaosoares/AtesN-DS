@@ -1,4 +1,5 @@
-#include "dns.skel.h"
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -7,12 +8,13 @@
 #include <net/if.h>
 #include <sys/stat.h>
 #include <regex.h>
-#include <stdio.h>
 #include <getopt.h>
 #include <netinet/ip.h>
 #include <linux/if_link.h>
-#include <stdlib.h>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
+#include "dns.h"
+#include "dns.skel.h"
 
 #ifndef BPF_XDP
 #define BPF_XDP 3
@@ -22,21 +24,6 @@
 
 static const char *standard_recursive_server = "8.8.8.8";
 
-struct event_send_packets {
-    char domain[255];
-    __u32 len;
-    __u32 ips[4];
-    __u16 id;
-    __u16 port;
-};
-
-struct event_prefetch {
-    char domain[255];
-    __u32 ip;
-    __u16 id;
-    __u16 port;
-};
-
 struct send_packets_context {
     __u32 saddr;
 };
@@ -44,16 +31,11 @@ struct send_packets_context {
 
 void convert_mac_to_bytes(const char *mac_str, unsigned char mac_bytes[6]) {
 
-    char hex[2];
-    hex[0] = mac_str[0];
-    hex[1] = mac_str[1];
-
+    char hex[3];
+    hex[2] = '\0';
     char *end;
 
-    mac_bytes[0] = strtol(hex, &end, 16);
-
-
-    for( uint8_t i = 1; i < 6; i++ )
+    for( uint8_t i = 0; i < 6; i++ )
     {
         hex[0] = mac_str[2*i + i];
         hex[1] = mac_str[2*i + i + 1];
@@ -182,9 +164,9 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
 static int handle_ringbuf_event(void *ctx, void *data, size_t len) {
     struct send_packets_context *myctx = ctx;
 
-    if (len == sizeof(struct event_send_packets))
+    if (len == sizeof(struct event_error_p))
     {
-        struct event_send_packets *e = data;
+        struct event_error_p *e = data;
 
         printf("[EVENT] Received domain: %s\n", e->domain);        
 
@@ -208,14 +190,9 @@ static int handle_ringbuf_event(void *ctx, void *data, size_t len) {
         }
     }
 
-    else {
+    else if (len == sizeof(struct event_prefetch)) {
 
         struct event_prefetch *e = data;
-
-        if (len < sizeof(*e)) {
-            fprintf(stderr, "Invalid event size: %zu (expected %zu)\n", len, sizeof(*e));
-            return 0;
-        }
 
         printf("[EVENT] Received domain: %s\n", e->domain);
 
@@ -253,47 +230,64 @@ void tutorial() {
 }
 
 int main(int argc, char *argv[]) {
-
+    fprintf(stderr, "Starting application...\n");
     struct dns *skel;
     skel = dns__open();
 
-    if(!skel)
-        goto cleanup;
-    printf("opened\n");
+    if(!skel) {
+        fprintf(stderr, "Failed to open BPF skeleton\n");
+        return 1;
+    }
 
-    if(dns__load(skel))
-        goto cleanup;
+    printf("BPF skeleton opened\n");
 
-    printf("loaded\n");
+    if(dns__load(skel)) {
+        fprintf(stderr, "Failed to load BPF skeleton\n");
+        dns__destroy(skel);
+        return 1;
+    }
+    
+    printf("BPF skeleton loaded\n");
+
+    if (!skel->bss) {
+        fprintf(stderr, "Error: BPF skeleton has no BSS (global variables)\n");
+        dns__destroy(skel);
+        return 1;
+    }
 
     int opt, index = 0;
-
     char recursive[MAX_IP_STRING_LENGTH], mac_address[18];
+    memset(recursive, 0, sizeof(recursive));
+    memset(mac_address, 0, sizeof(mac_address));
 
     strcpy(recursive, standard_recursive_server);
 
-    __u32 myip;
-
+    __u32 myip = 0;
     optind = 1;
 
     while ((opt = getopt(argc, argv, "a:i:s:m:h")) != -1) {
         switch (opt) {
         case 'a':
+            printf("Processing -a: %s\n", optarg);
             inet_pton(AF_INET, optarg, &myip);
             inet_pton(AF_INET, optarg, &skel->bss->serverip);
             break;
         case 'i':
+            printf("Processing -i: %s\n", optarg);
             index = if_nametoindex(optarg);
             break;
         case 's':
-            strcpy(recursive, optarg);
+            printf("Processing -s: %s\n", optarg);
+            strncpy(recursive, optarg, sizeof(recursive)-1);
             break;
         case 'm':
-            strcpy(mac_address, optarg);                    
+            printf("Processing -m: %s\n", optarg);
+            strncpy(mac_address, optarg, sizeof(mac_address)-1);
             break;
         case 'h':
         default:
             tutorial();
+            dns__destroy(skel);
             return 1;
         }
     }
@@ -315,75 +309,67 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
+    printf("Setting configuration...\n");
     convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
-
     inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
     struct {
         int key;
         struct bpf_program *prog;
     } programs[] = {
-        {0, skel->progs.dns_jump_query},
-        {1, skel->progs.dns_create_new_query},
-        {2, skel->progs.dns_back_to_last_query},
-        {3, skel->progs.dns_check_subdomain},
-        {4, skel->progs.dns_error},
-        {5, skel->progs.dns_error_prevention},
-        {6, skel->progs.dns_response},
-        {7, skel->progs.dns_pre_fetch}
+        {DNS_JUMP_QUERY_PROG, skel->progs.dns_jump_query},
+        {DNS_CREATE_NEW_QUERY_PROG, skel->progs.dns_create_new_query},
+        {DNS_BACK_TO_LAST_QUERY, skel->progs.dns_back_to_last_query},
+        {DNS_CHECK_SUBDOMAIN_PROG, skel->progs.dns_check_subdomain},
+        {DNS_ERROR_PROG, skel->progs.dns_error},
+        {DNS_ERROR_PREVENTION_PROG, skel->progs.dns_error_prevention},
+        {DNS_RESPONSE_PROG, skel->progs.dns_response},
+        {DNS_PRE_FETCH_PROG, skel->progs.dns_pre_fetch}
     };
     
+    printf("Updating tail call maps...\n");
     for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
         int fd = bpf_program__fd(programs[i].prog);
-        bpf_map_update_elem(bpf_map__fd(skel->maps.tail_programs), &programs[i].key, &fd, 0);
+        if (fd < 0) {
+            fprintf(stderr, "Failed to get FD for tail program index %zu\n", i);
+            continue;
+        }
+        if (bpf_map_update_elem(bpf_map__fd(skel->maps.tail_programs), &programs[i].key, &fd, 0) < 0) {
+            perror("bpf_map_update_elem");
+        }
     }
 
-    printf("%s\n", recursive);
-
     int fd = bpf_program__fd(skel->progs.dns_filter);
+    printf("Attaching XDP program...\n");
 
     struct bpf_link_create_opts opts = {};
     opts.sz = sizeof(opts);
-    opts.flags = XDP_FLAGS_DRV_MODE;  // THIS is the hardware offload flag
     
-
     int link_fd = bpf_link_create(fd, index, BPF_XDP, &opts);
     if (link_fd < 0) {
-        perror("bpf_link_create");
-        goto cleanup;
+        perror("bpf_link_create failed, trying bpf_program__attach_xdp");
+        if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0) {
+            fprintf(stderr, "Failed to attach XDP program\n");
+            goto cleanup;
+        }
     }
 
-
-
-    // if(bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0)
-    // {
-    //     printf("it was not possiblle to attach the program \n");
-    //     goto cleanup;
-    // }
-
-    printf("attached\n");
-
-    printf("make debug to see the progam running\n");
+    printf("Program attached successfully\n");
     printf("CTRL + C to stop\n");
 
-
-    struct send_packets_context ctx = {
+    struct send_packets_context sctx = {
         .saddr = myip
     };
 
     struct ring_buffer *rb;
-
-    rb = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf_send_packet), handle_ringbuf_event, &ctx, NULL);
+    rb = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf_send_packet), handle_ringbuf_event, &sctx, NULL);
     if (!rb) {
         fprintf(stderr, "Failed to create ring buffer\n");
-        return 1;
+        goto cleanup;
     }
 
-
-    for ( ; ; )
-    {
+    while (1) {
         ring_buffer__poll(rb, 100);
-        // sleep(1);
     }
     
 cleanup: 
