@@ -43,27 +43,16 @@ static __always_inline __u8 return_to_network(void *data, __u64 *offset, void *d
     if ((void *)((__u8 *)data + *offset) > data_end)
         return DROP;
 
-    __u32 csum = csum_unfold(ipv4->check);
-    __u32 old_saddr = ipv4->saddr;
-    __u32 old_daddr = ipv4->daddr;
-
     ipv4->saddr = serverip;
     ipv4->daddr = ip_dest;
 
-    csum = bpf_csum_diff(&old_saddr, sizeof(__u32), &ipv4->saddr, sizeof(__u32), csum);
-    csum = bpf_csum_diff(&old_daddr, sizeof(__u32), &ipv4->daddr, sizeof(__u32), csum);
-
     __u32 new_ttl = 255;
-    __u32 old_ttl = ipv4->ttl;
     ipv4->ttl = new_ttl;
-    csum = bpf_csum_diff(&old_ttl, sizeof(__u32), &new_ttl, sizeof(__u32), csum);
 
-    __u32 old_len = ipv4->tot_len;
     __u32 new_len = bpf_htons((uint16_t)(((__u8 *)data_end - (__u8 *)data) - sizeof(struct ethhdr)));
     ipv4->tot_len = new_len;
-    csum = bpf_csum_diff(&old_len, sizeof(__u32), &new_len, sizeof(__u32), csum);
 
-    ipv4->check = csum_fold_neg(csum);
+    ipv4->check = calculate_ip_checksum(ipv4);
     return ACCEPT;
 }
 

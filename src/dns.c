@@ -129,14 +129,9 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_DROP;
         case PASS:
             return XDP_PASS;
-        case QUERY_RETURN:
-            break;
         default:
-            return XDP_DROP;
+            break;
     }
-
-    if (is_dns_port != query_response)
-        return XDP_DROP;
 
     switch (get_domain_sw(data, &offset_h, data_end, &dnsquery->query))
     {
@@ -225,10 +220,18 @@ int dns_filter(struct xdp_md *ctx) {
     owner.not_cache = 0;
     owner.curr_pointer = pointer;
 
-    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) &dnsquery, &owner, BPF_ANY) < 0)
+    if(bpf_map_update_elem(&recursive_queries, (struct rec_query_key *) dnsquery, &owner, BPF_ANY) < 0)
     {
         return XDP_PASS;
     }
+
+    __s16 newsize = (data + offset_h - data_end);
+
+    if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
+        return XDP_DROP;
+
+    data = (void*) (long) ctx->data;
+    data_end = (void*) (long) ctx->data_end;
 
     offset_h = 0;
 
