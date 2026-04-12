@@ -49,7 +49,6 @@ static __always_inline __u8 get_additional(void *data, __u64 *offset, void *data
 
     return ACCEPT_NO_ANSWER;
 }
-
 static __always_inline __u8 get_authoritative_pointer(void *data, __u64 *offset, void *data_end, __u8 *pointer, __u8 *off,  struct dns_domain_sw *domain, struct dns_domain_sw *subdomain)
 {
     __builtin_memset(&subdomain->name, 0, MAX_DNS_NAME_LENGTH_SW);
@@ -104,23 +103,23 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
     if ((void *)((__u8 *)data + base + 12) > data_end)
         return DROP;
 
-    __u8 *type    = (__u8 *)data + base;
-    __u8 *content = (__u8 *)data + base + 10;
+    __u8 *type = (__u8 *)data + base;
 
     if (*((__u16 *)type) == SOA_RECORD_TYPE)
         return ACCEPT_NO_ANSWER;
 
+    __u8 *content = (__u8 *)data + base + 8;
     __u16 temp_size = bpf_ntohs(*((__u16 *)content));
     if (temp_size > MAX_DNS_NAME_LENGTH_SW)
         return DROP;
 
-    autho->domain_size = temp_size;
 
+    autho->domain_size = (__u8)temp_size;
     content += 2;
 
     __u64 newoff = *offset;
     __u8 *domain = (__u8 *)data + newoff;
-    __u64 cur = base + 12;
+    __u64 cur = base + 10;
     *offset = cur;
 
     for (size_t size = 0; size < autho->domain_size; size++) {
@@ -180,7 +179,9 @@ static __always_inline __u8 get_authoritative(void *data, __u64 *offset, void *d
 
     __u64 woff = sizeof(struct ethhdr) + sizeof(struct iphdr) +
                  sizeof(struct udphdr) + sizeof(struct dns_header) +
-                 autho->domain_size - 1;
+                 autho->domain_size;
+
+    autho->domain_size--;
 
     if ((void *)((__u8 *)data + woff + 6) > data_end)
         return DROP;
