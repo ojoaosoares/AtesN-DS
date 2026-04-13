@@ -2,132 +2,124 @@
 #define DNS_H
 
 #include <stdint.h>
-#include <string.h>
+#include <stddef.h>
+#include <linux/types.h>
 #include <linux/in.h>
+
+// -----------------------------------------------------------------------------
+// Compatibility & Helpers
+// -----------------------------------------------------------------------------
+#ifndef BPF_MAP_TYPE_RINGBUF
+#define BPF_MAP_TYPE_RINGBUF 27
+#endif
+
+#ifndef memset
+#define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
+#endif
+
+#ifndef memcpy
+#define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
+#endif
+
+#ifndef memmove
+#define memmove(dest, src, n) __builtin_memmove((dest), (src), (n))
+#endif
 
 // -----------------------------------------------------------------------------
 // Packet Processing Results
 // -----------------------------------------------------------------------------
-#define DROP 0
-#define PASS 1
-#define ACCEPT 2
-#define ACCEPT_NO_ANSWER 3
-#define ACCEPT_JUST_POINTER 3
-#define ACCEPT_ERROR 4
+enum packet_action {
+    DROP = 0,
+    PASS = 1,
+    ACCEPT = 2,
+    ACCEPT_NO_ANSWER = 3,
+    ACCEPT_JUST_POINTER = 3,
+    ACCEPT_ERROR = 4
+};
 
 // -----------------------------------------------------------------------------
 // Network Protocol Constants
 // -----------------------------------------------------------------------------
-#define MAX_UDP_SIZE 512
-#define IPV4 0x0800
-#define IP_FRAGMENTED_MASK 65343
-#define UDP_PROTOCOL 0x11
-#define UDP_NO_ERROR 0x0
+#define MAX_UDP_SIZE        512
+#define IPV4                0x0800
+#define IP_FRAGMENTED_MASK  65343
+#define UDP_PROTOCOL        0x11
+#define UDP_NO_ERROR        0x0
 
 // -----------------------------------------------------------------------------
-// DNS Constants
+// DNS Message Constants
 // -----------------------------------------------------------------------------
-#define MAX_DNS_PAYLOAD 500
+#define DNS_PORT            53
+#define MAX_DNS_PAYLOAD     500
+#define DNS_POINTER_OFFSET  0xc00c
 
-#define DNS_PORT 53
-#define TO_DNS_PORT 2
-#define FROM_DNS_PORT 3
-
-#define DNS_QUERY_TYPE 0
-#define DNS_RESPONSE_TYPE 1
-
-#define DNS_RA 1
-
-#define DNS_QR_SHIFT 15
-#define DNS_RA_SHIFT 7
-#define DNS_RD_SHIFT 8
-
-// -- DNS Record Types --
-#define A_RECORD_TYPE 1
-#define AAA_RECORD_TYPE 28
-#define NS_RECORD_TYPE 2
-#define CNAME_RECORD_TYPE 5
-#define SOA_RECORD_TYPE 6 
-#define OPT_TYPE 41
-#define DS_TYPE 43
-
-// -- DNS Record Classes --
-#define DNS_CLASS_IN 1
-
-// -- DNS Message Format --
-#define DNS_POINTER_OFFSET 0xc00c
-#define MAX_DNS_NAME_LENGTH 255
-#define MAX_SUBDOMAIN_LENGTH 127
-#define MAX_DNS_LABELS 127
-
-// -- DNS Query/Response Handling --
-#define QUERY_RETURN 2
-#define RESPONSE_RETURN 3
-#define QUERY_ADDITIONAL_RETURN 4
+// DNS Processing Status (Return codes internal to logic)
+#define TO_DNS_PORT              2
+#define FROM_DNS_PORT            3
+#define QUERY_RETURN             2
+#define RESPONSE_RETURN          3
+#define QUERY_ADDITIONAL_RETURN  4
 #define QUERY_NAMESERVERS_RETURN 5
 
-#define ANSWER 1
-#define ADDITIONAL 2
-#define NAMESERVERS 3
-#define NOTHING 0
+// DNS Types & Classes
+#define A_RECORD_TYPE       1
+#define NS_RECORD_TYPE      2
+#define CNAME_RECORD_TYPE   5
+#define SOA_RECORD_TYPE     6
+#define AAA_RECORD_TYPE     28
+#define OPT_TYPE            41
+#define DS_TYPE             43
+#define DNS_CLASS_IN        1
+
+// DNS Header Flags & Fields
+#define DNS_QUERY_TYPE      0
+#define DNS_RESPONSE_TYPE   1
+#define DNS_QR_SHIFT        15
+#define DNS_RA_SHIFT        7
+#define DNS_RD_SHIFT        8
+
+// DNS Response Codes (RCODE)
+#define RCODE_NOERROR       0
+#define RCODE_SERVERFAIL    2
+#define RCODE_NXDOMAIN      3
+
+// DNS Length Limits
+#define MAX_DNS_NAME_LENGTH_HW 56
+#define MAX_DNS_NAME_LENGTH_SW 255
+#define MAX_SUBDOMAIN_LENGTH   127
+#define MAX_DNS_LABELS         127
 
 // -----------------------------------------------------------------------------
-// Cache and Query Management
+// Cache & Recursive Logic Configuration
 // -----------------------------------------------------------------------------
-#define MINIMUM_TTL 15
-#define MAX_LABELS_CHECK 10
+#define MINIMUM_TTL         15
+#define MAX_LABELS_CHECK    10
+#define RECURSION_LIMIT     16
 
 // -----------------------------------------------------------------------------
 // eBPF Program Tail Call Indices
 // -----------------------------------------------------------------------------
-#define DNS_JUMP_QUERY_PROG 0
-#define DNS_CREATE_NEW_QUERY_PROG 1
-#define DNS_BACK_TO_LAST_QUERY 2
-#define DNS_CHECK_SUBDOMAIN_PROG 3
-#define DNS_ERROR_PROG 4
-#define DNS_ERROR_PREVENTION_PROG 5
-#define DNS_RESPONSE_PROG 6
-#define DNS_PRE_FETCH_PROG 7
-
+enum tail_prog_index {
+    DNS_JUMP_QUERY_PROG       = 0,
+    DNS_CREATE_NEW_QUERY_PROG = 1,
+    DNS_BACK_TO_LAST_QUERY    = 2,
+    DNS_CHECK_SUBDOMAIN_PROG  = 3,
+    DNS_ERROR_PROG            = 4,
+    DNS_ERROR_PREVENTION_PROG = 5,
+    DNS_RESPONSE_PROG         = 6,
+    DNS_PRE_FETCH_PROG        = 7
+};
 
 // -----------------------------------------------------------------------------
-// DNS Response Codes (RCODE)
+// DNS Protocol Structures
 // -----------------------------------------------------------------------------
-#define RCODE_NOERROR 0
-#define RCODE_SERVERFAIL 2
-#define RCODE_NXDOMAIN 3
-
-
-#ifndef memset
-    #define memset(dest, chr, n) __builtin_memset((dest), (chr), (n))
-#endif
-
-#ifndef memcpy
-    #define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
-#endif
-
-#ifndef memmove
-    #define memmove(dest, src, n) __builtin_memmove((dest), (src), (n))
-#endif
 
 /**
- * @brief Represents the header of a DNS message.
+ * @brief DNS Fixed Header
  */
-struct dns_header
-{
+struct dns_header {
     __be16 id;
     __be16 flags;
-
-    // flags partition
-    // qr                     1 bit
-    // opcode                 4 bits
-    // authoritative_answer   1 bit
-    // truncation             1 bit
-    // recursion_desired      1 bit
-    // recursion_available    1 bit
-    // future_use             3 bits
-    // response_code          4 bits
-
     __be16 questions;
     __be16 answer_count;
     __be16 name_servers;
@@ -135,61 +127,66 @@ struct dns_header
 } __attribute__((packed));
 
 /**
- * @brief Represents a DNS answer record.
+ * @brief DNS Resource Record (Answer/Authority/Additional)
  */
 struct dns_response {
-   uint16_t query_pointer;
-   uint16_t record_type;
-   uint16_t record_class;
-   uint32_t ttl;
-   uint16_t data_length;
-   uint32_t ip;
+    __be16 query_pointer;
+    __be16 record_type;
+    __be16 record_class;
+    __be32 ttl;
+    __be16 data_length;
+    __be32 ip;
 } __attribute__((packed));
 
 /**
- * @brief Represents an authoritative server record in a DNS response.
+ * @brief DNS Authoritative Record Header (no data field)
  */
 struct dns_authoritative {
-   uint16_t query_pointer;
-   uint16_t record_type;
-   uint16_t class;
-   uint32_t ttl;
-   uint16_t data_length;
+    __be16 query_pointer;
+    __be16 record_type;
+    __be16 class;
+    __be32 ttl;
+    __be16 data_length;
+} __attribute__((packed));
+
+// -----------------------------------------------------------------------------
+// eBPF Map Value & Logic Structures
+// -----------------------------------------------------------------------------
+
+/**
+ * @brief Cached DNS record (Software version)
+ */
+struct a_record_sw {
+    __u64 timestamp;
+    __u32 ip;
+    __u8  prefetch;
 } __attribute__((packed));
 
 /**
- * @brief Represents a cached A record with its expiration timestamp.
+ * @brief Cached DNS record (Hardware version)
  */
-struct a_record {
-    __u64 timestamp;
+struct a_record_hw {
+    __u32 timestamp;
     __u32 ip;
-    __u8 prefetch;
-    
-};
+} __attribute__((aligned(8)));
 
 /**
- * @brief Represents a DNS domain name.
+ * @brief Domain name container (Software version)
  */
-struct dns_domain {
+struct dns_domain_sw {
     __u8 domain_size;
-    char name[MAX_DNS_NAME_LENGTH];
+    char name[MAX_DNS_NAME_LENGTH_SW * 2];
 };
 
 /**
- * @brief Represents a hop in the recursive query process, tracking the query state.
+ * @brief Domain name container (Hardware version)
  */
-struct hop_query
-{
-    // Combined state field: Lower 8 bits track recursion depth.
-    // 9th bit, when set, flags the next response's source IP to be cached
-    // as a known authoritative nameserver.
-    __u16 recursion_state;
-    __u16 pointer;
-    struct dns_domain query;
-};
+struct dns_domain_hw {
+    char name[MAX_DNS_NAME_LENGTH_HW];
+} __attribute__((aligned(8)));
 
 /**
- * @brief Represents a DNS query identifier (Transaction ID and port).
+ * @brief DNS query identification
  */
 struct id {
     __u16 id;
@@ -197,15 +194,24 @@ struct id {
 };
 
 /**
- * @brief Represents a full DNS query, including its ID and the domain name.
+ * @brief Full DNS query context
  */
 struct dns_query {
     struct id id;
-    struct dns_domain query;
+    struct dns_domain_sw query;
 };
 
 /**
- * @brief Represents a small, partial domain name for recursive queries.
+ * @brief Recursive query hop state
+ */
+struct hop_query {
+    __u16 recursion_state;
+    __u16 pointer;
+    struct dns_domain_sw query;
+};
+
+/**
+ * @brief Partial domain for map keys
  */
 struct rec_query_domain {
     __u8 domain_size;
@@ -213,7 +219,7 @@ struct rec_query_domain {
 };
 
 /**
- * @brief Represents the key for a recursive query in the eBPF map.
+ * @brief Map key for recursive queries
  */
 struct rec_query_key {
     struct id id;
@@ -221,7 +227,7 @@ struct rec_query_key {
 };
 
 /**
- * @brief Stores information about the original client of a recursive query.
+ * @brief Recursive query ownership and state
  */
 struct query_owner {
     __be32 ip;
@@ -231,27 +237,33 @@ struct query_owner {
 };
 
 /**
- * @brief Represents the current query being processed by a specific server.
+ * @brief Context for current in-flight query
  */
-struct curr_query
-{
+struct curr_query {
     struct id id;
     __u32 ip;
 };
 
+// -----------------------------------------------------------------------------
+// Userspace Event Structures
+// -----------------------------------------------------------------------------
+
 /**
- * @brief Represents an event sent from the eBPF program to the userspace application.
+ * @brief Event for error prevention (authoritative IP pre-resolution)
  */
 struct event_error_p {
-    char domain[MAX_DNS_NAME_LENGTH];
+    char domain[MAX_DNS_NAME_LENGTH_SW];
     __u32 len;
     __u32 ips[4];
     __u16 id;
     __u16 port;
 };
 
+/**
+ * @brief Event for domain pre-fetching
+ */
 struct event_prefetch {
-    char domain[MAX_DNS_NAME_LENGTH];
+    char domain[MAX_DNS_NAME_LENGTH_SW];
     __u32 ip;
     __u16 id;
     __u16 port;
