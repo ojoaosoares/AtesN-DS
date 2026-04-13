@@ -128,6 +128,7 @@ static __always_inline __u8 filter_dns(void *data, __u64 *offset,  void *data_en
         case PASS:
             return PASS;
         case TO_DNS_PORT:
+            return TO_DNS_PORT;
             break;
         case FROM_DNS_PORT:
             return FROM_DNS_PORT;
