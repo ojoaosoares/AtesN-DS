@@ -1,11 +1,14 @@
 # AtesN-DS
+AtesN-DS is a high-performance, recursive DNS resolver built on eBPF that runs directly in the Linux kernel. By attaching to the XDP (eXpress Data Path) hook, it processes DNS queries at the network interface level, bypassing the kernel's network stack entirely. This approach avoids context switches and significantly reduces latency.
 
-AtesN-DS is a high-performance DNS resolver built on eBPF that processes DNS queries directly at the network interface level via the XDP (eXpress Data Path) hook, bypassing the kernel network stack entirely. This eliminates context switches and significantly reduces latency.
+This work was presetented at [SBESC 2025](https://sol.sbc.org.br/index.php/sbesc_estendido/article/view/39485) in Campinas, Brazil.
 
 The project is split into two main programs:
 
 - **Kernel Resolver** — a full recursive DNS resolver that runs in XDP generic or native mode. It performs the complete recursion process, querying root, TLD, and authoritative servers, and caches responses in eBPF maps.
 - **Hardware Cache** (`dns_filter`) — an XDP program designed for NIC hardware offload. It serves cached DNS responses directly from eBPF maps at line rate, without touching the CPU.
+
+***
 
 When a cached response is available, it is returned directly to the client. On a cache miss, the query is forwarded to the kernel resolver for full recursion.
 
