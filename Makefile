@@ -30,7 +30,9 @@ TARGET    = ${BIN_FOLDER}atesnds
 SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
 PROG_MOUNT_PATH = /sys/fs/bpf
-
+# time_updater
+TIME_SRC  = $(SRC_FOLDER)time_updater.c
+TIME_BIN  = $(BIN_FOLDER)time_updater
 $(shell mkdir -p $(OBJ_FOLDER))
 $(shell mkdir -p $(BIN_FOLDER))
 $(shell mkdir -p $(DATA_FOLDER))
@@ -48,7 +50,17 @@ ${SKELETON}: ${OBJ_FOLDER}dns.o
 
 ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
-
+# ------------------------------------------------
+# time_updater (userspace, atualiza time_map)
+# ------------------------------------------------
+time-updater: $(TIME_BIN)
+$(TIME_BIN): $(TIME_SRC)
+	clang-15 -O2 -Wall -o $@ $< -lbpf
+run-time-updater: $(TIME_BIN)
+	sudo rm -f $(PROG_MOUNT_PATH)/time_map
+	sudo bpftool map pin id $(TIME_MAP_ID) $(PROG_MOUNT_PATH)/time_map
+	sudo $(TIME_BIN) $(PROG_MOUNT_PATH)/time_map
+	
 # ------------------------------------------------
 # Offload (NFP hardware)
 # ------------------------------------------------
@@ -68,11 +80,13 @@ load-hw: $(HW_OBJ)
 	sudo bpftool net attach xdpoffload \
 		pinned $(PROG_PIN) \
 		dev $(HW_DEV)
-
+	sudo rm -f $(PROG_MOUNT_PATH)/time_map
+	
 unload-hw:
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
 	sudo rm -f $(PROG_PIN)
-
+	sudo rm -f $(PROG_MOUNT_PATH)/time_map
+	sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache
 reload-hw: unload-hw build-hw load-hw
 
 # ------------------------------------------------

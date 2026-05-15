@@ -61,6 +61,9 @@ static __always_inline __u8 get_domain_hw(void *data, __u64 *offset, void *data_
     }
     (*domain_size) = (__u8) size;
 
+    if (size == MAX_DNS_NAME_LENGTH_HW && *(content + size) != 0)
+        return PASS;
+
     content = (__u8 *)((__u8 *)data + *offset);
     *offset += (sizeof(__u8) * 4);
     if ((void *)((__u8 *)data + *offset) > data_end)

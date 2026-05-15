@@ -28,13 +28,11 @@ static __always_inline __u8 format_network_access_layer_hw(void *data, __u64 *of
     if (data + *offset > data_end)
         return DROP;
 
-    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-    eth->h_source[0] = 0xa0;
-    eth->h_source[1] = 0x36;
-    eth->h_source[2] = 0x9f;
-    eth->h_source[3] = 0x19;
-    eth->h_source[4] = 0xc4;
-    eth->h_source[5] = 0xcc;
+    unsigned char copy[ETH_ALEN];
+    __builtin_memcpy(copy, eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(eth->h_dest, eth->h_source, ETH_ALEN);
+    __builtin_memcpy(eth->h_source, copy, ETH_ALEN);
+    
     return ACCEPT;
 }
 
