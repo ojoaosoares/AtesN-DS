@@ -59,27 +59,43 @@ static __always_inline __u8 swap_internet_layer_sw(void *data, __u64 *offset, vo
 
 static __always_inline __u8 swap_internet_layer_hw(void *data, __u64 *offset, void *data_end)
 {
-    struct iphdr *ipv4 = (struct iphdr *)(data + *offset);
+    struct iphdr *ipv4 = data + *offset;
     *offset += sizeof(struct iphdr);
     if (data + *offset > data_end)
+    {
+        #ifdef DOMAIN
+            bpf_printk("[DROP] Boundary exceded");
+        #endif
         return DROP;
+    }
 
-    __be32 tmp_ip = ipv4->saddr;
-    ipv4->saddr = ipv4->daddr;
-    ipv4->daddr = tmp_ip;
+    // swap src/dst
+    __be32 tmp_ip  = ipv4->saddr;
+    ipv4->saddr    = ipv4->daddr;
+    ipv4->daddr    = tmp_ip;
 
-    __u16 old_ttl_word = bpf_htons((__u16)ipv4->ttl << 8);
-    __u16 old_len      = ipv4->tot_len;
+    // guarda campos antigos antes de modificar
+    __u16 old_ttl_proto = *((__u16 *)&ipv4->ttl);   // ttl+protocol juntos como word
+    __u16 old_tot_len   = ipv4->tot_len;
 
+    // aplica novos valores
     ipv4->ttl     = 255;
-    ipv4->tot_len = bpf_htons((uint16_t)(((__u8 *)data_end - (__u8 *)data) - sizeof(struct ethhdr)));
+    ipv4->tot_len = bpf_htons((__u16)(((__u8 *)data_end - (__u8 *)data) - sizeof(struct ethhdr)));
 
-    __u32 csum = csum_unfold(ipv4->check);
-    __u16 new_ttl_word = bpf_htons((__u16)ipv4->ttl << 8);
-    csum += (__u32)(__u16)~old_ttl_word + (__u32)new_ttl_word;
-    csum += (__u32)(__u16)~old_len + (__u32)ipv4->tot_len;
+    __u16 new_ttl_proto = *((__u16 *)&ipv4->ttl);
+    __u16 new_tot_len   = ipv4->tot_len;
 
-    ipv4->check = csum_fold_neg(csum);
+    // atualização incremental RFC 1624
+    // check = ~(~check + ~old + new)
+    __u32 csum  = (__u32)((__u16)~ipv4->check);
+    csum       += (__u32)((__u16)~old_ttl_proto) + (__u32)new_ttl_proto;
+    csum       += (__u32)((__u16)~old_tot_len)   + (__u32)new_tot_len;
+
+    // fold e complemento final
+    csum        = (csum >> 16) + (csum & 0xffff);
+    csum       += (csum >> 16);
+    ipv4->check = ~((__u16)csum);
+
     return ACCEPT;
 }
 
