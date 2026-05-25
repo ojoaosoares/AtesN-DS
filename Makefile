@@ -60,7 +60,8 @@ run-time-updater: $(TIME_BIN)
 	sudo rm -f $(PROG_MOUNT_PATH)/time_map
 	sudo bpftool map pin id $(TIME_MAP_ID) $(PROG_MOUNT_PATH)/time_map
 	sudo $(TIME_BIN) $(PROG_MOUNT_PATH)/time_map
-	
+
+
 # ------------------------------------------------
 # Offload (NFP hardware)
 # ------------------------------------------------
@@ -89,6 +90,13 @@ unload-hw:
 	sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache
 reload-hw: unload-hw build-hw load-hw
 
+
+load-and-run-time-updater:
+		$(MAKE) load-hw
+		$(MAKE) run-time-updater TIME_MAP_ID=$$(sudo bpftool map show | \
+					grep "name time_map" | \
+							head -n1 | \
+									cut -d: -f1)
 # ------------------------------------------------
 
 install:
