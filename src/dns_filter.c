@@ -125,7 +125,12 @@ int dns_filter(struct xdp_md *ctx) {
     if (arecord)
     { 
 	    __u32 now_value = *now;
-        if (arecord->timestamp < now_value)
+        __u64 diff = 0;
+
+        if (now_value < arecord->timestamp)
+            diff = arecord->timestamp - now_value;
+        
+        if (diff < MINIMUM_TTL)
         {
             bpf_map_delete_elem(&level_one_cache, domain_hw.name);
             return XDP_PASS;
@@ -158,7 +163,7 @@ int dns_filter(struct xdp_md *ctx) {
         if (swap_transport_layer(data, &offset_h, data_end) == DROP)
             return XDP_DROP;
 
-        if (create_dns_answer(data, &offset_h, data_end, arecord->ip, arecord->timestamp, status, domain_size) == DROP)
+        if (create_dns_answer(data, &offset_h, data_end, arecord->ip, diff, status, domain_size) == DROP)
             return XDP_DROP;
 
         return XDP_TX;
