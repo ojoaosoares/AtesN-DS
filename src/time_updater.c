@@ -30,7 +30,7 @@
 #include <bpf/bpf.h>
 
 #define DEFAULT_PIN_PATH    "/sys/fs/bpf/time_map"
-#define UPDATE_INTERVAL_SEC  5          /* intervalo de atualização em segundos */
+#define UPDATE_INTERVAL_SEC  1          /* intervalo de atualização em segundos */
 #define TIME_MAP_KEY         0          /* única entrada: índice 0 (BPF_MAP_TYPE_ARRAY) */
 
 static volatile int running = 1;
