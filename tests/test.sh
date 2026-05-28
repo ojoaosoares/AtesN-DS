@@ -64,8 +64,8 @@ for MODE in "${MODES[@]}"; do
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
       tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-      pkill -f atesnds || true
-      pkill -f time_updater || true
+      sudo pkill -f atesnds || true
+      sudo pkill -f time_updater || true
     "
 
     #########################################
@@ -151,13 +151,13 @@ for MODE in "${MODES[@]}"; do
       tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
 
-      pkill -f atesnds || true
+      sudo pkill -f atesnds || true
 
       if [ '${MODE}' = 'hw_cache' ]; then
 
         tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-        pkill -f time_updater || true
+        sudo pkill -f time_updater || true
 
         cd ${REMOTE_BASE_DIR}
 
