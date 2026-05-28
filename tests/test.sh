@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 #########################
 # CONFIGURAÇÃO
 #########################
@@ -10,6 +12,7 @@ REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
 
 REMOTE_PYTHON="python3"
 REMOTE_SERVER_SCRIPT="${REMOTE_BASE_DIR}/tests/sample_server.py"
+
 REMOTE_RESULTS_DIR="${REMOTE_BASE_DIR}/results"
 
 LOCAL_CLIENT_SCRIPT="./tests/sample_client.py"
@@ -17,6 +20,7 @@ LOCAL_RESULTS_DIR="./results"
 
 NUM_RUNS=2
 DURATION=60
+
 SERVER_IP="192.168.0.1"
 
 TMUX_SESSION_SERVER="server_session"
@@ -30,10 +34,20 @@ DNS_SERVER="199.7.83.42"
 CONCURRENCY_LEVELS=(1 2 4 8 16 32 64 128 256)
 
 #########################
-# MODOS DE EXECUÇÃO
+# MODOS
 #########################
 
 MODES=("no_hw_cache" "hw_cache")
+
+#########################
+# PREPARAÇÃO
+#########################
+
+mkdir -p "${LOCAL_RESULTS_DIR}"
+
+ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+  mkdir -p ${REMOTE_RESULTS_DIR}
+"
 
 #########################
 # LOOP PRINCIPAL
@@ -59,13 +73,16 @@ for MODE in "${MODES[@]}"; do
     # LIMPEZA PRÉVIA
     #########################################
 
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "
+    echo "-> Limpando sessões/processos antigos"
+
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+
       tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
       tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-      sudo pkill -f atesnds || true
-      sudo pkill -f time_updater || true
+      sudo -n pkill -f atesnds || true
+      sudo -n pkill -f time_updater || true
     "
 
     #########################################
@@ -74,9 +91,10 @@ for MODE in "${MODES[@]}"; do
 
     if [ "${MODE}" = "hw_cache" ]; then
 
-      echo "-> Iniciando time_updater (HW cache)"
+      echo "-> Iniciando time_updater"
 
-      ssh ${REMOTE_USER}@${REMOTE_HOST} "
+      ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+
         cd ${REMOTE_BASE_DIR}
 
         tmux new-session -d -s ${TMUX_SESSION_HW}
@@ -85,7 +103,7 @@ for MODE in "${MODES[@]}"; do
           'make load-and-run-time-updater' C-m
       "
 
-      echo "-> Aguardando inicialização do HW updater..."
+      echo "-> Aguardando HW updater..."
       sleep 5
     fi
 
@@ -95,17 +113,32 @@ for MODE in "${MODES[@]}"; do
 
     echo "-> Iniciando atesnds"
 
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+
       cd ${REMOTE_BASE_DIR}
 
       tmux new-session -d -s ${TMUX_SESSION_ATES}
 
       tmux send-keys -t ${TMUX_SESSION_ATES} \
-        'sudo ./bin/atesnds -a ${SERVER_IP} -i ${INTERFACE} -m ${MAC_ADDR} -s ${DNS_SERVER}' C-m
+        'sudo -n ./bin/atesnds \
+          -a ${SERVER_IP} \
+          -i ${INTERFACE} \
+          -m ${MAC_ADDR} \
+          -s ${DNS_SERVER}' C-m
     "
 
     echo "-> Aguardando atesnds inicializar..."
-    sleep 3
+    sleep 5
+
+    #########################################
+    # DEBUG ATES
+    #########################################
+
+    echo "-> Verificando saída do atesnds"
+
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+      tmux capture-pane -pt ${TMUX_SESSION_ATES}
+    "
 
     #########################################
     # INICIA SERVIDOR PYTHON
@@ -113,15 +146,29 @@ for MODE in "${MODES[@]}"; do
 
     echo "-> Iniciando servidor Python"
 
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+
       tmux new-session -d -s ${TMUX_SESSION_SERVER}
 
       tmux send-keys -t ${TMUX_SESSION_SERVER} \
-        '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_OUTPUT} ${DURATION} ${NUM_RUNS}' C-m
+        '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} \
+          ${REMOTE_OUTPUT} \
+          ${DURATION} \
+          ${NUM_RUNS}' C-m
     "
 
     echo "-> Aguardando servidor iniciar..."
-    sleep 2
+    sleep 3
+
+    #########################################
+    # DEBUG SERVER
+    #########################################
+
+    echo "-> Verificando saída do servidor"
+
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+      tmux capture-pane -pt ${TMUX_SESSION_SERVER}
+    "
 
     #########################################
     # EXECUTA CLIENTE
@@ -131,13 +178,17 @@ for MODE in "${MODES[@]}"; do
 
     python3 ${LOCAL_CLIENT_SCRIPT} \
       "${LOCAL_OUTPUT}" \
-      ${NUM_RUNS} ${SERVER_IP} ${DURATION}s ${CONCURRENCY}
+      ${NUM_RUNS} \
+      ${SERVER_IP} \
+      ${DURATION}s \
+      ${CONCURRENCY}
 
     #########################################
     # AGUARDA FINALIZAÇÃO
     #########################################
 
     echo "-> Aguardando finalização..."
+
     sleep $((DURATION + 5))
 
     #########################################
@@ -146,25 +197,27 @@ for MODE in "${MODES[@]}"; do
 
     echo "-> Encerrando processos"
 
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
 
       tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
+
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
 
-      sudo pkill -f atesnds || true
+      sudo -n pkill -f atesnds || true
 
       if [ '${MODE}' = 'hw_cache' ]; then
 
         tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-        sudo pkill -f time_updater || true
+        sudo -n pkill -f time_updater || true
 
         cd ${REMOTE_BASE_DIR}
 
-        make unload-hw
+        make unload-hw || true
       fi
     "
 
+    echo
     echo "========== Fim concorrência ${CONCURRENCY} =========="
     echo
 
