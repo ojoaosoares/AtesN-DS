@@ -49,6 +49,10 @@ ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
   mkdir -p ${REMOTE_RESULTS_DIR}
 "
 
+
+CLIENT_INTERFACE="enp1s0f0np0"
+CLIENT_IP="192.168.0.2"
+
 #########################
 # LOOP PRINCIPAL
 #########################
@@ -85,6 +89,27 @@ for MODE in "${MODES[@]}"; do
       sudo -n pkill -f time_updater || true
     "
 
+    #########################################
+    # RESET DAS INTERFACES
+    #########################################
+
+    echo "-> Resetando interface do servidor"
+
+    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+      sudo -n ip link set dev ${INTERFACE} down || true
+      sleep 2
+      sudo -n ip link set dev ${INTERFACE} up || true
+      sudo -n ip addr add ${SERVER_IP}/24 dev ${INTERFACE} 2>/dev/null || true
+    "
+
+    echo "-> Resetando interface do cliente"
+
+    sudo -n ip link set dev ${CLIENT_INTERFACE} down || true
+    sleep 2
+    sudo -n ip link set dev ${CLIENT_INTERFACE} up || true
+    sudo -n ip addr add ${CLIENT_IP}/24 dev ${CLIENT_INTERFACE} 2>/dev/null || true
+
+    sleep 3
     #########################################
     # MODO HW CACHE
     #########################################
