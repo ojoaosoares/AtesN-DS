@@ -60,18 +60,15 @@ def summarize(samples):
 
 def main():
 
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 3:
         print(
             f"Usage: {sys.argv[0]} "
-            "output.csv duration_seconds num_runs"
+            "output.csv duration_seconds"
         )
         sys.exit(1)
 
     output_file = sys.argv[1]
     duration = int(sys.argv[2])
-    num_runs = int(sys.argv[3])
-
-    all_runs = []
 
     print(f"Starting benchmark monitor")
     print(f"Warmup time: {WARMUP_SECONDS}s")
@@ -79,81 +76,49 @@ def main():
     print(f"Measurement duration: {duration}s")
     print()
 
-    for run in range(1, num_runs + 1):
+    print(
+        f"Waiting {WARMUP_SECONDS}s "
+        f"for external benchmark warmup..."
+    )
 
-        print(f"=== Run {run}/{num_runs} ===")
+    time.sleep(WARMUP_SECONDS)
 
-        print(
-            f"Waiting {WARMUP_SECONDS}s "
-            f"for external benchmark warmup..."
-        )
+    print("Collecting samples...")
 
-        time.sleep(WARMUP_SECONDS)
+    data = sample(duration)
 
-        print("Collecting samples...")
+    run_summary = {
+        "cpu_user": summarize(data["cpu_user"]),
+        "cpu_system": summarize(data["cpu_system"]),
+        "mem_used": summarize(data["mem_used"]),
+        "max_core_usage": summarize(data["max_core_usage"])
+    }
 
-        data = sample(duration)
+    print(
+        f"  CPU user mean: "
+        f"{run_summary['cpu_user']['mean']:.2f}%"
+    )
 
-        run_summary = {
-            "cpu_user": summarize(data["cpu_user"]),
-            "cpu_system": summarize(data["cpu_system"]),
-            "mem_used": summarize(data["mem_used"]),
-            "max_core_usage": summarize(data["max_core_usage"])
-        }
+    print(
+        f"  Max core usage p99: "
+        f"{run_summary['max_core_usage']['p99']:.2f}%"
+    )
 
-        all_runs.append(run_summary)
-
-        print(
-            f"  CPU user mean: "
-            f"{run_summary['cpu_user']['mean']:.2f}%"
-        )
-
-        print(
-            f"  Max core usage p99: "
-            f"{run_summary['max_core_usage']['p99']:.2f}%"
-        )
-
-    # Aggregate across runs
+    # Flatten the summary for CSV output
     rows = []
-
-    metrics = [
-        "cpu_user",
-        "cpu_system",
-        "mem_used",
-        "max_core_usage"
-    ]
-
-    stats_fields = [
-        "mean",
-        "std",
-        "max",
-        "p99"
-    ]
-
-    for metric in metrics:
-        for stat in stats_fields:
-
-            values = [
-                run[metric][stat]
-                for run in all_runs
-            ]
-
+    for metric, stats in run_summary.items():
+        for stat_name, value in stats.items():
             rows.append({
-                "metric": f"{metric}_{stat}",
-                "mean": round(statistics.mean(values), 2),
-                "std": round(
-                    statistics.stdev(values),
-                    2
-                ) if len(values) > 1 else 0.0
+                "metric": f"{metric}_{stat_name}",
+                "value": round(value, 2)
             })
 
-    with open(output_file, "w", newline="") as f:
 
+    with open(output_file, "w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["metric", "mean", "std"]
+            fieldnames=["metric", "value"]
         )
-
         writer.writeheader()
         writer.writerows(rows)
 

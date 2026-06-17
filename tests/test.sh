@@ -42,7 +42,8 @@ LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/data/server"
 LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/data"
 
 # Níveis de Concorrência e Modos
-CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
+#CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
+CONCURRENCY_LEVELS=(16384)
 MODES=("no_hw_cache" "hw_cache")
 
 #########################
@@ -107,8 +108,8 @@ for MODE in "${MODES[@]}"; do
 
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
         sleep 3
-        
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} --interface ${REMOTE_INTERFACE} > ${REMOTE_SERVER_OUTPUT_FILE} 2>/dev/null &"
+
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} > /dev/null 2>&1 &"
         sleep 2
 
         # 3. EXECUÇÃO DO CLIENTE (UMA MEDIÇÃO)
