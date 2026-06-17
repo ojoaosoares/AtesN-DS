@@ -18,7 +18,7 @@ REMOTE_RESULTS_DIR="${REMOTE_BASE_DIR}/results"
 LOCAL_CLIENT_SCRIPT="./tests/sample_client.py"
 LOCAL_RESULTS_DIR="./results"
 
-NUM_RUNS=2
+NUM_RUNS=30
 DURATION=60
 
 SERVER_IP="192.168.0.1"
@@ -31,13 +31,12 @@ INTERFACE="enp1s0np1"
 MAC_ADDR="3c:fd:fe:03:02:00"
 DNS_SERVER="199.7.83.42"
 
-CONCURRENCY_LEVELS=(1 2 4 8 16 32 64 128 256)
-
+CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
 #########################
 # MODOS
 #########################
 
-MODES=("no_hw_cache" "hw_cache")
+MODES=("no_hw_cache", "hw_cache")
 
 #########################
 # PREPARAÇÃO
@@ -85,8 +84,8 @@ for MODE in "${MODES[@]}"; do
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
       tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-      sudo -n pkill -f atesnds || true
-      sudo -n pkill -f time_updater || true
+      sudo -n pkill atesnds || true
+      sudo -n pkill time_updater || true
     "
 
     #########################################
@@ -222,32 +221,51 @@ for MODE in "${MODES[@]}"; do
 
     echo "-> Encerrando processos"
 
+    echo "ANTES SSH FINAL"
+
     ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
 
+      echo '[A] kill server'
       tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
 
+      echo '[B] kill ates'
       tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
 
-      sudo -n pkill -f atesnds || true
+      echo '[C] pkill atesnds'
+      sudo pkill atesnds || true
+
+      echo '[D] passou pkill'
 
       if [ '${MODE}' = 'hw_cache' ]; then
 
+        echo '[E] kill hw'
         tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
 
-        sudo -n pkill -f time_updater || true
+        echo '[F] pkill updater'
+        sudo pkill time_updater || true
 
+        echo '[G] cd'
         cd ${REMOTE_BASE_DIR}
 
+        echo '[H] unload'
         make unload-hw || true
+
+        echo '[I] fim unload'
       fi
+
+      echo '[J] fim ssh'
     "
+
+    SSH_RC=$?
+
+    echo "DEPOIS SSH FINAL"
+    echo "SSH RC = ${SSH_RC}"
 
     echo
     echo "========== Fim concorrência ${CONCURRENCY} =========="
     echo
+      done
 
-  done
-
-done
+    done
 
 echo "✅ Todos os testes foram concluídos!"
