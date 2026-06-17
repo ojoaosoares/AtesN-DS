@@ -2,270 +2,150 @@
 
 set -e
 
+# --- Script Portability ---
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+PROJECT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+
 #########################
 # CONFIGURAÇÃO
 #########################
 
+# Conexão Remota
 REMOTE_USER="soares"
 REMOTE_HOST="150.164.2.81"
 REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
 
-REMOTE_PYTHON="python3"
-REMOTE_SERVER_SCRIPT="${REMOTE_BASE_DIR}/tests/sample_server.py"
-
-REMOTE_RESULTS_DIR="${REMOTE_BASE_DIR}/results"
-
-LOCAL_CLIENT_SCRIPT="./tests/sample_client.py"
-LOCAL_RESULTS_DIR="./results"
-
+# Parâmetros do Benchmark
 NUM_RUNS=30
 DURATION=60
+WARMUP="--warmup" # Use "--warmup" para habilitar, "" para desabilitar
 
-SERVER_IP="192.168.0.1"
+# Configuração de Rede
+REMOTE_INTERFACE="enp1s0np1"
+REMOTE_SERVER_IP="192.168.0.1"
+REMOTE_MAC_ADDR="3c:fd:fe:03:02:00"
+REMOTE_DNS_SERVER="199.7.83.42"
 
-TMUX_SESSION_SERVER="server_session"
-TMUX_SESSION_ATES="ates_session"
-TMUX_SESSION_HW="hw_session"
+LOCAL_INTERFACE="enp1s0f0np0"
+LOCAL_CLIENT_IP="192.168.0.2"
 
-INTERFACE="enp1s0np1"
-MAC_ADDR="3c:fd:fe:03:02:00"
-DNS_SERVER="199.7.83.42"
+# Scripts e Diretórios
+REMOTE_PYTHON="python3"
+REMOTE_SERVER_SCRIPT="${REMOTE_BASE_DIR}/tests/sample_server.py"
+LOCAL_CLIENT_SCRIPT="${PROJECT_DIR}/tests/sample_client.py"
+CONSOLIDATE_SCRIPT="${PROJECT_DIR}/graphs/consolidate.py"
 
+# Diretórios de Resultados
+REMOTE_RESULTS_DIR_SERVER="${REMOTE_BASE_DIR}/data/server"
+LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/data/client"
+LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/data/server"
+LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/data"
+
+# Níveis de Concorrência e Modos
 CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
-#########################
-# MODOS
-#########################
-
-MODES=("no_hw_cache", "hw_cache")
+MODES=("no_hw_cache" "hw_cache")
 
 #########################
 # PREPARAÇÃO
 #########################
 
-mkdir -p "${LOCAL_RESULTS_DIR}"
-
-ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-  mkdir -p ${REMOTE_RESULTS_DIR}
-"
-
-
-CLIENT_INTERFACE="enp1s0f0np0"
-CLIENT_IP="192.168.0.2"
+echo "-> Preparando diretórios..."
+mkdir -p "${LOCAL_RESULTS_DIR_CLIENT}"
+mkdir -p "${LOCAL_RESULTS_DIR_SERVER}"
+ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${REMOTE_RESULTS_DIR_SERVER}"
 
 #########################
 # LOOP PRINCIPAL
 #########################
 
 for MODE in "${MODES[@]}"; do
-
   echo "==============================================="
   echo "Modo atual: ${MODE}"
   echo "==============================================="
 
   for CONCURRENCY in "${CONCURRENCY_LEVELS[@]}"; do
-
     echo
-    echo "========== Concorrência ${CONCURRENCY} =========="
-
-    OUTPUT_SUFFIX="_${MODE}_${CONCURRENCY}.csv"
-
-    REMOTE_OUTPUT="${REMOTE_RESULTS_DIR}/server_output${OUTPUT_SUFFIX}"
-    LOCAL_OUTPUT="${LOCAL_RESULTS_DIR}/client_output${OUTPUT_SUFFIX}"
-
-    #########################################
-    # LIMPEZA PRÉVIA
-    #########################################
-
-    echo "-> Limpando sessões/processos antigos"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-
-      tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
-      tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
-      tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
-
-      sudo -n pkill atesnds || true
-      sudo -n pkill time_updater || true
-    "
-
-    #########################################
-    # RESET DAS INTERFACES
-    #########################################
-
-    echo "-> Resetando interface do servidor"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-      sudo -n ip link set dev ${INTERFACE} down || true
-      sleep 2
-      sudo -n ip link set dev ${INTERFACE} up || true
-      sudo -n ip addr add ${SERVER_IP}/24 dev ${INTERFACE} 2>/dev/null || true
-    "
-
-    echo "-> Resetando interface do cliente"
-
-    sudo -n ip link set dev ${CLIENT_INTERFACE} down || true
-    sleep 2
-    sudo -n ip link set dev ${CLIENT_INTERFACE} up || true
-    sudo -n ip addr add ${CLIENT_IP}/24 dev ${CLIENT_INTERFACE} 2>/dev/null || true
-
-    sleep 3
-    #########################################
-    # MODO HW CACHE
-    #########################################
-
-    if [ "${MODE}" = "hw_cache" ]; then
-
-      echo "-> Iniciando time_updater"
-
-      ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-
-        cd ${REMOTE_BASE_DIR}
-
-        tmux new-session -d -s ${TMUX_SESSION_HW}
-
-        tmux send-keys -t ${TMUX_SESSION_HW} \
-          'make load-and-run-time-updater' C-m
-      "
-
-      echo "-> Aguardando HW updater..."
-      sleep 5
-    fi
-
-    #########################################
-    # INICIA ATESNDS
-    #########################################
-
-    echo "-> Iniciando atesnds"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-
-      cd ${REMOTE_BASE_DIR}
-
-      tmux new-session -d -s ${TMUX_SESSION_ATES}
-
-      tmux send-keys -t ${TMUX_SESSION_ATES} \
-        'sudo -n ./bin/atesnds \
-          -a ${SERVER_IP} \
-          -i ${INTERFACE} \
-          -m ${MAC_ADDR} \
-          -s ${DNS_SERVER}' C-m
-    "
-
-    echo "-> Aguardando atesnds inicializar..."
-    sleep 5
-
-    #########################################
-    # DEBUG ATES
-    #########################################
-
-    echo "-> Verificando saída do atesnds"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-      tmux capture-pane -pt ${TMUX_SESSION_ATES}
-    "
-
-    #########################################
-    # INICIA SERVIDOR PYTHON
-    #########################################
-
-    echo "-> Iniciando servidor Python"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-
-      tmux new-session -d -s ${TMUX_SESSION_SERVER}
-
-      tmux send-keys -t ${TMUX_SESSION_SERVER} \
-        '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} \
-          ${REMOTE_OUTPUT} \
-          ${DURATION} \
-          ${NUM_RUNS}' C-m
-    "
-
-    echo "-> Aguardando servidor iniciar..."
-    sleep 3
-
-    #########################################
-    # DEBUG SERVER
-    #########################################
-
-    echo "-> Verificando saída do servidor"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-      tmux capture-pane -pt ${TMUX_SESSION_SERVER}
-    "
-
-    #########################################
-    # EXECUTA CLIENTE
-    #########################################
-
-    echo "-> Executando cliente"
-
-    python3 ${LOCAL_CLIENT_SCRIPT} \
-      "${LOCAL_OUTPUT}" \
-      ${NUM_RUNS} \
-      ${SERVER_IP} \
-      ${DURATION}s \
-      ${CONCURRENCY}
-
-    #########################################
-    # AGUARDA FINALIZAÇÃO
-    #########################################
-
-    echo "-> Aguardando finalização..."
-
-    sleep $((DURATION + 5))
-
-    #########################################
-    # ENCERRAMENTO
-    #########################################
-
-    echo "-> Encerrando processos"
-
-    echo "ANTES SSH FINAL"
-
-    ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-
-      echo '[A] kill server'
-      tmux kill-session -t ${TMUX_SESSION_SERVER} 2>/dev/null || true
-
-      echo '[B] kill ates'
-      tmux kill-session -t ${TMUX_SESSION_ATES} 2>/dev/null || true
-
-      echo '[C] pkill atesnds'
-      sudo pkill atesnds || true
-
-      echo '[D] passou pkill'
-
-      if [ '${MODE}' = 'hw_cache' ]; then
-
-        echo '[E] kill hw'
-        tmux kill-session -t ${TMUX_SESSION_HW} 2>/dev/null || true
-
-        echo '[F] pkill updater'
-        sudo pkill time_updater || true
-
-        echo '[G] cd'
-        cd ${REMOTE_BASE_DIR}
-
-        echo '[H] unload'
-        make unload-hw || true
-
-        echo '[I] fim unload'
-      fi
-
-      echo '[J] fim ssh'
-    "
-
-    SSH_RC=$?
-
-    echo "DEPOIS SSH FINAL"
-    echo "SSH RC = ${SSH_RC}"
-
-    echo
-    echo "========== Fim concorrência ${CONCURRENCY} =========="
-    echo
-      done
-
+    echo "========== Iniciando concorrência ${CONCURRENCY} =========="
+
+    # NOVO LOOP DE RUN: A lógica de reset/init/exec/kill acontece aqui dentro
+    for run in $(seq 1 $NUM_RUNS); do
+        echo
+        echo "--> RUN ${run} / ${NUM_RUNS}"
+
+        CLIENT_OUTPUT_FILE="${LOCAL_RESULTS_DIR_CLIENT}/client_output_${MODE}_${CONCURRENCY}_run${run}.csv"
+        REMOTE_SERVER_OUTPUT_FILE="${REMOTE_RESULTS_DIR_SERVER}/server_output_${MODE}_${CONCURRENCY}_run${run}.csv"
+
+        # 1. LIMPEZA E RESET
+        echo "-> Limpando e resetando ambiente..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+          tmux kill-session -t srv 2>/dev/null || true
+          tmux kill-session -t ates 2>/dev/null || true
+          tmux kill-session -t hw 2>/dev/null || true
+          sudo -n pkill atesnds 2>/dev/null || true
+          sudo -n pkill time_updater 2>/dev/null || true
+          sudo -n pkill sample_server.py 2>/dev/null || true
+          (cd ${REMOTE_BASE_DIR} && sudo -n make unload-hw) 2>/dev/null || true
+          sudo -n ip link set dev ${REMOTE_INTERFACE} down 2>/dev/null || true
+          sleep 1
+          sudo -n ip link set dev ${REMOTE_INTERFACE} up 2>/dev/null || true
+          sudo -n ip addr flush dev ${REMOTE_INTERFACE} 2>/dev/null || true
+          sudo -n ip addr add ${REMOTE_SERVER_IP}/24 dev ${REMOTE_INTERFACE} 2>/dev/null || true
+        "
+        sudo -n ip link set dev ${LOCAL_INTERFACE} down 2>/dev/null || true
+        sleep 1
+        sudo -n ip link set dev ${LOCAL_INTERFACE} up 2>/dev/null || true
+        sudo -n ip addr flush dev ${LOCAL_INTERFACE} 2>/dev/null || true
+        sudo -n ip addr add ${LOCAL_CLIENT_IP}/24 dev ${LOCAL_INTERFACE} 2>/dev/null || true
+        sleep 2
+
+        # 2. INICIALIZAÇÃO
+        echo "-> Inicializando ambiente no servidor remoto..."
+        if [ "${MODE}" = "hw_cache" ]; then
+          ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s hw 'make load-and-run-time-updater'"
+          sleep 3
+        fi
+
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
+        sleep 3
+        
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} --interface ${REMOTE_INTERFACE} > ${REMOTE_SERVER_OUTPUT_FILE} 2>/dev/null &"
+        sleep 2
+
+        # 3. EXECUÇÃO DO CLIENTE (UMA MEDIÇÃO)
+        echo "-> Executando cliente (run ${run})..."
+        python3 "${LOCAL_CLIENT_SCRIPT}" \
+            --server "${REMOTE_SERVER_IP}" \
+            --duration "${DURATION}" \
+            --concurrency "${CONCURRENCY}" \
+            ${WARMUP} > "${CLIENT_OUTPUT_FILE}"
+
+        # 4. ENCERRAMENTO
+        echo "-> Encerrando processos remotos para esta execução..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
+            sudo -n pkill sample_server.py 2>/dev/null || true
+            sudo -n pkill atesnds 2>/dev/null || true
+            sudo -n pkill time_updater 2>/dev/null || true
+            tmux kill-session -t srv 2>/dev/null || true
+            tmux kill-session -t ates 2>/dev/null || true
+            tmux kill-session -t hw 2>/dev/null || true
+        "
+        echo "--> Fim da RUN ${run}"
     done
+
+    # 5. CONSOLIDAÇÃO (após todos os runs da concorrência)
+    echo
+    echo "========== Fim da concorrência ${CONCURRENCY} =========="
+    echo "-> Baixando arquivos de resultado do servidor..."
+    scp "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_RESULTS_DIR_SERVER}/server_output_${MODE}_${CONCURRENCY}_run*.csv" "${LOCAL_RESULTS_DIR_SERVER}/" || echo "Nenhum arquivo de servidor para baixar, continuando."
+
+    echo "-> Consolidando resultados..."
+    python3 "${CONSOLIDATE_SCRIPT}" \
+        --mode "${MODE}" \
+        --concurrency "${CONCURRENCY}" \
+        --client-dir "${LOCAL_RESULTS_DIR_CLIENT}" \
+        --server-dir "${LOCAL_RESULTS_DIR_SERVER}" \
+        --output-dir "${LOCAL_FINAL_RESULTS_DIR}"
+  done
+done
 
 echo "✅ Todos os testes foram concluídos!"
