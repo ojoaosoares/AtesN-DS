@@ -10,46 +10,60 @@ def run_dnspyre(server, duration, concurrency):
         "dnspyre",
         "--duration", duration,
         "-c", concurrency,
-
         "--server", server,
-
-        # EDNS configuration
         "--edns0=1232",
         "--no-dnssec",
         "--ednsopt=10:11223344556677889900aabb",
-
-        "--json",
-
         "https://raw.githubusercontent.com/zer0h/top-1000000-domains/refs/heads/master/top-10000-domains"
     ]
-
     result = subprocess.run(cmd, capture_output=True, text=True)
-
     if result.returncode != 0:
         print("dnspyre failed:")
         print(result.stderr)
         sys.exit(1)
-
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("Failed to parse dnspyre JSON output")
-        sys.exit(1)
+    return result.stdout
 
 
-def extract_principal_fields(data):
-    latency = data.get("latencyStats", {})
+import re
+
+def parse_duration_to_ms(value, unit):
+    unit = unit.strip()
+    value = float(value)
+    if unit == "µs":
+        return value / 1000
+    elif unit == "ms":
+        return value
+    elif unit == "s":
+        return value * 1000
+    return value
+
+
+def strip_ansi(text):
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
+
+def extract_principal_fields(text):
+    text = strip_ansi(text)
+    print("DEBUG CLEAN:", text[text.find("DNS timings"):text.find("DNS distribution")])
+
+    def get_float(pattern):
+        m = re.search(pattern, text)
+        return float(m.group(1)) if m else 0.0
+
+    def get_latency(label):
+        m = re.search(rf"{label}:\s+([\d.]+)(µs|ms|s)", text)
+        if m:
+            return parse_duration_to_ms(m.group(1), m.group(2))
+        return 0.0
 
     return {
-        "totalRequests": data.get("totalRequests", 0),
-        "queriesPerSecond": data.get("queriesPerSecond", 0.0),
-
-        "latency_mean_ms": latency.get("meanMs", 0.0),
-        "latency_p99_ms": latency.get("p99Ms", 0.0),
-        "latency_p95_ms": latency.get("p95Ms", 0.0),
-        "latency_p90_ms": latency.get("p90Ms", 0.0),
-        "latency_p75_ms": latency.get("p75Ms", 0.0),
-        "latency_p50_ms": latency.get("p50Ms", 0.0),
+        "totalRequests":    get_float(r"Total requests:\s+([\d.]+)"),
+        "queriesPerSecond": get_float(r"Questions per second:\s+([\d.]+)"),
+        "latency_mean_ms":  get_latency("mean"),
+        "latency_p50_ms":   get_latency("p50"),
+        "latency_p75_ms":   get_latency("p75"),
+        "latency_p90_ms":   get_latency("p90"),
+        "latency_p95_ms":   get_latency("p95"),
+        "latency_p99_ms":   get_latency("p99"),
     }
 
 
