@@ -18,7 +18,7 @@ REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
 # Parâmetros do Benchmark
 NUM_RUNS=30
 DURATION=60
-WARMUP="--warmup" # Use "--warmup" para habilitar, "" para desabilitar
+# Warmup é obrigatório nos testes
 
 # Configuração de Rede
 REMOTE_INTERFACE="enp1s0np1"
@@ -109,7 +109,10 @@ for MODE in "${MODES[@]}"; do
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
         sleep 3
 
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} > /dev/null 2>&1 &"
+        # Warmup duration is always equal to DURATION since warmup is mandatory
+        WARMUP_DURATION="${DURATION}"
+
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > /dev/null 2>&1 &"
         sleep 2
 
         # 3. EXECUÇÃO DO CLIENTE (UMA MEDIÇÃO)
@@ -118,7 +121,7 @@ for MODE in "${MODES[@]}"; do
             --server "${REMOTE_SERVER_IP}" \
             --duration "${DURATION}" \
             --concurrency "${CONCURRENCY}" \
-            ${WARMUP} > "${CLIENT_OUTPUT_FILE}"
+            --warmup > "${CLIENT_OUTPUT_FILE}"
 
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."

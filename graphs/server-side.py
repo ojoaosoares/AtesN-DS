@@ -65,15 +65,24 @@ if (
     "cpu_user_mean" in df.columns
     and "cpu_system_mean" in df.columns
 ):
+    softirq_mean = df["cpu_softirq_mean"] if "cpu_softirq_mean" in df.columns else 0.0
+    irq_mean = df["cpu_irq_mean"] if "cpu_irq_mean" in df.columns else 0.0
+    softirq_std = df["cpu_softirq_mean_std"] if "cpu_softirq_mean_std" in df.columns else 0.0
+    irq_std = df["cpu_irq_mean_std"] if "cpu_irq_mean_std" in df.columns else 0.0
+
     df["cpu_total_mean"] = (
         df["cpu_user_mean"]
         + df["cpu_system_mean"]
+        + softirq_mean
+        + irq_mean
     )
 
     df["cpu_total_mean_std"] = (
         (
             df["cpu_user_mean_std"] ** 2
             + df["cpu_system_mean_std"] ** 2
+            + softirq_std ** 2
+            + irq_std ** 2
         ) ** 0.5
     )
 
@@ -144,6 +153,12 @@ plot_metric(
 )
 
 plot_metric(
+    "cpu_softirq_mean",
+    "CPU SoftIRQ (%)",
+    "cpu_softirq_mean.png",
+)
+
+plot_metric(
     "cpu_total_mean",
     "Total CPU (%)",
     "cpu_total_mean.png",
@@ -166,40 +181,54 @@ plot_metric(
 )
 
 # =====================================================
-# P99
+# Percentis (P50, P75, P90, P99)
 # =====================================================
 
-plot_metric(
-    "cpu_user_p99",
-    "CPU User P99 (%)",
-    "cpu_user_p99.png",
-)
+percentiles = ["p50", "p75", "p90", "p99"]
+generated_files = [
+    "cpu_user_mean.png",
+    "cpu_system_mean.png",
+    "cpu_softirq_mean.png",
+    "cpu_total_mean.png",
+    "max_core_usage_mean.png",
+    "mem_used_mean.png",
+]
 
-plot_metric(
-    "cpu_system_p99",
-    "CPU System P99 (%)",
-    "cpu_system_p99.png",
-)
-
-plot_metric(
-    "max_core_usage_p99",
-    "Max Core Usage P99 (%)",
-    "max_core_usage_p99.png",
-)
-
-plot_metric(
-    "mem_used_p99",
-    "Memory Used P99 (GB)",
-    "mem_used_p99.png",
-)
+for p in percentiles:
+    plot_metric(
+        f"cpu_user_{p}",
+        f"CPU User {p.upper()} (%)",
+        f"cpu_user_{p}.png",
+    )
+    plot_metric(
+        f"cpu_system_{p}",
+        f"CPU System {p.upper()} (%)",
+        f"cpu_system_{p}.png",
+    )
+    plot_metric(
+        f"cpu_softirq_{p}",
+        f"CPU SoftIRQ {p.upper()} (%)",
+        f"cpu_softirq_{p}.png",
+    )
+    plot_metric(
+        f"max_core_usage_{p}",
+        f"Max Core Usage {p.upper()} (%)",
+        f"max_core_usage_{p}.png",
+    )
+    plot_metric(
+        f"mem_used_{p}",
+        f"Memory Used {p.upper()} (GB)",
+        f"mem_used_{p}.png",
+    )
+    
+    generated_files.extend([
+        f"cpu_user_{p}.png",
+        f"cpu_system_{p}.png",
+        f"cpu_softirq_{p}.png",
+        f"max_core_usage_{p}.png",
+        f"mem_used_{p}.png",
+    ])
 
 print("\nGráficos gerados:")
-print("cpu_user_mean.png")
-print("cpu_system_mean.png")
-print("cpu_total_mean.png")
-print("max_core_usage_mean.png")
-print("mem_used_mean.png")
-print("cpu_user_p99.png")
-print("cpu_system_p99.png")
-print("max_core_usage_p99.png")
-print("mem_used_p99.png")
+for f in generated_files:
+    print(f)
