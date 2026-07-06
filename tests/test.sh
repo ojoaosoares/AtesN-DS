@@ -84,7 +84,7 @@ for MODE in "${MODES[@]}"; do
           tmux kill-session -t hw 2>/dev/null || true
           sudo -n pkill atesnds 2>/dev/null || true
           sudo -n pkill time_updater 2>/dev/null || true
-          sudo -n pkill sample_server.py 2>/dev/null || true
+          sudo -n pkill -f sample_server.py 2>/dev/null || true
           (cd ${REMOTE_BASE_DIR} && sudo -n make unload-hw) 2>/dev/null || true
           sudo -n ip link set dev ${REMOTE_INTERFACE} down 2>/dev/null || true
           sleep 1
@@ -112,8 +112,15 @@ for MODE in "${MODES[@]}"; do
         # Warmup duration is always equal to DURATION since warmup is mandatory
         WARMUP_DURATION="${DURATION}"
 
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > /dev/null 2>&1 &"
+        echo "-> [DEBUG] Iniciando sample_server.py via SSH/nohup..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
         sleep 2
+
+        echo "-> [DEBUG] Verificando se sample_server.py está ativo no servidor..."
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando!"
+
+        echo "-> [DEBUG] Lendo conteúdo inicial do log no servidor..."
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "cat ${REMOTE_SERVER_OUTPUT_FILE}.log 2>/dev/null || echo 'Log não encontrado'"
 
         # 3. EXECUÇÃO DO CLIENTE (UMA MEDIÇÃO)
         echo "-> Executando cliente (run ${run})..."
@@ -123,10 +130,21 @@ for MODE in "${MODES[@]}"; do
             --concurrency "${CONCURRENCY}" \
             --warmup > "${CLIENT_OUTPUT_FILE}"
 
+        # 3.5. AGUARDAR O MONITOR REMOTO CONCLUIR
+        echo "-> Aguardando o monitor de recursos (sample_server.py) concluir..."
+        for i in {1..20}; do
+          echo "-> [DEBUG] Verificando se sample_server.py ainda roda (tentativa $i/20)..."
+          if ! ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -f \"python.*sample_server.py\"" >/dev/null 2>&1; then
+            echo "-> [DEBUG] sample_server.py finalizou."
+            break
+          fi
+          sleep 1
+        done
+
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-            sudo -n pkill sample_server.py 2>/dev/null || true
+            sudo -n pkill -f sample_server.py 2>/dev/null || true
             sudo -n pkill atesnds 2>/dev/null || true
             sudo -n pkill time_updater 2>/dev/null || true
             tmux kill-session -t srv 2>/dev/null || true
