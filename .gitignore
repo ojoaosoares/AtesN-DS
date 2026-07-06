@@ -6,6 +6,8 @@ bin/
 
 obj/
 
+.venv/
+
 test/
 
 nohup*

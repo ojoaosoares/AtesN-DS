@@ -41,11 +41,20 @@ def consolidate_files(input_dir, file_pattern, output_file, is_server_data=False
             summary.columns = ['metric', 'mean', 'std']
             summary_df = summary
         else:
-            # Client data is in wide format, one column per metric
-            summary_mean = combined_df.mean().add_suffix('_mean')
-            summary_std = combined_df.std().add_suffix('_std')
-            summary_df = pd.concat([summary_mean, summary_std]).to_frame().T
+            # Client data is in wide format, one column per metric.
+            # Convert to long format (metric, mean, std) to match client-side.py requirements.
+            numeric_cols = combined_df.select_dtypes(include='number').columns
+            summary_mean = combined_df[numeric_cols].mean()
+            summary_std = combined_df[numeric_cols].std()
 
+            rows = []
+            for col in numeric_cols:
+                rows.append({
+                    "metric": col,
+                    "mean": summary_mean[col],
+                    "std": summary_std[col]
+                })
+            summary_df = pd.DataFrame(rows)
 
         summary_df.to_csv(output_file, index=False)
         print(f"Sucesso: {len(df_list)} arquivos consolidados em '{output_file}'")

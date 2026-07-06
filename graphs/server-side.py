@@ -9,9 +9,14 @@ import re
 # =====================================================
 
 rows = []
+seen_files = set()
+files = glob.glob("server_results*.csv") + glob.glob("server_output*.csv")
 
-for file in glob.glob("server_output*.csv"):
+for file in files:
     name = os.path.basename(file)
+    if name in seen_files:
+        continue
+    seen_files.add(name)
 
     if "no_hw_cache" in name:
         cache_type = "No HW Cache"
@@ -86,6 +91,26 @@ if (
         ) ** 0.5
     )
 
+    # Calcular percentis para o CPU Total como a soma dos percentis dos componentes
+    for p in ["p50", "p75", "p90", "p99"]:
+        user_p = df[f"cpu_user_{p}"] if f"cpu_user_{p}" in df.columns else 0.0
+        system_p = df[f"cpu_system_{p}"] if f"cpu_system_{p}" in df.columns else 0.0
+        softirq_p = df[f"cpu_softirq_{p}"] if f"cpu_softirq_{p}" in df.columns else 0.0
+        irq_p = df[f"cpu_irq_{p}"] if f"cpu_irq_{p}" in df.columns else 0.0
+
+        user_p_std = df[f"cpu_user_{p}_std"] if f"cpu_user_{p}_std" in df.columns else 0.0
+        system_p_std = df[f"cpu_system_{p}_std"] if f"cpu_system_{p}_std" in df.columns else 0.0
+        softirq_p_std = df[f"cpu_softirq_{p}_std"] if f"cpu_softirq_{p}_std" in df.columns else 0.0
+        irq_p_std = df[f"cpu_irq_{p}_std"] if f"cpu_irq_{p}_std" in df.columns else 0.0
+
+        df[f"cpu_total_{p}"] = user_p + system_p + softirq_p + irq_p
+        df[f"cpu_total_{p}_std"] = (
+            user_p_std ** 2
+            + system_p_std ** 2
+            + softirq_p_std ** 2
+            + irq_p_std ** 2
+        ) ** 0.5
+
 # =====================================================
 # PLOT
 # =====================================================
@@ -159,6 +184,12 @@ plot_metric(
 )
 
 plot_metric(
+    "cpu_irq_mean",
+    "CPU IRQ (%)",
+    "cpu_irq_mean.png",
+)
+
+plot_metric(
     "cpu_total_mean",
     "Total CPU (%)",
     "cpu_total_mean.png",
@@ -176,7 +207,7 @@ plot_metric(
 
 plot_metric(
     "mem_used_mean",
-    "Memory Used (GB)",
+    "Memory Used (%)",
     "mem_used_mean.png",
 )
 
@@ -189,6 +220,7 @@ generated_files = [
     "cpu_user_mean.png",
     "cpu_system_mean.png",
     "cpu_softirq_mean.png",
+    "cpu_irq_mean.png",
     "cpu_total_mean.png",
     "max_core_usage_mean.png",
     "mem_used_mean.png",
@@ -211,13 +243,23 @@ for p in percentiles:
         f"cpu_softirq_{p}.png",
     )
     plot_metric(
+        f"cpu_irq_{p}",
+        f"CPU IRQ {p.upper()} (%)",
+        f"cpu_irq_{p}.png",
+    )
+    plot_metric(
+        f"cpu_total_{p}",
+        f"Total CPU {p.upper()} (%)",
+        f"cpu_total_{p}.png",
+    )
+    plot_metric(
         f"max_core_usage_{p}",
         f"Max Core Usage {p.upper()} (%)",
         f"max_core_usage_{p}.png",
     )
     plot_metric(
         f"mem_used_{p}",
-        f"Memory Used {p.upper()} (GB)",
+        f"Memory Used {p.upper()} (%)",
         f"mem_used_{p}.png",
     )
     
@@ -225,6 +267,8 @@ for p in percentiles:
         f"cpu_user_{p}.png",
         f"cpu_system_{p}.png",
         f"cpu_softirq_{p}.png",
+        f"cpu_irq_{p}.png",
+        f"cpu_total_{p}.png",
         f"max_core_usage_{p}.png",
         f"mem_used_{p}.png",
     ])
