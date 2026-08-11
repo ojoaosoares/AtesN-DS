@@ -50,14 +50,14 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 65536);
+    __uint(max_entries, 20000000);
     __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH_SW]));
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_arecords SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 655368);
+    __uint(max_entries, 40000000);
     __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_nsrecords SEC(".maps");
