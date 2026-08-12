@@ -16,7 +16,7 @@ def reset_bpf_dns_misses():
     try:
         subprocess.run(
             [
-                "sudo", "-n", "bpftool", "map", "update", "pinned",
+                "sudo", "bpftool", "map", "update", "pinned",
                 "/sys/fs/bpf/dns_misses",
                 "key", "hex", "00", "00", "00", "00",
                 "value", "hex", "00", "00", "00", "00", "00", "00", "00", "00"
@@ -33,7 +33,7 @@ def reset_bpf_dns_misses():
 def get_bpf_dns_misses():
     try:
         res = subprocess.run(
-            ["sudo", "-n", "bpftool", "map", "dump", "pinned", "/sys/fs/bpf/dns_misses"],
+            ["sudo", "bpftool", "map", "dump", "pinned", "/sys/fs/bpf/dns_misses"],
             capture_output=True,
             text=True,
             check=True
