@@ -13,41 +13,46 @@ SAMPLE_INTERVAL = 0.2
 
 
 def reset_bpf_dns_misses():
-    try:
-        subprocess.run(
-            [
-                "sudo", "bpftool", "map", "update", "pinned",
-                "/sys/fs/bpf/dns_misses",
-                "key", "hex", "00", "00", "00", "00",
-                "value", "hex", "00", "00", "00", "00", "00", "00", "00", "00"
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        print("  BPF dns_misses map reset to 0 at start of measurement window.")
-    except Exception as e:
-        print(f"  Warning: Failed to reset BPF dns_misses map: {e}", file=sys.stderr)
+    for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
+        try:
+            res = subprocess.run(
+                [
+                    "sudo", "bpftool", "map", "update",
+                    target[0], target[1],
+                    "key", "hex", "00", "00", "00", "00",
+                    "value", "hex", "00", "00", "00", "00", "00", "00", "00", "00"
+                ],
+                capture_output=True,
+                text=True
+            )
+            if res.returncode == 0:
+                print(f"  BPF dns_misses map reset to 0 via bpftool ({target[0]} {target[1]}).")
+                return
+        except Exception:
+            pass
+
+    print("  Warning: Failed to reset BPF dns_misses map via bpftool.", file=sys.stderr)
 
 
 def get_bpf_dns_misses():
-    try:
-        res = subprocess.run(
-            ["sudo", "bpftool", "map", "dump", "pinned", "/sys/fs/bpf/dns_misses"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        total = 0
-        for line in res.stdout.splitlines():
-            m = re.search(r"value \(CPU \d+\):\s*([0-9a-fA-F ]{23,24})", line)
-            if m:
-                raw = bytes.fromhex(m.group(1).replace(" ", ""))
-                total += int.from_bytes(raw, byteorder="little")
-        return total
-    except Exception as e:
-        print(f"  Warning: Failed to dump BPF dns_misses map: {e}", file=sys.stderr)
-        return 0
+    for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
+        try:
+            res = subprocess.run(
+                ["sudo", "bpftool", "map", "dump", target[0], target[1]],
+                capture_output=True,
+                text=True
+            )
+            if res.returncode == 0 and res.stdout:
+                total = 0
+                for line in res.stdout.splitlines():
+                    m = re.search(r"value \(CPU \d+\):\s*([0-9a-fA-F ]{23,24})", line)
+                    if m:
+                        raw = bytes.fromhex(m.group(1).replace(" ", ""))
+                        total += int.from_bytes(raw, byteorder="little")
+                return total
+        except Exception:
+            pass
+    return 0
 
 
 def sample(duration):
@@ -176,12 +181,14 @@ def main():
 
     # Immediately reset BPF dns_misses after cache warmup phase
     reset_bpf_dns_misses()
+    initial_misses = get_bpf_dns_misses()
 
     print("Collecting samples...")
     data = sample(duration)
 
-    cache_misses = get_bpf_dns_misses()
-    print(f"  Cache misses collected: {cache_misses}")
+    final_misses = get_bpf_dns_misses()
+    cache_misses = max(0, final_misses - initial_misses)
+    print(f"  Cache misses collected: {cache_misses} (initial: {initial_misses}, final: {final_misses})")
 
     run_summary = {
         "cpu_user": summarize(data["cpu_user"]),

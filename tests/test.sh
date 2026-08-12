@@ -44,7 +44,9 @@ LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 
 # Níveis de Concorrência e Modos
 CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
-MODES=("no_hw_cache" "hw_cache")
+#CONCURRENCY_LEVELS=(754)
+MODES=("hw_cache")
+#MODES=("hw_cache")
 
 #########################
 # PREPARAÇÃO
@@ -53,7 +55,7 @@ MODES=("no_hw_cache" "hw_cache")
 echo "-> Preparando diretórios..."
 mkdir -p "${LOCAL_RESULTS_DIR_CLIENT}"
 mkdir -p "${LOCAL_RESULTS_DIR_SERVER}"
-ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${REMOTE_RESULTS_DIR_SERVER}"
+ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${REMOTE_RESULTS_DIR_SERVER}" || true
 
 #########################
 # LOOP PRINCIPAL
@@ -90,7 +92,7 @@ for MODE in "${MODES[@]}"; do
           sudo -n ip link set dev ${REMOTE_INTERFACE} up 2>/dev/null || true
           sudo -n ip addr flush dev ${REMOTE_INTERFACE} 2>/dev/null || true
           sudo -n ip addr add ${REMOTE_SERVER_IP}/24 dev ${REMOTE_INTERFACE} 2>/dev/null || true
-        "
+        " || true
         sudo -n ip link set dev ${LOCAL_INTERFACE} down 2>/dev/null || true
         sleep 1
         sudo -n ip link set dev ${LOCAL_INTERFACE} up 2>/dev/null || true
@@ -144,7 +146,7 @@ for MODE in "${MODES[@]}"; do
             tmux kill-session -t srv 2>/dev/null || true
             tmux kill-session -t ates 2>/dev/null || true
             tmux kill-session -t hw 2>/dev/null || true
-        "
+        " || true
         echo "--> Fim da RUN ${run}"
     done
 

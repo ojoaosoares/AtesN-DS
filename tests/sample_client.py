@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
 import sys
 import subprocess
+import json
 import csv
+import statistics
 import re
 import argparse
 import io
@@ -15,7 +16,7 @@ def run_dnspyre(server, duration, concurrency):
         "--server", server,
         "--type", "A",
         "--ednsopt=10:11223344556677889900aabb",
-        "https://raw.githubusercontent.com/zer0h/top-1000000-domains/refs/heads/master/top-10000-domains"
+        "@dominios3.txt"
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
