@@ -1,12 +1,14 @@
 .vscode/
 
-data/
-data10/
-data3/
+data*/
+data*
+
 
 bin/
 
 obj/
+
+.venv/
 
 test/
 

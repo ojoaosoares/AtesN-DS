@@ -33,19 +33,11 @@ for file in glob.glob("*.csv"):
     for _, row in metrics_df.iterrows():
         metric_name = str(row["metric"])
 
-        metrics[metric_name] = float(row["mean"])
-        metrics[f"{metric_name}_std"] = float(row["std"])
+        metrics[metric_name] = float(row["mean"]) if "mean" in row else float(row["value"])
+        if "std" in row:
+            metrics[f"{metric_name}_std"] = float(row["std"])
 
     rows.append(metrics)
-
-df = pd.DataFrame(rows)
-
-print("\n=== COLUNAS DO DATAFRAME ===")
-for c in sorted(df.columns):
-    print(c)
-
-print("\n=== PRIMEIRA LINHA ===")
-print(df.head(1).T)
 
 if not rows:
     raise ValueError(
@@ -53,6 +45,10 @@ if not rows:
     )
 
 df = pd.DataFrame(rows)
+
+print("\n=== COLUNAS DO DATAFRAME ===")
+for c in sorted(df.columns):
+    print(c)
 
 print("\nDados carregados:")
 print(df[["cache_type", "concurrency"]].sort_values("concurrency"))
@@ -83,6 +79,7 @@ plt.grid(True)
 plt.legend()
 plt.tight_layout()
 plt.savefig("throughput_vs_concurrency.png", dpi=300)
+plt.close()
 
 # =====================================================
 # Mean Latency
@@ -108,6 +105,7 @@ plt.grid(True)
 plt.legend()
 plt.tight_layout()
 plt.savefig("latency_mean_vs_concurrency.png", dpi=300)
+plt.close()
 
 # =====================================================
 # Percentis
@@ -122,6 +120,8 @@ percentiles = [
 ]
 
 for metric in percentiles:
+    if metric not in df.columns:
+        continue
 
     plt.figure(figsize=(12, 6))
 
@@ -143,72 +143,78 @@ for metric in percentiles:
     plt.legend()
     plt.tight_layout()
     plt.savefig(f"{metric}.png", dpi=300)
+    plt.close()
 
 # =====================================================
 # Total Requests
 # =====================================================
 
-plt.figure(figsize=(12, 6))
+if "totalRequests" in df.columns:
+    plt.figure(figsize=(12, 6))
 
-for cache in df["cache_type"].unique():
-    subset = df[df["cache_type"] == cache]
+    for cache in df["cache_type"].unique():
+        subset = df[df["cache_type"] == cache]
 
-    plt.plot(
-        subset["concurrency"],
-        subset["totalRequests"],
-        marker="o",
-        linewidth=2,
-        label=cache,
-    )
+        plt.plot(
+            subset["concurrency"],
+            subset["totalRequests"],
+            marker="o",
+            linewidth=2,
+            label=cache,
+        )
 
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Total Requests")
-plt.title("Total Requests vs Concurrency")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
-plt.savefig("total_requests_vs_concurrency.png", dpi=300)
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Total Requests")
+    plt.title("Total Requests vs Concurrency")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("total_requests_vs_concurrency.png", dpi=300)
+    plt.close()
 
 # =====================================================
 # Speedup
 # =====================================================
 
-hw = (
-    df[df["cache_type"] == "HW Cache"]
-    .set_index("concurrency")
-    .sort_index()
-)
+if "HW Cache" in df["cache_type"].values and "No HW Cache" in df["cache_type"].values:
+    hw = (
+        df[df["cache_type"] == "HW Cache"]
+        .set_index("concurrency")
+        .sort_index()
+    )
 
-no_hw = (
-    df[df["cache_type"] == "No HW Cache"]
-    .set_index("concurrency")
-    .sort_index()
-)
+    no_hw = (
+        df[df["cache_type"] == "No HW Cache"]
+        .set_index("concurrency")
+        .sort_index()
+    )
 
-common = hw.index.intersection(no_hw.index)
+    common = hw.index.intersection(no_hw.index)
 
-speedup = (
-    hw.loc[common, "queriesPerSecond"]
-    / no_hw.loc[common, "queriesPerSecond"]
-)
+    if not common.empty and "queriesPerSecond" in hw.columns:
+        speedup = (
+            hw.loc[common, "queriesPerSecond"]
+            / no_hw.loc[common, "queriesPerSecond"]
+        )
 
-plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 6))
 
-plt.plot(
-    common,
-    speedup,
-    marker="o",
-    linewidth=2,
-)
+        plt.plot(
+            common,
+            speedup,
+            marker="o",
+            linewidth=2,
+        )
 
-plt.axhline(1.0, linestyle="--")
+        plt.axhline(1.0, linestyle="--")
 
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Speedup")
-plt.title("HW Cache Speedup")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("speedup.png", dpi=300)
+        plt.xlabel("Concurrent Connections")
+        plt.ylabel("Speedup")
+        plt.title("HW Cache Speedup")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig("speedup.png", dpi=300)
+        plt.close()
 
 print("\nGráficos gerados:")
 print("throughput_vs_concurrency.png")
@@ -220,17 +226,3 @@ print("latency_p95_ms.png")
 print("latency_p99_ms.png")
 print("total_requests_vs_concurrency.png")
 print("speedup.png")
-
-print(df[
-    [
-        "concurrency",
-        "latency_p90_ms",
-        "latency_p90_ms_std"
-    ]
-])
-
-plt.show()
-
-
-
-

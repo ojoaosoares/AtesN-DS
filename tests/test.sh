@@ -18,7 +18,7 @@ REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
 # Parâmetros do Benchmark
 NUM_RUNS=30
 DURATION=60
-WARMUP="--warmup" # Use "--warmup" para habilitar, "" para desabilitar
+# Warmup é obrigatório nos testes
 
 # Configuração de Rede
 REMOTE_INTERFACE="enp1s0np1"
@@ -36,14 +36,14 @@ LOCAL_CLIENT_SCRIPT="${PROJECT_DIR}/tests/sample_client.py"
 CONSOLIDATE_SCRIPT="${PROJECT_DIR}/graphs/consolidate.py"
 
 # Diretórios de Resultados
-REMOTE_RESULTS_DIR_SERVER="${REMOTE_BASE_DIR}/data/server"
-LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/data/client"
-LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/data/server"
-LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/data"
+DATA_DATE="data_$(date +%Y-%m-%d)"
+REMOTE_RESULTS_DIR_SERVER="${REMOTE_BASE_DIR}/${DATA_DATE}/server"
+LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/${DATA_DATE}/client"
+LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/${DATA_DATE}/server"
+LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 
 # Níveis de Concorrência e Modos
-#CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
-CONCURRENCY_LEVELS=(16384)
+CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
 MODES=("no_hw_cache" "hw_cache")
 
 #########################
@@ -68,7 +68,6 @@ for MODE in "${MODES[@]}"; do
     echo
     echo "========== Iniciando concorrência ${CONCURRENCY} =========="
 
-    # NOVO LOOP DE RUN: A lógica de reset/init/exec/kill acontece aqui dentro
     for run in $(seq 1 $NUM_RUNS); do
         echo
         echo "--> RUN ${run} / ${NUM_RUNS}"
@@ -84,7 +83,7 @@ for MODE in "${MODES[@]}"; do
           tmux kill-session -t hw 2>/dev/null || true
           sudo -n pkill atesnds 2>/dev/null || true
           sudo -n pkill time_updater 2>/dev/null || true
-          sudo -n pkill sample_server.py 2>/dev/null || true
+          sudo -n pkill -f sample_server.py 2>/dev/null || true
           (cd ${REMOTE_BASE_DIR} && sudo -n make unload-hw) 2>/dev/null || true
           sudo -n ip link set dev ${REMOTE_INTERFACE} down 2>/dev/null || true
           sleep 1
@@ -109,21 +108,37 @@ for MODE in "${MODES[@]}"; do
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
         sleep 3
 
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} > /dev/null 2>&1 &"
+        WARMUP_DURATION="${DURATION}"
+
+        echo "-> [DEBUG] Iniciando sample_server.py via SSH/nohup..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
         sleep 2
 
-        # 3. EXECUÇÃO DO CLIENTE (UMA MEDIÇÃO)
+        echo "-> [DEBUG] Verificando se sample_server.py está ativo no servidor..."
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando!"
+
+        # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
         echo "-> Executando cliente (run ${run})..."
         python3 "${LOCAL_CLIENT_SCRIPT}" \
             --server "${REMOTE_SERVER_IP}" \
             --duration "${DURATION}" \
             --concurrency "${CONCURRENCY}" \
-            ${WARMUP} > "${CLIENT_OUTPUT_FILE}"
+            --warmup > "${CLIENT_OUTPUT_FILE}"
+
+        # 3.5. AGUARDAR O MONITOR REMOTO CONCLUIR
+        echo "-> Aguardando o monitor de recursos (sample_server.py) concluir..."
+        for i in {1..30}; do
+          if ! ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -f \"python.*sample_server.py\"" >/dev/null 2>&1; then
+            echo "-> sample_server.py finalizou."
+            break
+          fi
+          sleep 2
+        done
 
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
-            sudo -n pkill sample_server.py 2>/dev/null || true
+            sudo -n pkill -f sample_server.py 2>/dev/null || true
             sudo -n pkill atesnds 2>/dev/null || true
             sudo -n pkill time_updater 2>/dev/null || true
             tmux kill-session -t srv 2>/dev/null || true

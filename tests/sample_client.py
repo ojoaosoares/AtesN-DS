@@ -1,22 +1,19 @@
+#!/usr/bin/env python3
 import sys
 import subprocess
-import json
 import csv
-import statistics
 import re
 import argparse
 import io
 
-# Suas funções de execução e parsing, mantidas intactas
+
 def run_dnspyre(server, duration, concurrency):
-    # O comando exato que você especificou
     cmd = [
         "dnspyre",
         "--duration", str(duration) + "s",
-        "-c", str(concurrency),
+        "--concurrency", str(concurrency),
         "--server", server,
-        "--edns0=1232",
-        "--no-dnssec",
+        "--type", "A",
         "--ednsopt=10:11223344556677889900aabb",
         "https://raw.githubusercontent.com/zer0h/top-1000000-domains/refs/heads/master/top-10000-domains"
     ]
@@ -26,6 +23,7 @@ def run_dnspyre(server, duration, concurrency):
         print(result.stderr, file=sys.stderr)
         sys.exit(1)
     return result.stdout
+
 
 def parse_duration_to_ms(value, unit):
     unit = unit.strip()
@@ -38,8 +36,10 @@ def parse_duration_to_ms(value, unit):
         return value * 1000
     return value
 
+
 def strip_ansi(text):
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
+
 
 def extract_principal_fields(text):
     text = strip_ansi(text)
@@ -65,6 +65,7 @@ def extract_principal_fields(text):
         "latency_p99_ms":   get_latency("p99"),
     }
 
+
 def execute_measured_run(server, duration, concurrency, warmup):
     if warmup:
         print("  Warmup run...", file=sys.stderr)
@@ -81,7 +82,7 @@ def execute_measured_run(server, duration, concurrency, warmup):
         concurrency=concurrency
     )
 
-# Nova função main, adaptada para o fluxo do test.sh
+
 def main():
     parser = argparse.ArgumentParser(description='Run a single DNS benchmark using a specific dnspyre command.')
     parser.add_argument('--server', type=str, required=True)
@@ -104,7 +105,7 @@ def main():
     writer = csv.DictWriter(output, fieldnames=extracted_data.keys())
     writer.writeheader()
     writer.writerow(extracted_data)
-    
+
     print(output.getvalue(), end='')
 
 
