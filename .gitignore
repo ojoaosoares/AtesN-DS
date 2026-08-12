@@ -1,6 +1,7 @@
 .vscode/
 
-data/
+data*/
+data*
 
 bin/
 
