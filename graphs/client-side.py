@@ -1,51 +1,61 @@
-import pandas as pd
-import matplotlib.pyplot as plt
 import glob
 import os
 import re
+import pandas as pd
+import matplotlib.pyplot as plt
 
+# =====================================================
+# CONFIGURAÇÕES DE PLOTAGEM (ESTILO)
+# =====================================================
+plt.rcParams.update({
+    "font.size": 26,          # Fonte padrão
+    "axes.labelsize": 24,     # Labels dos eixos
+    "xtick.labelsize": 22,    # Números do eixo X
+    "ytick.labelsize": 22,    # Números do eixo Y
+    "legend.fontsize": 22,    # Legenda
+    "lines.linewidth": 2.5,
+    "lines.markersize": 8,
+})
+
+# =====================================================
+# LEITURA DOS DADOS
+# =====================================================
 rows = []
+files = glob.glob("client_results_*.csv")
+if not files:
+    files = [f for f in glob.glob("*.csv") if "server" not in os.path.basename(f)]
 
-for file in glob.glob("*.csv"):
+for file in files:
     name = os.path.basename(file)
 
     if "no_hw_cache" in name:
-        cache_type = "No HW Cache"
+        cache_type = "driver-mode"
     elif "hw_cache" in name:
-        cache_type = "HW Cache"
+        cache_type = "offloaded-mode"
     else:
         continue
 
     match = re.search(r"(\d+)\.csv$", name)
-
     if not match:
         continue
 
     concurrency = int(match.group(1))
 
-    metrics_df = pd.read_csv(file)
+    try:
+        metrics_df = pd.read_csv(file)
+        metrics = {
+            "cache_type": cache_type,
+            "concurrency": concurrency,
+        }
 
-    metrics = {
-        "cache_type": cache_type,
-        "concurrency": concurrency,
-    }
+        for _, row in metrics_df.iterrows():
+            metric_name = str(row["metric"])
+            metrics[metric_name] = float(row["mean"])
+            metrics[f"{metric_name}_std"] = float(row["std"])
 
-    for _, row in metrics_df.iterrows():
-        metric_name = str(row["metric"])
-
-        metrics[metric_name] = float(row["mean"])
-        metrics[f"{metric_name}_std"] = float(row["std"])
-
-    rows.append(metrics)
-
-df = pd.DataFrame(rows)
-
-print("\n=== COLUNAS DO DATAFRAME ===")
-for c in sorted(df.columns):
-    print(c)
-
-print("\n=== PRIMEIRA LINHA ===")
-print(df.head(1).T)
+        rows.append(metrics)
+    except Exception as e:
+        print(f"Erro ao processar {name}: {e}")
 
 if not rows:
     raise ValueError(
@@ -53,184 +63,129 @@ if not rows:
     )
 
 df = pd.DataFrame(rows)
-
-print("\nDados carregados:")
-print(df[["cache_type", "concurrency"]].sort_values("concurrency"))
-
 df = df.sort_values(["cache_type", "concurrency"])
 
-# =====================================================
-# Throughput
-# =====================================================
-
-plt.figure(figsize=(12, 6))
-
-for cache in df["cache_type"].unique():
-    subset = df[df["cache_type"] == cache]
-
-    plt.plot(
-        subset["concurrency"],
-        subset["queriesPerSecond"],
-        marker="o",
-        linewidth=2,
-        label=cache,
-    )
-
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Queries/s")
-plt.title("Throughput vs Concurrency")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
-plt.savefig("throughput_vs_concurrency.png", dpi=300)
+print("\nDados carregados:")
+print(df[["cache_type", "concurrency"]].drop_duplicates())
 
 # =====================================================
-# Mean Latency
+# FUNÇÃO REUTILIZÁVEL DE PLOTAGEM (COM DESVIO PADRÃO)
 # =====================================================
-
-plt.figure(figsize=(12, 6))
-
-for cache in df["cache_type"].unique():
-    subset = df[df["cache_type"] == cache]
-
-    plt.plot(
-        subset["concurrency"],
-        subset["latency_mean_ms"],
-        marker="o",
-        linewidth=2,
-        label=cache,
-    )
-
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Mean Latency (ms)")
-plt.title("Mean Latency vs Concurrency")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
-plt.savefig("latency_mean_vs_concurrency.png", dpi=300)
-
-# =====================================================
-# Percentis
-# =====================================================
-
-percentiles = [
-    "latency_p50_ms",
-    "latency_p75_ms",
-    "latency_p90_ms",
-    "latency_p95_ms",
-    "latency_p99_ms",
-]
-
-for metric in percentiles:
-
+def plot_metric(metric, ylabel, title, filename):
     plt.figure(figsize=(12, 6))
 
-    for cache in df["cache_type"].unique():
-        subset = df[df["cache_type"] == cache]
+    for cache in sorted(df["cache_type"].unique()):
+        subset = df[df["cache_type"] == cache].sort_values("concurrency")
+
+        if metric not in subset.columns:
+            continue
+
+        x = subset["concurrency"].to_numpy()
+        y = subset[metric].to_numpy()
 
         plt.plot(
-            subset["concurrency"],
-            subset[metric],
+            x,
+            y,
             marker="o",
             linewidth=2,
             label=cache,
         )
 
+        std_col = f"{metric}_std"
+        if std_col in subset.columns:
+            std = subset[std_col].fillna(0).to_numpy()
+            plt.fill_between(
+                x,
+                y - std,
+                y + std,
+                alpha=0.30,
+            )
+
     plt.xlabel("Concurrent Connections")
-    plt.ylabel("Latency (ms)")
-    plt.title(metric)
-    plt.grid(True)
+    plt.ylabel(ylabel)
+    plt.title(f"{title} (Mean ± Std Dev)")
+    plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"{metric}.png", dpi=300)
+    plt.savefig(filename, dpi=300)
+    plt.close()
+
+# Lista para acompanhar arquivos gerados
+generated_files = []
 
 # =====================================================
-# Total Requests
+# THROUGHPUT & LATÊNCIA MÉDIA & TOTAL REQUESTS
 # =====================================================
+plot_metric("queriesPerSecond", "Queries/s", "Throughput vs Concurrency", "throughput_vs_concurrency.png")
+generated_files.append("throughput_vs_concurrency.png")
 
-plt.figure(figsize=(12, 6))
+plot_metric("latency_mean_ms", "Mean Latency (ms)", "Mean Latency vs Concurrency", "latency_mean_vs_concurrency.png")
+generated_files.append("latency_mean_vs_concurrency.png")
 
-for cache in df["cache_type"].unique():
-    subset = df[df["cache_type"] == cache]
-
-    plt.plot(
-        subset["concurrency"],
-        subset["totalRequests"],
-        marker="o",
-        linewidth=2,
-        label=cache,
-    )
-
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Total Requests")
-plt.title("Total Requests vs Concurrency")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
-plt.savefig("total_requests_vs_concurrency.png", dpi=300)
+plot_metric("totalRequests", "Total Requests", "Total Requests vs Concurrency", "total_requests_vs_concurrency.png")
+generated_files.append("total_requests_vs_concurrency.png")
 
 # =====================================================
-# Speedup
+# PERCENTIS DE LATÊNCIA
 # =====================================================
+percentiles = [
+    ("latency_p50_ms", "Latency P50 (ms)", "Latency P50"),
+    ("latency_p75_ms", "Latency P75 (ms)", "Latency P75"),
+    ("latency_p90_ms", "Latency P90 (ms)", "Latency P90"),
+    ("latency_p95_ms", "Latency P95 (ms)", "Latency P95"),
+    ("latency_p99_ms", "Latency P99 (ms)", "Latency P99"),
+]
 
-hw = (
-    df[df["cache_type"] == "HW Cache"]
-    .set_index("concurrency")
-    .sort_index()
-)
+for metric_key, ylabel, title in percentiles:
+    fname = f"{metric_key}.png"
+    plot_metric(metric_key, ylabel, title, fname)
+    generated_files.append(fname)
 
-no_hw = (
-    df[df["cache_type"] == "No HW Cache"]
-    .set_index("concurrency")
-    .sort_index()
-)
+# =====================================================
+# SPEEDUP (COM PROPAGAÇÃO DE INERTEZA/STD)
+# =====================================================
+hw = df[df["cache_type"] == "offloaded-mode"].set_index("concurrency").sort_index()
+no_hw = df[df["cache_type"] == "driver-mode"].set_index("concurrency").sort_index()
 
 common = hw.index.intersection(no_hw.index)
 
-speedup = (
-    hw.loc[common, "queriesPerSecond"]
-    / no_hw.loc[common, "queriesPerSecond"]
-)
+if not common.empty:
+    y_hw = hw.loc[common, "queriesPerSecond"].to_numpy()
+    y_no_hw = no_hw.loc[common, "queriesPerSecond"].to_numpy()
 
-plt.figure(figsize=(12, 6))
+    speedup = y_hw / y_no_hw
 
-plt.plot(
-    common,
-    speedup,
-    marker="o",
-    linewidth=2,
-)
+    # Cálculo da incerteza do Speedup (S = A/B => std_S = S * sqrt((std_A/A)^2 + (std_B/B)^2))
+    std_hw = hw.loc[common, "queriesPerSecond_std"].fillna(0).to_numpy()
+    std_no_hw = no_hw.loc[common, "queriesPerSecond_std"].fillna(0).to_numpy()
 
-plt.axhline(1.0, linestyle="--")
+    speedup_std = speedup * (
+        (std_hw / y_hw) ** 2 + (std_no_hw / y_no_hw) ** 2
+    ) ** 0.5
 
-plt.xlabel("Concurrent Connections")
-plt.ylabel("Speedup")
-plt.title("HW Cache Speedup")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("speedup.png", dpi=300)
+    plt.figure(figsize=(12, 6))
+    plt.plot(common, speedup, marker="o", linewidth=2, label="Speedup")
+    plt.fill_between(
+        common,
+        speedup - speedup_std,
+        speedup + speedup_std,
+        alpha=0.30,
+    )
+    plt.axhline(1.0, linestyle="--", color="gray", alpha=0.7)
 
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Speedup")
+    plt.title("Offloaded-mode Speedup vs Driver-mode (Mean ± Std Dev)")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("speedup.png", dpi=300)
+    plt.close()
+
+    generated_files.append("speedup.png")
+
+# =====================================================
+# RELATÓRIO FINAL
+# =====================================================
 print("\nGráficos gerados:")
-print("throughput_vs_concurrency.png")
-print("latency_mean_vs_concurrency.png")
-print("latency_p50_ms.png")
-print("latency_p75_ms.png")
-print("latency_p90_ms.png")
-print("latency_p95_ms.png")
-print("latency_p99_ms.png")
-print("total_requests_vs_concurrency.png")
-print("speedup.png")
-
-print(df[
-    [
-        "concurrency",
-        "latency_p90_ms",
-        "latency_p90_ms_std"
-    ]
-])
-
-plt.show()
-
-
-
-
+for f in generated_files:
+    print(f)
