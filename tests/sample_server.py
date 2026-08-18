@@ -17,7 +17,7 @@ def reset_bpf_dns_misses():
             try:
                 res = subprocess.run(
                     [
-                        "sudo", "-n", bpftool_bin, "map", "update",
+                        "sudo", bpftool_bin, "map", "update",
                         target[0], target[1],
                         "key", "hex", "00", "00", "00", "00",
                         "value", "hex", "00", "00", "00", "00", "00", "00", "00", "00"
@@ -37,51 +37,77 @@ def reset_bpf_dns_misses():
 import json
 
 
+def _parse_bpf_val(v):
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        v = v.strip()
+        if v.startswith(('0x', '0X')):
+            try:
+                return int(v, 16)
+            except ValueError:
+                pass
+        if ' ' in v:
+            try:
+                return int.from_bytes(bytes.fromhex(v.replace(' ', '')), byteorder='little')
+            except Exception:
+                pass
+        try:
+            return int(v, 10)
+        except ValueError:
+            pass
+    return 0
+
+
 def get_bpf_dns_misses():
-    # 1. Try JSON dump first (most accurate and native for bpftool)
+    total = 0
+
+    # 1. Tentativa via JSON dump (-j)
     for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
         for bpftool_bin in ["bpftool", "/usr/sbin/bpftool", "/sbin/bpftool"]:
             try:
                 res = subprocess.run(
-                    ["sudo", "-n", bpftool_bin, "-j", "map", "dump", target[0], target[1]],
+                    ["sudo", bpftool_bin, "-j", "map", "dump", target[0], target[1]],
                     capture_output=True,
                     text=True
                 )
                 if res.returncode == 0 and res.stdout.strip():
                     data = json.loads(res.stdout)
                     if isinstance(data, list):
-                        total = 0
+                        curr_total = 0
                         for item in data:
                             for v in item.get("values", []):
                                 if isinstance(v, dict) and "value" in v:
-                                    total += int(v["value"])
-                        return total
+                                    curr_total += _parse_bpf_val(v["value"])
+                        if curr_total > 0:
+                            return curr_total
             except Exception:
                 pass
 
-    # 2. Fallback to text dump
+    # 2. Tentativa via dump em texto puro
     for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
         for bpftool_bin in ["bpftool", "/usr/sbin/bpftool", "/sbin/bpftool"]:
             try:
                 res = subprocess.run(
-                    ["sudo", "-n", bpftool_bin, "map", "dump", target[0], target[1]],
+                    ["sudo", bpftool_bin, "map", "dump", target[0], target[1]],
                     capture_output=True,
                     text=True
                 )
                 if res.returncode == 0 and res.stdout:
-                    total = 0
+                    curr_total = 0
                     for line in res.stdout.splitlines():
+                        # Exemplo: value (CPU 07): 35 f3 0f 00 00 00 00 00
+                        # ou value (CPU 07): 1045349
                         m = re.search(r"value\s*\(CPU\s*\d+\):\s*([0-9a-fA-F ]+)", line)
                         if m:
-                            hex_str = m.group(1).replace(" ", "").strip()
-                            if hex_str:
-                                raw = bytes.fromhex(hex_str)
-                                total += int.from_bytes(raw, byteorder="little")
-                    return total
+                            val_str = m.group(1).strip()
+                            curr_total += _parse_bpf_val(val_str)
+                    if curr_total > 0:
+                        return curr_total
             except Exception:
                 pass
 
-    return 0
+    return total
 
 
 def sample(duration):
@@ -216,7 +242,11 @@ def main():
     data = sample(duration)
 
     final_misses = get_bpf_dns_misses()
-    cache_misses = max(0, final_misses - initial_misses)
+    cache_misses = final_misses - initial_misses
+    if cache_misses <= 0 and final_misses > 0:
+        cache_misses = final_misses
+    elif cache_misses < 0:
+        cache_misses = 0
     print(f"  Cache misses collected: {cache_misses} (initial: {initial_misses}, final: {final_misses})")
 
     run_summary = {

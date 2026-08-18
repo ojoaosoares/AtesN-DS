@@ -46,21 +46,43 @@ LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 # FUNÇÃO: COLETAR DNS MISSES DIRETAMENTE VIA BPFTOOL
 # ============================================================
 get_cache_misses() {
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "sudo -n bpftool -j map dump name dns_misses 2>/dev/null || sudo -n bpftool -j map dump pinned /sys/fs/bpf/dns_misses 2>/dev/null" | python3 -c '
+    ssh ${REMOTE_USER}@${REMOTE_HOST} "sudo bpftool -j map dump name dns_misses 2>/dev/null || sudo bpftool map dump name dns_misses 2>/dev/null" | python3 -c '
 import sys
 import json
+import re
 
+def parse_val(v):
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        v = v.strip()
+        if v.startswith(("0x", "0X")):
+            try: return int(v, 16)
+            except ValueError: pass
+        if " " in v:
+            try: return int.from_bytes(bytes.fromhex(v.replace(" ", "")), byteorder="little")
+            except Exception: pass
+        try: return int(v, 10)
+        except ValueError: pass
+    return 0
+
+content = sys.stdin.read().strip()
 total = 0
-try:
-    content = sys.stdin.read().strip()
-    if content:
+
+if content:
+    try:
         data = json.loads(content)
         if isinstance(data, list):
             for item in data:
                 for v in item.get("values", []):
-                    total += int(v.get("value", 0))
-except Exception:
-    pass
+                    if isinstance(v, dict) and "value" in v:
+                        total += parse_val(v["value"])
+    except Exception:
+        for line in content.splitlines():
+            m = re.search(r"value\s*\(CPU\s*\d+\):\s*([0-9a-fA-F ]+)", line)
+            if m:
+                total += parse_val(m.group(1).strip())
+
 print(total)
 ' 2>/dev/null || echo "0"
 }
