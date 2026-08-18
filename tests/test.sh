@@ -111,10 +111,17 @@ for MODE in "${MODES[@]}"; do
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
         sleep 3
 
-        WARMUP_DURATION="${DURATION}"
+        # 3. WARMUP DO CLIENTE (60s)
+        echo "-> Executando warmup do cliente (60s, concorrência ${CONCURRENCY})..."
+        python3 "${LOCAL_CLIENT_SCRIPT}" \
+            --server "${REMOTE_SERVER_IP}" \
+            --duration "${DURATION}" \
+            --concurrency "${CONCURRENCY}" \
+            --warmup-only
 
+        # 4. INICIALIZAR MONITOR REMOTO (MEDIÇÃO INICIA IMEDIATAMENTE APÓS WARMUP)
         echo "-> Iniciando sample_server.py no servidor (sessão tmux 'srv')..."
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && tmux kill-session -t srv 2>/dev/null || true; tmux new-session -d -s srv '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION}'"
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && tmux kill-session -t srv 2>/dev/null || true; tmux new-session -d -s srv '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} 0'"
         sleep 1
 
         echo "-> Verificando se sample_server.py está ativo no servidor..."
@@ -122,13 +129,12 @@ for MODE in "${MODES[@]}"; do
             echo "-> ALERTA: sample_server.py NÃO está rodando no servidor!"
         fi
 
-        # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
-        echo "-> Executando cliente (run ${run})..."
+        # 5. EXECUÇÃO DO CLIENTE (MEDIÇÃO)
+        echo "-> Executando medição do cliente (run ${run})..."
         python3 "${LOCAL_CLIENT_SCRIPT}" \
             --server "${REMOTE_SERVER_IP}" \
             --duration "${DURATION}" \
-            --concurrency "${CONCURRENCY}" \
-            --warmup > "${CLIENT_OUTPUT_FILE}"
+            --concurrency "${CONCURRENCY}" > "${CLIENT_OUTPUT_FILE}"
 
         # 3.5. AGUARDAR O MONITOR REMOTO CONCLUIR
         echo "-> Aguardando o monitor de recursos (sample_server.py) concluir..."

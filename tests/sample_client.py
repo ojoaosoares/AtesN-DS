@@ -8,6 +8,35 @@ import argparse
 import io
 
 
+import os
+
+
+def get_warmup_file():
+    if os.path.exists("unicos.txt"):
+        return "@unicos.txt"
+    return "@unique.txt"
+
+
+def run_warmup(server, duration, concurrency):
+    warmup_target = get_warmup_file()
+    cmd = [
+        "dnspyre",
+        "--duration", str(duration) + "s",
+        "--concurrency", str(concurrency),
+        "--server", server,
+        "--type", "A",
+        "--separate-worker-connections",
+        "--ednsopt=10:11223344556677889900aabb",
+        warmup_target
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("dnspyre warmup failed:", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        sys.exit(1)
+    return result.stdout
+
+
 def run_dnspyre(server, duration, concurrency):
     cmd = [
         "dnspyre",
@@ -71,7 +100,7 @@ def extract_principal_fields(text):
 def execute_measured_run(server, duration, concurrency, warmup):
     if warmup:
         print("  Warmup run...", file=sys.stderr)
-        run_dnspyre(
+        run_warmup(
             server=server,
             duration=duration,
             concurrency=concurrency
@@ -88,11 +117,21 @@ def execute_measured_run(server, duration, concurrency, warmup):
 def main():
     parser = argparse.ArgumentParser(description='Run a single DNS benchmark using a specific dnspyre command.')
     parser.add_argument('--server', type=str, required=True)
-    parser.add_argument('--duration', type=int, required=True)
+    parser.add_argument('--duration', type=int, default=60)
     parser.add_argument('--concurrency', type=int, required=True)
-    parser.add_argument('--warmup', action='store_true')
+    parser.add_argument('--warmup', action='store_true', help='Run warmup before measured run.')
+    parser.add_argument('--warmup-only', action='store_true', help='Run only warmup and exit.')
 
     args = parser.parse_args()
+
+    if args.warmup_only:
+        print("Running warmup...", file=sys.stderr)
+        run_warmup(
+            server=args.server,
+            duration=args.duration,
+            concurrency=args.concurrency
+        )
+        return
 
     raw_output = execute_measured_run(
         server=args.server,

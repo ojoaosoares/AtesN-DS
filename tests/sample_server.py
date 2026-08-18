@@ -158,7 +158,7 @@ def main():
         print(f"Error: Invalid duration: {e}", file=sys.stderr)
         sys.exit(1)
 
-    warmup_seconds = 60
+    warmup_seconds = 0
     if len(sys.argv) == 4:
         try:
             warmup_seconds = int(sys.argv[3])
