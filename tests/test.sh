@@ -42,51 +42,6 @@ LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/${DATA_DATE}/client"
 LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/${DATA_DATE}/server"
 LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 
-# ============================================================
-# FUNÇÃO: COLETAR DNS MISSES DIRETAMENTE VIA BPFTOOL
-# ============================================================
-get_cache_misses() {
-    ssh ${REMOTE_USER}@${REMOTE_HOST} "sudo bpftool -j map dump name dns_misses 2>/dev/null || sudo bpftool map dump name dns_misses 2>/dev/null" | python3 -c '
-import sys
-import json
-import re
-
-def parse_val(v):
-    if isinstance(v, (int, float)):
-        return int(v)
-    if isinstance(v, str):
-        v = v.strip()
-        if v.startswith(("0x", "0X")):
-            try: return int(v, 16)
-            except ValueError: pass
-        if " " in v:
-            try: return int.from_bytes(bytes.fromhex(v.replace(" ", "")), byteorder="little")
-            except Exception: pass
-        try: return int(v, 10)
-        except ValueError: pass
-    return 0
-
-content = sys.stdin.read().strip()
-total = 0
-
-if content:
-    try:
-        data = json.loads(content)
-        if isinstance(data, list):
-            for item in data:
-                for v in item.get("values", []):
-                    if isinstance(v, dict) and "value" in v:
-                        total += parse_val(v["value"])
-    except Exception:
-        for line in content.splitlines():
-            m = re.search(r"value\s*\(CPU\s*\d+\):\s*([0-9a-fA-F ]+)", line)
-            if m:
-                total += parse_val(m.group(1).strip())
-
-print(total)
-' 2>/dev/null || echo "0"
-}
-
 # Níveis de Concorrência e Modos
 CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
 #CONCURRENCY_LEVELS=(754)
@@ -137,7 +92,6 @@ for MODE in "${MODES[@]}"; do
           sudo -n ip link set dev ${REMOTE_INTERFACE} up 2>/dev/null || true
           sudo -n ip addr flush dev ${REMOTE_INTERFACE} 2>/dev/null || true
           sudo -n ip addr add ${REMOTE_SERVER_IP}/24 dev ${REMOTE_INTERFACE} 2>/dev/null || true
-          sudo -n ethtool -N ${REMOTE_INTERFACE} rx-flow-hash udp4 sdfn 2>/dev/null || true
         " || true
         sudo -n ip link set dev ${LOCAL_INTERFACE} down 2>/dev/null || true
         sleep 1
@@ -156,30 +110,22 @@ for MODE in "${MODES[@]}"; do
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_BASE_DIR} && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
         sleep 3
 
-        # 3. WARMUP DO CLIENTE (60s)
-        echo "-> Executando warmup do cliente (60s, concorrência ${CONCURRENCY})..."
+        WARMUP_DURATION="${DURATION}"
+
+        echo "-> [DEBUG] Iniciando sample_server.py via SSH/nohup..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
+        sleep 2
+
+        echo "-> [DEBUG] Verificando se sample_server.py está ativo no servidor..."
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando!"
+
+        # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
+        echo "-> Executando cliente (run ${run})..."
         python3 "${LOCAL_CLIENT_SCRIPT}" \
             --server "${REMOTE_SERVER_IP}" \
             --duration "${DURATION}" \
             --concurrency "${CONCURRENCY}" \
-            --warmup-only
-
-        # 4. INICIALIZAR MONITOR REMOTO (MEDIÇÃO INICIA IMEDIATAMENTE APÓS WARMUP)
-        echo "-> Iniciando sample_server.py no servidor (sessão tmux 'srv')..."
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && tmux kill-session -t srv 2>/dev/null || true; tmux new-session -d -s srv '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} 0'"
-        sleep 1
-
-        echo "-> Verificando se sample_server.py está ativo no servidor..."
-        if ! ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\""; then
-            echo "-> ALERTA: sample_server.py NÃO está rodando no servidor!"
-        fi
-
-        # 5. EXECUÇÃO DO CLIENTE (MEDIÇÃO)
-        echo "-> Executando medição do cliente (run ${run})..."
-        python3 "${LOCAL_CLIENT_SCRIPT}" \
-            --server "${REMOTE_SERVER_IP}" \
-            --duration "${DURATION}" \
-            --concurrency "${CONCURRENCY}" > "${CLIENT_OUTPUT_FILE}"
+            --warmup > "${CLIENT_OUTPUT_FILE}"
 
         # 3.5. AGUARDAR O MONITOR REMOTO CONCLUIR
         echo "-> Aguardando o monitor de recursos (sample_server.py) concluir..."
@@ -190,18 +136,6 @@ for MODE in "${MODES[@]}"; do
           fi
           sleep 2
         done
-
-        # 3.6. COLETAR E ASSEGURAR CACHE MISSES NO SERVER CSV
-        CACHE_MISSES=$(get_cache_misses)
-        echo "-> [RESULTADO] Cache Misses apurados no mapa BPF: ${CACHE_MISSES}"
-
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "
-            if grep -q 'cache_misses' '${REMOTE_SERVER_OUTPUT_FILE}' 2>/dev/null; then
-                sed -i 's/^cache_misses,.*/cache_misses,${CACHE_MISSES}/' '${REMOTE_SERVER_OUTPUT_FILE}'
-            else
-                echo 'cache_misses,${CACHE_MISSES}' >> '${REMOTE_SERVER_OUTPUT_FILE}'
-            fi
-        " 2>/dev/null || true
 
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."
