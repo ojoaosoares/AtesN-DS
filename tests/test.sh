@@ -112,12 +112,12 @@ for MODE in "${MODES[@]}"; do
 
         WARMUP_DURATION="${DURATION}"
 
-        echo "-> [DEBUG] Iniciando sample_server.py via SSH/nohup..."
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
+        echo "-> Iniciando sample_server.py no servidor (sessão tmux 'srv')..."
+        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && tmux kill-session -t srv 2>/dev/null || true; tmux new-session -d -s srv '${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION}'"
         sleep 2
 
-        echo "-> [DEBUG] Verificando se sample_server.py está ativo no servidor..."
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando!"
+        echo "-> Verificando se sample_server.py está ativo no servidor..."
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> ALERTA: sample_server.py NÃO está rodando!"
 
         # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
         echo "-> Executando cliente (run ${run})..."
