@@ -159,6 +159,23 @@ static __always_inline __u8 get_dns_answer_hw(void *data, __u64 *offset, void *d
          record->ip = response->ip;
          record->timestamp = now + bpf_ntohl(response->ttl);
          return ACCEPT;
+     } else if (bpf_ntohs(header->name_servers)) {
+         if ((void *)((__u8 *)data + *offset + sizeof(struct dns_response)) > data_end)
+             return DROP;
+
+         *offset += sizeof(struct dns_response);
+         if (bpf_ntohs(response->record_type) != SOA_RECORD_TYPE)
+             return ACCEPT_NO_ANSWER;
+         if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
+             return ACCEPT_NO_ANSWER;
+
+         record->ip = 0;
+         record->timestamp = now + bpf_ntohl(response->ttl);
+         return ACCEPT;
+     } else if ((bpf_ntohs(header->flags) & 0x000F) == 3) {
+         record->ip = 0;
+         record->timestamp = now + 60;
+         return ACCEPT;
      }
      return ACCEPT_NO_ANSWER;
  }
