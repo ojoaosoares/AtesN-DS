@@ -355,6 +355,8 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Program attached successfully\n");
+    unlink("/sys/fs/bpf/dns_misses");
+    bpf_map__pin(skel->maps.dns_misses, "/sys/fs/bpf/dns_misses");
     printf("CTRL + C to stop\n");
 
     struct send_packets_context sctx = {

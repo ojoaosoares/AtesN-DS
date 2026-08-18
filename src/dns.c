@@ -62,6 +62,12 @@ struct {
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_nsrecords SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} dns_misses SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -150,6 +156,12 @@ int dns_filter(struct xdp_md *ctx) {
 
         bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
         return XDP_DROP;
+    }
+
+    __u32 miss_key = 0;
+    __u64 *miss_cnt = bpf_map_lookup_elem(&dns_misses, &miss_key);
+    if (miss_cnt) {
+        *miss_cnt += 1;
     }
 
     bpf_printk("Received query for domain: %s\n", dnsquery->query.name);
