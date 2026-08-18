@@ -117,7 +117,7 @@ for MODE in "${MODES[@]}"; do
         sleep 2
 
         echo "-> Verificando se sample_server.py está ativo no servidor..."
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> ALERTA: sample_server.py NÃO está rodando!"
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -f \"sample_server.py\"" || echo "-> ALERTA: sample_server.py NÃO está rodando!"
 
         # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
         echo "-> Executando cliente (run ${run})..."

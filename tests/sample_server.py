@@ -33,24 +33,72 @@ def reset_bpf_dns_misses():
     print("  Warning: Failed to reset BPF dns_misses map.", file=sys.stderr)
 
 
+import json
+
+
+def _parse_bpf_json(content):
+    try:
+        data = json.loads(content)
+    except Exception:
+        return 0
+
+    if not isinstance(data, list):
+        return 0
+
+    total = 0
+    for item in data:
+        # 1. Prefer formatted BTF values if available
+        if "formatted" in item and isinstance(item["formatted"], dict) and "values" in item["formatted"]:
+            subtotal = 0
+            for v in item["formatted"]["values"]:
+                if isinstance(v, dict) and "value" in v:
+                    try:
+                        subtotal += int(v["value"])
+                    except Exception:
+                        pass
+            if subtotal > 0:
+                return subtotal
+
+        # 2. Parse raw values array
+        if "values" in item and isinstance(item["values"], list):
+            for v in item["values"]:
+                if not isinstance(v, dict) or "value" not in v:
+                    continue
+                val = v["value"]
+                if isinstance(val, list):
+                    # Array of hex bytes like ['0x95', '0xa4', '0x00', ...]
+                    try:
+                        b = bytes([int(x, 16) for x in val])
+                        total += int.from_bytes(b, byteorder="little")
+                    except Exception:
+                        pass
+                elif isinstance(val, (int, float)):
+                    total += int(val)
+                elif isinstance(val, str):
+                    try:
+                        total += int(val, 0)
+                    except Exception:
+                        pass
+
+    return total
+
+
 def get_bpf_dns_misses():
     for target in [["pinned", "/sys/fs/bpf/dns_misses"], ["name", "dns_misses"]]:
-        try:
-            res = subprocess.run(
-                ["sudo", "bpftool", "map", "dump", target[0], target[1]],
-                capture_output=True,
-                text=True
-            )
-            if res.returncode == 0 and res.stdout:
-                total = 0
-                for line in res.stdout.splitlines():
-                    m = re.search(r"value \(CPU \d+\):\s*([0-9a-fA-F ]{23,24})", line)
-                    if m:
-                        raw = bytes.fromhex(m.group(1).replace(" ", ""))
-                        total += int.from_bytes(raw, byteorder="little")
-                return total
-        except Exception as e:
-            pass
+        for bpftool_bin in ["bpftool", "/usr/sbin/bpftool", "/sbin/bpftool"]:
+            try:
+                res = subprocess.run(
+                    ["sudo", bpftool_bin, "-j", "map", "dump", target[0], target[1]],
+                    capture_output=True,
+                    text=True
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    total = _parse_bpf_json(res.stdout)
+                    if total > 0:
+                        return total
+            except Exception:
+                pass
+
     return 0
 
 
