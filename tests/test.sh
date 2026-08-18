@@ -114,11 +114,14 @@ for MODE in "${MODES[@]}"; do
         WARMUP_DURATION="${DURATION}"
 
         echo "-> [DEBUG] Iniciando sample_server.py via SSH/nohup..."
-        ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p \$(dirname ${REMOTE_SERVER_OUTPUT_FILE}) && nohup ${REMOTE_PYTHON} ${REMOTE_SERVER_SCRIPT} ${REMOTE_SERVER_OUTPUT_FILE} ${DURATION} ${WARMUP_DURATION} </dev/null > ${REMOTE_SERVER_OUTPUT_FILE}.log 2>&1 &"
         sleep 2
 
         echo "-> [DEBUG] Verificando se sample_server.py está ativo no servidor..."
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\"" || echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando!"
+        if ! ssh ${REMOTE_USER}@${REMOTE_HOST} "pgrep -a -f \"python.*sample_server.py\""; then
+            echo "-> [DEBUG] ALERTA: sample_server.py NÃO está rodando! Conteúdo do log no servidor:"
+            ssh ${REMOTE_USER}@${REMOTE_HOST} "cat ${REMOTE_SERVER_OUTPUT_FILE}.log 2>/dev/null || echo 'Log vazio ou não encontrado'"
+        fi
 
         # 3. EXECUÇÃO DO CLIENTE (COM WARMUP + MEDIÇÃO)
         echo "-> Executando cliente (run ${run})..."

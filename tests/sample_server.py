@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
-
 import sys
+import os
 import time
 import csv
 import statistics
@@ -216,6 +215,9 @@ def main():
         "metric": "cache_misses",
         "value": cache_misses
     })
+
+    if os.path.dirname(output_file):
+        os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
 
     with open(output_file, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["metric", "value"])
