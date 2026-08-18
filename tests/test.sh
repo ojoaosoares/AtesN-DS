@@ -42,6 +42,29 @@ LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/${DATA_DATE}/client"
 LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/${DATA_DATE}/server"
 LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 
+# ============================================================
+# FUNÇÃO: COLETAR DNS MISSES DIRETAMENTE VIA BPFTOOL
+# ============================================================
+get_cache_misses() {
+    ssh ${REMOTE_USER}@${REMOTE_HOST} "sudo -n bpftool -j map dump name dns_misses 2>/dev/null || sudo -n bpftool -j map dump pinned /sys/fs/bpf/dns_misses 2>/dev/null" | python3 -c '
+import sys
+import json
+
+total = 0
+try:
+    content = sys.stdin.read().strip()
+    if content:
+        data = json.loads(content)
+        if isinstance(data, list):
+            for item in data:
+                for v in item.get("values", []):
+                    total += int(v.get("value", 0))
+except Exception:
+    pass
+print(total)
+' 2>/dev/null || echo "0"
+}
+
 # Níveis de Concorrência e Modos
 CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
 #CONCURRENCY_LEVELS=(754)
@@ -146,8 +169,17 @@ for MODE in "${MODES[@]}"; do
           sleep 2
         done
 
-        echo "-> [RESULTADO] Métricas de Cache Miss no Servidor:"
-        ssh ${REMOTE_USER}@${REMOTE_HOST} "grep 'cache_misses' ${REMOTE_SERVER_OUTPUT_FILE} 2>/dev/null" || true
+        # 3.6. COLETAR E ASSEGURAR CACHE MISSES NO SERVER CSV
+        CACHE_MISSES=$(get_cache_misses)
+        echo "-> [RESULTADO] Cache Misses apurados no mapa BPF: ${CACHE_MISSES}"
+
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "
+            if grep -q 'cache_misses' '${REMOTE_SERVER_OUTPUT_FILE}' 2>/dev/null; then
+                sed -i 's/^cache_misses,.*/cache_misses,${CACHE_MISSES}/' '${REMOTE_SERVER_OUTPUT_FILE}'
+            else
+                echo 'cache_misses,${CACHE_MISSES}' >> '${REMOTE_SERVER_OUTPUT_FILE}'
+            fi
+        " 2>/dev/null || true
 
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."
