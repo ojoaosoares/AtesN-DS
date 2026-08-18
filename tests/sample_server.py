@@ -33,7 +33,31 @@ def reset_bpf_dns_misses():
     print("  Warning: Failed to reset BPF dns_misses map via bpftool.", file=sys.stderr)
 
 
+import json
+
+
 def get_bpf_dns_misses():
+    # 1. Try JSON dump first (most accurate and native for bpftool)
+    for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
+        try:
+            res = subprocess.run(
+                ["sudo", "bpftool", "-j", "map", "dump", target[0], target[1]],
+                capture_output=True,
+                text=True
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                if isinstance(data, list):
+                    total = 0
+                    for item in data:
+                        for v in item.get("values", []):
+                            if isinstance(v, dict) and "value" in v:
+                                total += int(v["value"])
+                    return total
+        except Exception:
+            pass
+
+    # 2. Fallback to text dump
     for target in [["name", "dns_misses"], ["pinned", "/sys/fs/bpf/dns_misses"]]:
         try:
             res = subprocess.run(
@@ -44,13 +68,16 @@ def get_bpf_dns_misses():
             if res.returncode == 0 and res.stdout:
                 total = 0
                 for line in res.stdout.splitlines():
-                    m = re.search(r"value \(CPU \d+\):\s*([0-9a-fA-F ]{23,24})", line)
+                    m = re.search(r"value\s*\(CPU\s*\d+\):\s*([0-9a-fA-F ]+)", line)
                     if m:
-                        raw = bytes.fromhex(m.group(1).replace(" ", ""))
-                        total += int.from_bytes(raw, byteorder="little")
+                        hex_str = m.group(1).replace(" ", "").strip()
+                        if hex_str:
+                            raw = bytes.fromhex(hex_str)
+                            total += int.from_bytes(raw, byteorder="little")
                 return total
         except Exception:
             pass
+
     return 0
 
 

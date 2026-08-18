@@ -146,6 +146,9 @@ for MODE in "${MODES[@]}"; do
           sleep 2
         done
 
+        echo "-> [RESULTADO] Métricas de Cache Miss no Servidor:"
+        ssh ${REMOTE_USER}@${REMOTE_HOST} "grep 'cache_misses' ${REMOTE_SERVER_OUTPUT_FILE} 2>/dev/null" || true
+
         # 4. ENCERRAMENTO
         echo "-> Encerrando processos remotos para esta execução..."
         ssh -tt ${REMOTE_USER}@${REMOTE_HOST} "
