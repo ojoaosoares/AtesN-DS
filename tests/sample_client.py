@@ -15,6 +15,7 @@ def run_dnspyre(server, duration, concurrency):
         "--concurrency", str(concurrency),
         "--server", server,
         "--type", "A",
+        "--separate-worker-connections",
         "--ednsopt=10:11223344556677889900aabb",
         "@dominios3.txt"
     ]

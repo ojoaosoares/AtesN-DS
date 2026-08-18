@@ -92,6 +92,7 @@ for MODE in "${MODES[@]}"; do
           sudo -n ip link set dev ${REMOTE_INTERFACE} up 2>/dev/null || true
           sudo -n ip addr flush dev ${REMOTE_INTERFACE} 2>/dev/null || true
           sudo -n ip addr add ${REMOTE_SERVER_IP}/24 dev ${REMOTE_INTERFACE} 2>/dev/null || true
+          sudo -n ethtool -N ${REMOTE_INTERFACE} rx-flow-hash udp4 sdfn 2>/dev/null || true
         " || true
         sudo -n ip link set dev ${LOCAL_INTERFACE} down 2>/dev/null || true
         sleep 1
