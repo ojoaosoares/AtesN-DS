@@ -92,7 +92,7 @@ enum packet_action {
 // -----------------------------------------------------------------------------
 // Cache & Recursive Logic Configuration
 // -----------------------------------------------------------------------------
-#define MINIMUM_TTL         15
+#define MINIMUM_TTL         1
 #define MAX_LABELS_CHECK    10
 #define RECURSION_LIMIT     16
 
