@@ -35,8 +35,8 @@ REMOTE_SERVER_SCRIPT="${REMOTE_BASE_DIR}/tests/sample_server.py"
 LOCAL_CLIENT_SCRIPT="${PROJECT_DIR}/tests/sample_client.py"
 CONSOLIDATE_SCRIPT="${PROJECT_DIR}/graphs/consolidate.py"
 
-# Diretórios de Resultados
-DATA_DATE="data_$(date +%Y-%m-%d)"
+# Diretórios de Resultados (com data e hora de início)
+DATA_DATE="data_$(date +%Y-%m-%d_%H-%M-%S)"
 REMOTE_RESULTS_DIR_SERVER="${REMOTE_BASE_DIR}/${DATA_DATE}/server"
 LOCAL_RESULTS_DIR_CLIENT="${PROJECT_DIR}/${DATA_DATE}/client"
 LOCAL_RESULTS_DIR_SERVER="${PROJECT_DIR}/${DATA_DATE}/server"
@@ -78,6 +78,7 @@ trap error_handler ERR
 #########################
 
 echo "-> Preparando diretórios..."
+echo "-> Diretório de resultados desta bateria: ${DATA_DATE}"
 
 mkdir -p "${LOCAL_RESULTS_DIR_CLIENT}"
 mkdir -p "${LOCAL_RESULTS_DIR_SERVER}"

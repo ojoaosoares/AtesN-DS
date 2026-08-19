@@ -24,7 +24,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
     __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof( __u32));
+    __uint(value_size, sizeof(__u32));
     __uint(map_flags, 0);
 } time_map SEC(".maps");
 

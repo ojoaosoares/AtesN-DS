@@ -26,7 +26,7 @@ def reset_bpf_dns_misses():
                 text=True
             )
             if res.returncode == 0:
-                print(f"  BPF dns_misses map reset to 0 at start of measurement window ({target[0]} {target[1]}).")
+                print(f"  BPF dns_misses map reset to 0 ({target[0]} {target[1]}).")
                 return
         except Exception as e:
             pass
