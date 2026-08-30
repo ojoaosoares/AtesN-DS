@@ -1,0 +1,2 @@
+totalRequests,queriesPerSecond,latency_mean_ms,latency_p50_ms,latency_p75_ms,latency_p90_ms,latency_p95_ms,latency_p99_ms
+9160580.0,152238.6,7.48,0.78643,2.36,26.21,48.23,104.86
