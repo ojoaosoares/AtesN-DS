@@ -50,14 +50,14 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 65536);
+    __uint(max_entries, 4000000);
     __uint(key_size, sizeof(char[MAX_DNS_NAME_LENGTH_SW]));
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_arecords SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 655368);
+    __uint(max_entries, 8000000);
     __uint(key_size, sizeof(char[MAX_SUBDOMAIN_LENGTH]));
     __uint(value_size, sizeof(struct a_record_sw));
 } cache_nsrecords SEC(".maps");
@@ -76,6 +76,15 @@ struct {
     __type(key, __u32);
     __type(value, struct dns_query);
 } tmp_new_query_buf SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+
+} dns_misses SEC(".maps");
 
 // Include recursive logic AFTER maps so it can access them
 #include "dns_owner.h"
@@ -150,6 +159,12 @@ int dns_filter(struct xdp_md *ctx) {
 
         bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
         return XDP_DROP;
+    }
+
+    __u32 miss_key = 0;
+    __u64 *miss_cnt = bpf_map_lookup_elem(&dns_misses, &miss_key);
+    if (miss_cnt) {
+        *miss_cnt += 1;
     }
 
     bpf_printk("Received query for domain: %s\n", dnsquery->query.name);

@@ -1,30 +1,69 @@
+#!/usr/bin/env python3
+
 import sys
 import subprocess
 import json
 import csv
 import statistics
+import re
+import argparse
+import io
+
+
+import os
+
+
+def get_warmup_file():
+    if os.path.exists("unicos.txt"):
+        return "@unicos.txt"
+    if os.path.exists("tests/unicos.txt"):
+        return "@tests/unicos.txt"
+    return "@unicos.txt"
+
+
+def run_warmup(server, duration, concurrency):
+    cmd = [
+        "dnspyre",
+        "--duration", str(duration) + "s",
+        "--concurrency", str(concurrency),
+        "--server", server,
+        "--type", "A",
+        "--ednsopt=10:11223344556677889900aabb",
+        get_warmup_file()
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("dnspyre warmup failed:", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        sys.exit(1)
+    return result.stdout
+
+
+def get_trace_file():
+    if os.path.exists("tracefile.txt"):
+        return "@tracefile.txt"
+    if os.path.exists("tests/tracefile.txt"):
+        return "@tests/tracefile.txt"
+    return "@tracefile.txt"
 
 
 def run_dnspyre(server, duration, concurrency):
     cmd = [
         "dnspyre",
-        "--duration", duration,
-        "-c", concurrency,
+        "--duration", str(duration) + "s",
+        "--concurrency", str(concurrency),
         "--server", server,
-        "--edns0=1232",
-        "--no-dnssec",
+        "--type", "A",
         "--ednsopt=10:11223344556677889900aabb",
-        "https://raw.githubusercontent.com/zer0h/top-1000000-domains/refs/heads/master/top-10000-domains"
+        get_trace_file()
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print("dnspyre failed:")
-        print(result.stderr)
+        print("dnspyre failed:", file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
         sys.exit(1)
     return result.stdout
 
-
-import re
 
 def parse_duration_to_ms(value, unit):
     unit = unit.strip()
@@ -41,9 +80,9 @@ def parse_duration_to_ms(value, unit):
 def strip_ansi(text):
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
+
 def extract_principal_fields(text):
     text = strip_ansi(text)
-    print("DEBUG CLEAN:", text[text.find("DNS timings"):text.find("DNS distribution")])
 
     def get_float(pattern):
         m = re.search(pattern, text)
@@ -67,18 +106,16 @@ def extract_principal_fields(text):
     }
 
 
-def execute_measured_run(server, duration, concurrency):
-    print("  Warmup run...")
+def execute_measured_run(server, duration, concurrency, warmup):
+    if warmup:
+        print("  Warmup run...", file=sys.stderr)
+        run_warmup(
+            server=server,
+            duration=duration,
+            concurrency=concurrency
+        )
 
-    # Warmup run intentionally discarded
-    run_dnspyre(
-        server=server,
-        duration=duration,
-        concurrency=concurrency
-    )
-
-    print("  Measured run...")
-
+    print("  Measured run...", file=sys.stderr)
     return run_dnspyre(
         server=server,
         duration=duration,
@@ -86,80 +123,31 @@ def execute_measured_run(server, duration, concurrency):
     )
 
 
-def compute_summary(results):
-    metrics = results[0].keys()
-    summary = []
-
-    for metric in metrics:
-        values = [r[metric] for r in results]
-
-        summary.append({
-            "metric": metric,
-            "mean": statistics.mean(values),
-            "std": statistics.stdev(values) if len(values) > 1 else 0.0
-        })
-
-    return summary
-
-
-def write_summary_csv(path, rows):
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=["metric", "mean", "std"]
-        )
-
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def main():
-    if len(sys.argv) < 6:
-        print(
-            f"Usage: {sys.argv[0]} "
-            "output.csv num_runs server duration concurrency"
-        )
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Run a single DNS benchmark using a specific dnspyre command.')
+    parser.add_argument('--server', type=str, required=True)
+    parser.add_argument('--duration', type=int, required=True)
+    parser.add_argument('--concurrency', type=int, required=True)
+    parser.add_argument('--warmup', action='store_true')
 
-    output_csv = sys.argv[1]
-    num_runs = int(sys.argv[2])
+    args = parser.parse_args()
 
-    server = sys.argv[3]
-    duration = sys.argv[4]
-    concurrency = sys.argv[5]
+    raw_output = execute_measured_run(
+        server=args.server,
+        duration=args.duration,
+        concurrency=args.concurrency,
+        warmup=args.warmup
+    )
 
-    print("Starting benchmark...")
-    print("EDNS0 size fixed at 1232 bytes")
+    extracted_data = extract_principal_fields(raw_output)
 
-    results = []
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=extracted_data.keys())
+    writer.writeheader()
+    writer.writerow(extracted_data)
 
-    for run in range(1, num_runs + 1):
-
-        print(f"\n=== Run {run}/{num_runs} ===")
-
-        data = execute_measured_run(
-            server=server,
-            duration=duration,
-            concurrency=concurrency
-        )
-
-        extracted = extract_principal_fields(data)
-        results.append(extracted)
-
-        print(
-            f"  QPS={extracted['queriesPerSecond']:.2f} | "
-            f"P50={extracted['latency_p50_ms']:.2f} ms | "
-            f"P99={extracted['latency_p99_ms']:.2f} ms"
-        )
-
-    summary = compute_summary(results)
-
-    write_summary_csv(output_csv, summary)
-
-    print(f"\nSummary written to {output_csv}")
+    print(output.getvalue(), end='')
 
 
 if __name__ == "__main__":
     main()
-
-

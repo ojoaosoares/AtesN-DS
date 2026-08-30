@@ -75,6 +75,8 @@ $(HW_OBJ): $(HW_SRC)
 		-D HW_MODE
 
 load-hw: $(HW_OBJ)
+	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
+	sudo rm -f $(PROG_PIN) $(PROG_MOUNT_PATH)/time_map $(PROG_MOUNT_PATH)/level_one_cache
 	sudo bpftool prog load $(HW_OBJ) $(PROG_PIN) \
 		type xdp \
 		dev $(HW_DEV)

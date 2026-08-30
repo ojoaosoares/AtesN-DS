@@ -13,17 +13,18 @@
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 8192);
+    __uint(max_entries, 2000000);
     __uint(key_size, MAX_DNS_NAME_LENGTH_HW);
     __uint(map_flags, 0);
     __uint(value_size, sizeof(struct a_record_hw));
- } level_one_cache SEC(".maps");
+
+} level_one_cache SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
     __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof( __u32));
+    __uint(value_size, sizeof(__u32));
     __uint(map_flags, 0);
 } time_map SEC(".maps");
 

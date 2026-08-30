@@ -1,10 +1,12 @@
 .vscode/
 
-data/
+data*/*.png
 
 bin/
 
 obj/
+
+.venv/
 
 test/
 
@@ -15,7 +17,5 @@ nohup*
 *.out
 
 *.skel.h
-
-*.txt
 
 *.pcap
