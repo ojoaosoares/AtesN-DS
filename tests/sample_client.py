@@ -16,7 +16,9 @@ import os
 def get_warmup_file():
     if os.path.exists("unicos.txt"):
         return "@unicos.txt"
-    return "@unique.txt"
+    if os.path.exists("tests/unicos.txt"):
+        return "@tests/unicos.txt"
+    return "@unicos.txt"
 
 
 def run_warmup(server, duration, concurrency):
@@ -37,6 +39,14 @@ def run_warmup(server, duration, concurrency):
     return result.stdout
 
 
+def get_trace_file():
+    if os.path.exists("tracefile.txt"):
+        return "@tracefile.txt"
+    if os.path.exists("tests/tracefile.txt"):
+        return "@tests/tracefile.txt"
+    return "@tracefile.txt"
+
+
 def run_dnspyre(server, duration, concurrency):
     cmd = [
         "dnspyre",
@@ -45,7 +55,7 @@ def run_dnspyre(server, duration, concurrency):
         "--server", server,
         "--type", "A",
         "--ednsopt=10:11223344556677889900aabb",
-        "@dominios3.txt"
+        get_trace_file()
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
