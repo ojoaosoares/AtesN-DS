@@ -163,13 +163,13 @@ static __always_inline __u8 get_dns_answer_hw(void *data, __u64 *offset, void *d
              return ACCEPT_NO_ANSWER;
 
          record->ip = response->ip;
-         record->timestamp = now + bpf_ntohl(response->ttl) + 1000;
+         record->timestamp = now + bpf_ntohl(response->ttl);
          return ACCEPT;
      }
 
      if (rcode == 3) {
          record->ip = 0;
-         record->timestamp = now + 1000;
+         record->timestamp = now + 60;
          return ACCEPT;
      }
 
