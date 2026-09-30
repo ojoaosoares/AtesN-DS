@@ -29,7 +29,7 @@ SKELETON  = ${INCLUDE_FOLDER}dns.skel.h
 TARGET    = ${BIN_FOLDER}atesnds
 SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
-HEADERS   = $(wildcard $(INCLUDE_FOLDER)*.h)
+HEADERS   = $(filter-out $(SKELETON), $(wildcard $(INCLUDE_FOLDER)*.h))
 PROG_MOUNT_PATH = /sys/fs/bpf
 # time_updater
 TIME_SRC  = $(SRC_FOLDER)time_updater.c
@@ -61,6 +61,19 @@ run-time-updater: $(TIME_BIN)
 	sudo rm -f $(PROG_MOUNT_PATH)/time_map
 	sudo bpftool map pin id $(TIME_MAP_ID) $(PROG_MOUNT_PATH)/time_map
 	sudo $(TIME_BIN) $(PROG_MOUNT_PATH)/time_map
+
+# ------------------------------------------------
+# cleaner_daemon (userspace, limpa expiração e LRU em level_one_cache)
+# ------------------------------------------------
+CLEANER_SRC = $(SRC_FOLDER)cleaner_daemon.c
+CLEANER_BIN = $(BIN_FOLDER)cleaner_daemon
+
+cleaner: $(CLEANER_BIN)
+$(CLEANER_BIN): $(CLEANER_SRC) $(HEADERS)
+	clang-15 -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf
+
+run-cleaner: $(CLEANER_BIN)
+	sudo $(CLEANER_BIN) -v
 
 
 # ------------------------------------------------
