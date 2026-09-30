@@ -115,14 +115,14 @@ int dns_filter(struct xdp_md *ctx) {
             if (resp->record_type == bpf_htons(A_RECORD_TYPE) && resp->record_class == bpf_htons(DNS_CLASS_IN))
             {
                 cache_record.ip = resp->ip;
-                cache_record.timestamp = now_value + bpf_ntohl(resp->ttl) + DNS_TTL_GRACE_SEC;
+                cache_record.timestamp = now_value + bpf_ntohl(resp->ttl);
                 bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
             }
         }
         else if (rcode == RCODE_NXDOMAIN)
         {
             cache_record.ip = 0;
-            cache_record.timestamp = now_value + DNS_TTL_GRACE_SEC;
+            cache_record.timestamp = now_value + DEFAULT_NXDOMAIN_TTL_SEC;
             bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
         }
 

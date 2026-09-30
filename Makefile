@@ -2,6 +2,7 @@
 CC = clang-15
 CXXFLAGS = -g -target bpf -O2
 # LIBBPF = /usr/lib64/libbpf.so
+export PYTHONPATH := /home/soares/snap/antigravity-cli/common/pyenv/local/lib/python3.14/dist-packages:$(PYTHONPATH)
 
 # folders
 INCLUDE_FOLDER = ./include/
@@ -74,6 +75,36 @@ $(CLEANER_BIN): $(CLEANER_SRC) $(HEADERS)
 
 run-cleaner: $(CLEANER_BIN)
 	sudo $(CLEANER_BIN) -v
+
+# ------------------------------------------------
+# Control-plane benchmarks & plotting
+# ------------------------------------------------
+RUNS ?= 30
+ENTRIES ?= 2000000
+
+BENCH_SAT_SRC = tests/bench_saturation.c
+BENCH_SAT_BIN = $(BIN_FOLDER)bench_saturation
+BENCH_DAEMONS_SRC = tests/bench_daemons_statistical.c
+BENCH_DAEMONS_BIN = $(BIN_FOLDER)bench_daemons_statistical
+
+bench-saturation: $(BENCH_SAT_BIN)
+$(BENCH_SAT_BIN): $(BENCH_SAT_SRC) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf -lm
+
+run-bench-saturation: $(BENCH_SAT_BIN)
+	sudo $(BENCH_SAT_BIN) -r $(RUNS) -n $(ENTRIES) -m 200000 -H 90 -L 80 -e 5
+
+bench-daemons: $(BENCH_DAEMONS_BIN)
+$(BENCH_DAEMONS_BIN): $(BENCH_DAEMONS_SRC) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf -lm
+
+run-bench-daemons: $(BENCH_DAEMONS_BIN)
+	sudo $(BENCH_DAEMONS_BIN) -r $(RUNS) -n 100000
+
+plot-daemons:
+	python3 graphs/plot_statistical_distributions.py
+
+plot-distributions: plot-daemons
 
 
 # ------------------------------------------------

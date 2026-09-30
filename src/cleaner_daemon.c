@@ -115,22 +115,6 @@ static void candidate_insert(struct eviction_candidate *candidates, size_t *coun
         memcpy(candidates[*count].key, key, MAX_DNS_NAME_LENGTH_HW);
         candidates[*count].remaining_ttl = remaining_ttl;
         (*count)++;
-        return;
-    }
-
-    /* Replace element with largest remaining TTL */
-    size_t worst_idx = 0;
-    uint32_t max_ttl = candidates[0].remaining_ttl;
-    for (size_t i = 1; i < *count; i++) {
-        if (candidates[i].remaining_ttl > max_ttl) {
-            max_ttl = candidates[i].remaining_ttl;
-            worst_idx = i;
-        }
-    }
-
-    if (remaining_ttl < max_ttl) {
-        memcpy(candidates[worst_idx].key, key, MAX_DNS_NAME_LENGTH_HW);
-        candidates[worst_idx].remaining_ttl = remaining_ttl;
     }
 }
 
@@ -168,25 +152,28 @@ static int perform_cleaner_sweep(int map_fd, const struct cleaner_config *cfg,
 
     uint32_t batch_count = 0;
 
+    char cur_key[MAX_DNS_NAME_LENGTH_HW] = {0};
+
     /* Start traversal from NULL key */
     int res = bpf_map_get_next_key(map_fd, NULL, next_key);
     while (res == 0 && running) {
         total_entries++;
         batch_count++;
 
-        if (bpf_map_lookup_elem(map_fd, next_key, &val) == 0) {
+        memcpy(cur_key, next_key, sizeof(cur_key));
+        /* Advance iterator to next_key BEFORE deleting cur_key */
+        res = bpf_map_get_next_key(map_fd, cur_key, next_key);
+
+        if (bpf_map_lookup_elem(map_fd, cur_key, &val) == 0) {
             if (val.timestamp <= now) {
                 /* TTL Expired -> Zero-loss reclamation */
-                if (bpf_map_delete_elem(map_fd, next_key) == 0)
+                if (bpf_map_delete_elem(map_fd, cur_key) == 0)
                     expired_deleted++;
-            } else if (candidates) {
+            } else if (candidates && candidate_count < MAX_EVICT_CANDIDATES) {
                 uint32_t remaining = val.timestamp - now;
-                candidate_insert(candidates, &candidate_count, MAX_EVICT_CANDIDATES, next_key, remaining);
+                candidate_insert(candidates, &candidate_count, MAX_EVICT_CANDIDATES, cur_key, remaining);
             }
         }
-
-        memcpy(key, next_key, sizeof(key));
-        res = bpf_map_get_next_key(map_fd, key, next_key);
 
         /* Rate limiting: yield CPU and PCIe bus every batch_size lookups */
         if (batch_count >= cfg->batch_size) {

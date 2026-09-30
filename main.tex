@@ -1,0 +1,468 @@
+%% 
+%% Copyright 2019-2024 Elsevier Ltd
+%% 
+%% Version 2.4
+%% 
+%% This file is part of the 'CAS Bundle'.
+%% --------------------------------------
+%% 
+%% It may be distributed under the conditions of the LaTeX Project Public
+%% License, either version 1.2 of this license or (at your option) any
+%% later version.  The latest version of this license is in
+%%    http://www.latex-project.org/lppl.txt
+%% and version 1.2 or later is part of all distributions of LaTeX
+%% version 1999/12/01 or later.
+%% 
+%% The list of all files belonging to the 'CAS Bundle' is
+%% given in the file `manifest.txt'.
+%% 
+%% Template article for cas-sc documentclass for 
+%% single column output.
+
+%\documentclass[a4paper,fleqn,longmktitle]{cas-sc}
+\documentclass[a4paper,fleqn,colorlinks,hidelinks]{cas-sc}
+
+%\usepackage[numbers]{natbib}
+%\usepackage[authoryear]{natbib}
+\usepackage[authoryear,longnamesfirst]{natbib}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{booktabs}
+% \usepackage[hidelinks]{hyperref}
+
+%%%Author macros
+% \def\tsc#1{\csdef{#1}{\textsc{\lowercase{#1}}\xspace}}
+% \tsc{WGM}
+% \tsc{QE}
+% \tsc{EP}
+% \tsc{PMS}
+% \tsc{BEC}
+% \tsc{DE}
+%%%
+
+\begin{document}
+\let\WriteBookmarks\relax
+\def\floatpagepagefraction{1}
+\def\textpagefraction{.001}
+\shorttitle{AtesN-DS: Offloading DNS into Hardware}
+\shortauthors{Soares et~al.}
+%\begin{frontmatter}
+
+\title [mode = title]{AtesN-DS: Offloading DNS into Hardware with XDP}                      
+% \tnotemark[1,2]
+
+% \tnotetext[1]{This document is the results of the research
+%    project funded by the National Science Foundation.}
+
+% \tnotetext[2]{The second title footnote which is a longer text matter
+%    to fill through the whole text width and overflow into
+%    another line in the footnotes area of the first page.}
+
+
+% ==========================================
+% BLOCO DE AUTORES COM ORCID - UFMG
+% ==========================================
+
+% --- Autor 1 (Você) ---
+\author[1]{João V. Soares S.}[orcid=0009-0002-7600-9784]
+\ead{joaosoares@dcc.ufmg.br}
+% \credit{Software, Data curation, Investigation, Writing - Original draft preparation}
+
+% --- Autor 2 (André) ---
+\author[1]{André G. Vieira}[orcid=0000-0002-7200-1825] % Substitua pelos números dele depois!
+\ead{andregarcia@dcc.ufmg.br}
+% \credit{Software, Methodology, Validation}
+
+% --- Autor 3 (Luiz Felipe) ---
+\author[1]{Luiz F. M. Vieira}[orcid=0000-0002-9050-3001]
+\ead{lfvieira@dcc.ufmg.br}
+% \credit{Conceptualization, Supervision, Writing - Review \& Editing}
+
+% --- Autor 4 (Marcos Augusto - Correspondente) ---
+\author[1]{Marcos A. M. Vieira}[orcid=0000-0001-9152-4114]
+\cormark[1] 
+\ead{mmvieira@dcc.ufmg.br}
+% \credit{Conceptualization, Project administration, Supervision, Writing - Review \& Editing}
+
+% --- Afiliação Única ---
+\affiliation[1]{organization={Universidade Federal de Minas Gerais},
+                department={Departamento de Ciência da Computação},
+                addressline={Av. Antônio Carlos, 6627},
+                city={Belo Horizonte},
+                postcode={31270-901},
+                state={MG},
+                country={Brasil}}
+
+% --- Texto do Rodapé do Autor Correspondente ---
+\cortext[cor1]{Corresponding author}
+
+% --- Nota de Agradecimento Geral ---
+\nonumnote{This work was partially supported by CNPq.}
+
+% ==========================================
+
+\begin{abstract}
+DNS is fundamental to the Internet, but traditional user-space resolvers incur high overhead from network stack traversal. Kernel-space designs such as AtesN-DS reduce this cost by executing resolution in the eBPF/XDP driver layer, yet performance still degrades under heavy concurrency because of host interrupts and PCIe traffic. This paper presents a hybrid extension that combines driver-space execution with programmable SmartNIC offloading. A new cache layer is created in the NIC, where cache hits are resolved at line rate without crossing the PCIe bus or triggering host interrupts; misses fall back to the AtesN-DS driver-space resolver. To validate the architecture under genuine Internet conditions, comprehensive empirical evaluations were conducted on a physical testbed by replaying a real-world enterprise DNS traffic trace captured in an active university campus network. Results demonstrate that augmenting AtesN-DS with the hardware-offloaded cache layer increases throughput by up to 1.80$\times$ (achieving a peak capacity of over 172,000\,Queries/s, equivalent to 10.35\,M queries/min) and reduces mean latency by up to 38.1\% for workloads spanning up to 4,096 simultaneous connections compared to its standalone driver-space execution. Under this real trace workload, the SmartNIC hardware cache achieves a stable hit rate of up to 72.8\%, filtering over 7.5 million queries in complete host bypass and pushing the system's throughput-latency saturation knee beyond 166,000\,Queries/s. Furthermore, the offloaded architecture sustains a 1.52$\times$ throughput advantage under peak stress of 16,384 connections, delivers a +120\% to +141.6\% increase in computational efficiency (sustaining over 91,000\,Queries/s per 1\% host CPU), cuts host SoftIRQ overhead by up to 36.5\%, and keeps global host CPU utilization strictly below 2.15\% across all tested scenarios.\end{abstract}
+
+\begin{graphicalabstract}
+\includegraphics{figs/cas-grabs.pdf}
+\end{graphicalabstract}
+
+\begin{highlights}
+\item Hybrid DNS architecture combining XDP driver-space resolution with a SmartNIC hardware-offloaded cache.
+\item Rigorously evaluated on a physical testbed using a real-world university campus DNS traffic trace.
+\item Delivers up to 1.80$\times$ higher throughput and a peak capacity of 172,468\,Queries/s (10.35\,M queries/min).
+\item Mean latency is reduced by up to 38.1\% across workloads up to 4,096 concurrent connections.
+\item SmartNIC hardware cache achieves up to a 72.8\% hit rate, shifting the saturation knee beyond 166,000\,Queries/s.
+\item Boosts computational efficiency by +120\% to +141.6\% (>91k Queries/s per 1\% host CPU vs $\sim$40k in driver mode).
+\item Slashes host SoftIRQ overhead by up to 36.5\% and caps global host CPU usage strictly below 2.15\%.
+\end{highlights}
+
+\begin{keywords}
+Domain Name System (DNS) \sep eBPF \sep XDP \sep Hardware offloading \sep Recursive resolver \sep Network stack bypass \sep Kernel-space processing
+\end{keywords}
+
+
+\maketitle
+
+
+\section{Introduction}
+
+The Domain Name System (DNS) is a distributed and hierarchical system~(\cite{rfc1035, mockapetris1987domain}) that translates human-understandable domain names into machine-readable IP addresses. Currently, DNS is an indispensable part of the Internet; beyond being the pivot for name resolution, it also enables users to locate services~(\cite{cheshire2013dns}) and load balancing~(\cite{brisco1995dns}). Furthermore, CDNs utilize DNS to route clients to the geographically closest servers based on their location~(\cite{hours2016study}) and to identify malicious botnets~(\cite{choi2007botnet}). Thus, the global impact of DNS becomes evident, highlighting the importance of studies aimed at reducing name resolution time and the efficiency of this process.
+
+The DNS infrastructure relies on recursive resolvers to close the gap between clients and authoritative servers. When a requested domain is missing from the local cache, the resolver must initiate an iterative traversal across the DNS hierarchy, a process that can trigger hundreds of nested messages for a single resolution in worst-case scenarios~(\cite{afek2020nxnsattack}). Because traditional architectures implement these resolvers in user space~(\cite{6932501}), every incoming and outgoing packet from this multi-hop sequence is forced to traverse the entire operating system network stack. This traversal triggers heavy performance penalties through continuous context switches and memory copies, consuming up to half of the available host CPU cycles even during baseline operations~(\cite{10.1145/3672197.3673439}), which directly translates into tail-latency inflation for end-user applications~(\cite{singla2014internet}).
+
+To mitigate these bottlenecks, embedding data plane functions directly into the kernel through the extended Berkeley Packet Filter (eBPF) and the Express Data Path (XDP)~(\cite{10.1145/3281411.3281443}) has gained significant traction as an alternative to kernel-bypass techniques such as DPDK. Unlike DPDK, which trades throughput for wasteful busy-waiting and host CPU consumption, eBPF/XDP behaves as an event-driven virtual processor inside the Linux kernel~(\cite{vieira2020fast}). It enables safe execution of packet logic directly at the network interface driver layer, allowing filtering and processing at the lowest practical level of the network subsystem without the dedicated-core overhead of DPDK.
+
+Consequently, recent studies have shown that DNS resolvers placed directly in the XDP hook can achieve very high performance and substantially lower latency~(\cite{sbesc_estendido, 10.1145/3672197.3673439}). However, XDP also offers a hardware offload mode for programmable NICs, a setting in which implementing a full recursive resolver directly remains highly challenging. Because of strict limits on instructions and memory, realizing an iterative resolver in the hardware data plane is still difficult.
+
+To overcome these constraints, this study proposes a hybrid architecture that extends the AtesN-DS framework~(\cite{sbesc_estendido}) by combining its XDP driver-based resolver with a multi-tier cache structure built around XDP hardware offloading. By orchestrating a high-performance DNS cache directly on the programmable hardware alongside a secondary, larger cache layer in the driver space, the system can intercept and resolve the majority of queries at line rate. Under this design, the offloaded hardware cache and the AtesN-DS native resolver immediately process queries within the accelerated data plane, while the user-space resolver is utilized only as a fallback mechanism to handle specific unhandled query types or severe traffic overloads.
+
+In summary, the primary contributions of this work are threefold: $(i)$ the design and implementation of a hybrid, multi-tier DNS resolver architecture that harmonizes XDP hardware offloading with kernel driver-space execution; $(ii)$ an open-source framework demonstrating the practical feasibility of executing bounded, state-synchronized DNS caching tables within strict SmartNIC hardware limitations; and $(iii)$ a comprehensive experimental evaluation comparing driver-mode and hardware-offloaded configurations driven by a real-world enterprise DNS traffic trace collected in an active university network. Rather than relying on synthetic uniform benchmarks, our evaluation replays genuine campus DNS queries to expose realistic domain popularity skewness, temporal locality, and trade-offs in latency, throughput, cache filtering, and host CPU decoupling under intense concurrency. 
+
+Compared with the standalone driver-mode AtesN-DS resolver, the offloaded architecture achieves a throughput speedup of up to 1.80$\times$ (reaching a peak overall capacity of 172,468\,Queries/s, or 10.35\,M queries/min), reduces average latency by up to 38.1\% for workloads spanning up to 4,096 simultaneous connections, and maintains a robust 1.52$\times$ throughput advantage under peak stress of 16,384 connections. The SmartNIC hardware cache sustains a hit rate of up to 72.8\%, resolving nearly three-quarters of all requests in silicon and shifting the throughput-latency saturation knee from 101.8k to over 166k\,Queries/s. Furthermore, by shifting processing to the SmartNIC, the system boosts computational efficiency by +120\% to +141.6\% (delivering over 91,000\,Queries/s per 1\% host CPU), slashes host SoftIRQ overhead by up to 36.5\%, lowers overall host CPU consumption by up to 33.6\% (keeping it strictly under 2.15\% across all tested scenarios), and caps peak utilization of the most strained network core below 7.85\%.
+
+The remainder of this paper is organized as follows. Section~\ref{sec:related_work} reviews the related work in the literature. Section~\ref{sec:proposed_system} details the hybrid architecture, multi-tier cache structure, and implementation details of the proposed system. Section~\ref{sec:evaluation} presents the experimental setup and analyzes the performance evaluation results, highlighting the trade-offs in throughput, latency, and resource utilization. Finally, Section~\ref{sec:conclusion} concludes the paper and discusses directions for future work.
+
+% Experiments show that AtesN-DS reduces latency by up to 51\% and increases throughput by up to 213\% compared to solutions like hyDNS, while keeping CPU utilization below 2%.
+
+% The Elsevier cas-sc class is based on the
+% standard article class and supports almost all of the functionality of
+% that class. In addition, it features commands and options to format the
+% \begin{itemize} \item document style \item baselineskip \item front
+% matter \item keywords and MSC codes \item theorems, definitions and
+% proofs \item lables of enumerations \item citation style and labeling.
+% \end{itemize}
+
+% This class depends on the following packages
+% for its proper functioning:
+
+% \begin{enumerate}
+% \itemsep=0pt
+% \item {natbib.sty} for citation processing;
+% \item {geometry.sty} for margin settings;
+% \item {fleqn.clo} for left aligned equations;
+% \item {graphicx.sty} for graphics inclusion;
+% \item {hyperref.sty} optional packages if hyperlinking is
+%   required in the document;
+% \end{enumerate}  
+
+% All the above packages are part of any
+% standard \LaTeX{} installation.
+% Therefore, the users need not be
+% bothered about downloading any extra packages.
+
+\section{Literature Review}
+\label{sec:related_work}
+
+This section reviews the core concepts and recent advancements in high-performance DNS design, focusing on traditional DNS optimizations, OS-level latency bottlenecks, and the use of eBPF/XDP for kernel-embedded data planes. By highlighting how programmable data planes streamline packet processing, this discussion establishes the foundation for our proposed extension, which builds upon the AtesN-DS framework~(\cite{sbesc_estendido}).
+
+
+As a native in-kernel recursive DNS resolver, AtesN-DS keeps a fast domain cache in the driver space. On a miss, it resolves the query while tracking the original client request to route the reply correctly. To simplify this multi-hop path, it maps zones to their upstream servers and learns which servers handle each TLD. It also pre-resolves popular domains before their cache expires. Acting below user space, it intercepts queries at the XDP layer, but lets packets fall back to the usual network stack when the query type is unsupported or traffic is too high.
+
+
+\subsection{DNS Offloading}
+
+Several studies have demonstrated the advantages of offloading DNS resolution. In particular, early kernel-space implementations approached this task as an application-agnostic datagram processing pipeline~(\cite{8493053}), while more recent eBPF-based kernel extensions further validated the benefits of in-kernel DNS processing, like AtesN-DS~~(\cite{sbesc_estendido}) and hyDNS~(\cite{10.1145/3672197.3673439}). Beyond kernel-level techniques, hardware-level offloading onto programmable network interface cards has emerged as the most prominent strategy~(\cite{8806651}). Collectively, these works highlight consistent performance dividends, with hardware offloading yielding the highest gains, including superior request throughput, reduced and highly deterministic latency, and maximum host CPU relief achieved by entirely bypassing traditional OS network stack traversals.
+
+\subsection{Latency}
+
+Several studies have investigated the critical impact of network latency on user experience~(\cite{attig2017system}), including extensive research on web browsing~(\cite{arapakis2021impact}) and cloud-based applications~(\cite{claypool2014effects}). Among these works, some identify the operating system network stack as one of the primary bottlenecks responsible for latency inflation~(\cite{singla2014internet}). To overcome this architectural limitation, researchers have developed highly efficient network stacks~(\cite{10.1145/2740070.2626311}) as well as stack-bypass strategies~(\cite{10.1145/3297156.3297242}). Notable paradigms among these bypass techniques include the Data Plane Development Kit (DPDK)~(\cite{kourtis2015enhancing}) and, more recently, the adoption of eBPF/XDP~(\cite{cai2021understanding}).
+
+\subsection{Caching}
+
+Beyond bypassing network stack traversals, caching represents another well-established strategy for latency reduction, with eBPF emerging as a highly effective enabler for in-kernel cache implementations. Frameworks such as \texttt{cache\_ext}~(\cite{zussman2025cache_ext}) and LearnedCache~(\cite{qi2026learnedcache}) (which leverages perceptron-based eviction policies) demonstrate the effectiveness and versatility of eBPF in customizing OS page cache management. Furthermore, other studies highlight its value in key-value store acceleration; for instance, BMC~(\cite{performance:bmc}) attaches an eBPF program to the XDP hook to intercept Memcached \texttt{GET} requests over UDP, serving cached responses directly from kernel-space eBPF maps, while MiddleCache~(\cite{pang2023middlecache}) extends this paradigm to support TCP-based queries.
+
+\subsection{eBPF}
+
+eBPF has become the primary choice for kernel extensions, gaining significant attention and driving a wide range of systems applications. Beyond traditional packet filtering and observability, recent works have leveraged eBPF to bypass upper-layer kernel overheads in both storage and transport subsystems. For instance, XRP~(\cite{280870}) enables user-defined storage functions, such as index lookups and aggregations to execute directly within an eBPF hook in the NVMe driver, drastically reducing OS storage stack overheads for microsecond-scale devices. Similarly, eTran~(\cite{chen2025etran}) extends eBPF to make the kernel networking stack agilely extensible, allowing developers to safely implement and customize complex transport designs, such as TCP congestion controls and clean-slate protocols like Homa, directly within the Linux kernel while achieving near user-space performance.
+
+As eBPF adoption expands across diverse system domains, ensuring execution isolation and multi-tenant security becomes critical. Addressing these challenges from complementary perspectives, vBPF~(\cite{zhang2026virtualizing}) introduces a late-binding virtualization framework that replaces static hook coupling with dynamic event attribution to guarantee secure coexistence and $O(1)$ dispatching for concurrent workloads, whereas KrakenGuard~(\cite{patel2026krakenguard}) acts as a trusted user-space manager that employs symbolic execution at load time to enforce fine-grained, policy-driven constraints on eBPF bytecode, preventing helper misuse, unauthorized map access, and cross-program interference.
+
+Furthermore, Abranches~et~al.~(\cite{9665095}) demonstrate that leveraging eBPF with XDP for network monitoring yields higher computational efficiency compared to kernel-bypass alternatives like DPDK. Moving beyond general-purpose host CPUs, platforms such as hXDP~(\cite{performance:hxdp}) and eBPFlow~(\cite{performance:ebpflow,networking:application_layer}) demonstrate that offloading packet processing to FPGAs programmed with eBPF can achieve ultra-low latency and high throughput, utilizing only a fraction of the hardware resources consumed by traditional software-based approaches
+
+\section{Proposed System}
+\label{sec:proposed_system}
+
+This section describes the proposed multi-tier DNS design and implementation, which routes packet processing across hardware, the driver, and user space. To maximize throughput, the core resolver extends the AtesN-DS framework~(\cite{sbesc_estendido}) and runs as an in-kernel recursive resolver at the XDP hook. The main novelty, however, is offloading the DNS cache to specialized hardware in XDP offload mode.
+
+\subsection{Design}
+
+To maximize packet processing throughput while working around the resource constraints of network hardware, our system adopts a hybrid, multi-tier resolution architecture. Instead of processing all DNS logic within a single execution tier, the system decouples high-frequency caching from full recursive resolution across three specialized operational levels: an offloaded hardware data plane in the SmartNIC silicon, an in-kernel driver resolver, and a user-space control and fallback tier. 
+
+The core of the hardware offload layer operates as a stateful, line-rate cache running directly within the NIC, managing two distinct packet flows (depicted in Figure~\ref{fig:hw_pipeline}) to serve client traffic and maintain cache freshness entirely in silicon. For incoming DNS queries, the hardware cache inspects the requested domain name. On a cache hit with a valid TTL, the NIC directly constructs the DNS answer, rewrites transport headers, and retransmits the frame back to the client at line rate, completely bypassing host interrupts, PCIe bus traversals, and upper-stack overhead. Conversely, on a cache miss or TTL expiration, the query cleanly cascades down over PCIe to the native AtesN-DS driver layer for high-throughput recursive resolution or to user space under severe traffic overloads. Complementing this query path, the data plane also manages response interception: upon detecting incoming DNS responses generated by host resolvers, the hardware transparently intercepts the payload, extracts the resolved IP address and record TTL, and dynamically populates or updates the in-NIC lookup table before forwarding the frame to the client.
+
+To maintain hardware simplicity and keep the offloaded data plane lightweight, the architecture delegates state maintenance and active housekeeping functions to two dedicated user-space control daemons running on the host. First, a \textit{time daemon} periodically synchronizes the host epoch clock with the hardware memory, enabling the offloaded data plane to perform absolute TTL freshness validation during packet processing without requiring native hardware timer support. Second, an asynchronous \textit{cleaner daemon} periodically inspects the hardware table to perform active cache housekeeping and garbage collection, explicitly deleting stale or expired records to reclaim capacity and prevent map saturation.
+
+Figure~\ref{fig:1} outlines this complete hybrid architecture, where dark blue highlights the components of the hardware-offloaded cache subsystem, encompassing both the in-NIC data plane and the host-side control daemons, and gray represents the native driver-space AtesN-DS resolver stack.
+
+The proposed hardware cache operates entirely independently of the driver and user-space layers, rendering it completely transparent and application-agnostic. Because it runs autonomously within the network interface card, it transparently intercepts and caches successful responses generated by any underlying resolution engine. Consequently, the native driver resolver (AtesN-DS) and the traditional user-space resolver remain completely optional components; the hardware cache layer can be seamlessly integrated in front of any standard DNS software architecture without requiring modifications to the upstream application logic.
+
+Because these operational tiers execute in complete isolation without sharing state or parsed packet metadata, each layer must independently parse the DNS query header upon packet arrival. In the event of a cache miss at lower hardware layers, this decoupled inspection introduces a negligible parsing overhead, as upper host layers must re-parse the domain upon receiving the forwarded packet. However, this trade-off yields substantial performance dividends: on a cache hit, the hardware data plane resolves the query entirely in silicon, completely bypassing host interrupts, PCIe bus traversal, and upper-stack overhead. Ultimately, this isolated design was chosen for architectural simplicity, ensuring modularity, robust fallback mechanisms, and zero modification requirements for existing upstream resolution software.
+
+\begin{figure}
+	\centering
+	\includegraphics[width=.9\textwidth]{figs/atesnds.drawio-hw-7.drawio.png}
+	\caption{AtesN-DS Architecture with Offloaded Cache. (1) Indicates packets or unhandled DNS queries forwarded to user space due to architectural limitations or hardware saturation. (2) Represents packets generated in user space for proactive cache renewal of popular domains or fault prevention. (3) Denotes queries fully resolved by the traditional user-space resolver.}
+	\label{fig:1}
+\end{figure}
+
+
+\subsection{Implementation}
+\label{sec:implementation}
+
+The hardware-level caching layer was implemented using the eBPF/XDP offload framework, attaching the data plane execution directly to the SmartNIC silicon. While eBPF/XDP offloading has emerged as a compelling paradigm for line-rate packet processing, adapting high-level stateful application logic such as a DNS lookup table to network interface hardware introduces two fundamental architectural challenges: time abstraction and restricted map operations. The overall architecture and execution pipeline of this hardware-level caching mechanism are illustrated in Figure~\ref{fig:hw_pipeline}.
+
+First, because the XDP offload engine lacks time-based helpers such as \texttt{bpf\_ktime\_get\_ns()}, the hardware data plane has no intrinsic notion of time to evaluate domain TTL expiration. To bridge the host clock to the SmartNIC, the architecture employs a single-element \texttt{BPF\_MAP\_TYPE\_ARRAY} named \texttt{time\_map} (depicted in Figure~\ref{fig:hw_pipeline}). Standard eBPF array maps mandate a 32-bit unsigned integer (\texttt{\_\_u32}, 4 bytes) as the key index. The map value is also a 4-byte \texttt{\_\_u32} unsigned integer holding the global epoch timestamp in seconds. A lightweight host-side \textit{time daemon} (Figure~\ref{fig:1}) periodically writes the current host epoch timestamp to index zero once per second ($1\,\text{Hz}$), providing fine-grained 1-second TTL accuracy with negligible host overhead. During packet lookup, the offloaded program performs an $\mathcal{O}(1)$ query against index zero, enabling in-NIC TTL validation by comparing the retrieved epoch against stored record expiration timestamps.
+
+Second, SmartNIC hardware architectures inherently lack silicon support for native Least Recently Used (LRU) maps (\texttt{BPF\_MAP\_TYPE\_LRU\_HASH}), which would otherwise manage record eviction automatically upon table saturation. This hardware limitation forces the caching mechanism to rely on a standard hash map, instantiated within the offloaded program as \texttt{hw\_cache} (depicted in Figure~\ref{fig:hw_pipeline}). The architectural layout of this map is strictly constrained by the offload NIC verifier, which enforces an aggressive total size cap of 32 bytes per entry, encompassing both key and value components. To maximize record capacity within this tight memory budget, the map value is structured as an 8-byte payload containing two 32-bit unsigned integers (\texttt{\_\_u32}): a 4-byte IPv4 response address and a 4-byte absolute expiration timestamp. Subtracting this 8-byte value leaves a maximum key budget of exactly 24 bytes, represented as a fixed character array (\texttt{char[24]}) reserved for the encoded domain name (\texttt{QNAME}). While this key bound on domain lengths, empirical findings by Ma et al.(\cite{ma2022dnstunnelslidingwindow}) indicate that real-world DNS query names follow a distribution with a mean length of approximately 13 characters, making domain names exceeding 20 characters statistically rare. Consequently, this key-value layout achieves an optimal trade-off, serving the vast majority of real-world DNS traffic while minimizing memory consumption across resource-constrained SmartNIC SRAM.
+
+Because standard \texttt{BPF\_MAP\_TYPE\_HASH} tables cannot autonomously purge stale entries when capacity is reached, managing the lifecycle of cached records relies on a coordinated dual-plane operational strategy. At the hardware data plane, the offloaded XDP program performs inline lazy TTL evaluation, checking entry freshness during packet lookup and triggering immediate $\mathcal{O}(1)$ deletions via \texttt{bpf\_map\_delete\_elem} upon encountering expired records. To complement this reactive lookup mechanism, the system deploys an asynchronous host-side \textit{cleaner daemon} (Figure~\ref{fig:1}) dedicated to active background housekeeping and eviction. Both the time daemon and cleaner daemon are intentionally implemented as lightweight, single-threaded user-space background processes pinned to a single host CPU core. Restricting control-plane housekeeping to a single thread prevents multi-thread lock contention on the BPF map, eliminates DMA channel thrashing across the PCIe bus, and ensures minimal CPU footprint on the host system. The cleaner daemon executes periodic sweeps (configurable, set by default to $T_{\text{sweep}} = 15\,\text{s}$). To eliminate PCIe bus contention and avoid CPU spikes that could disrupt control-plane responsiveness, traversal is performed in batched iterations of $B = 256$ keys via \texttt{bpf\_map\_get\_next\_key}, followed by an intentional sleep of $\Delta t = 1,500\,\mu\text{s}$ between batches. 
+
+Cache reclamation follows a two-phase watermark eviction policy:
+\begin{enumerate}
+    \item \textit{Zero-Loss TTL Reclamation (Phase 1):} During the batched sweep, the daemon inspects the absolute expiration timestamp of each record against the current host Unix epoch. Expired entries ($\text{timestamp} \le \text{now}$) are immediately deleted via \texttt{bpf\_map\_delete\_elem}, reclaiming hardware slots at zero penalty to cache hit efficiency.
+    \item \textit{Watermark-Driven Min-TTL Eviction (Phase 2):} Concurrently, the daemon maintains a bounded pool of unexpired candidate entries. If the number of active records exceeds a high watermark ($H = 90\%$, i.e., $1.8\times 10^6$ entries in a 2,000,000-entry map), the daemon sorts candidates in ascending order of remaining TTL via \texttt{qsort} and proactively purges entries with the shortest remaining lifespan until occupancy decreases to the low watermark ($L = 80\%$, i.e., $1.6\times 10^6$ entries).
+\end{enumerate}
+
+This hysteresis mechanism guarantees a perpetual $10\%\text{--}20\%$ headroom ($200{,}000$ to $400{,}000$ available slots), completely preventing insertion rejections (\texttt{-E2BIG}) and ensuring continuous cache adaptation even under working-set surges.
+
+From an execution perspective, the packet processing flow branches based on the DNS message type identified after initial header parsing and timestamp retrieval from \texttt{time\_map} (depicted in Figure~\ref{fig:hw_pipeline}). For incoming DNS queries, the offloaded program executes a deterministic $\mathcal{O}(1)$ lookup against \texttt{hw\_cache} using the extracted \texttt{QNAME}. On a cache hit with a valid TTL, the hardware logic directly rewrites the packet payload and transport layer headers in silicon, returning \texttt{XDP\_TX} to retransmit the generated DNS answer immediately back onto the wire without host OS involvement (Figure~\ref{fig:hw_pipeline}). Conversely, on a cache miss or an expired TTL, where a stale entry triggers inline eviction via an $\mathcal{O}(1)$ \texttt{bpf\_map\_delete\_elem} call, the program returns \texttt{XDP\_PASS}, allowing the packet to traverse the PCIe bus to the native AtesN-DS driver layer for kernel-space recursive resolution.
+
+For incoming DNS responses, the offloaded program inspects the payload to extract the resolved IPv4 address and its corresponding TTL. It then executes an $\mathcal{O}(1)$ \texttt{bpf\_map\_update\_elem} operation to dynamically populate or update \texttt{hw\_cache}, returning \texttt{XDP\_PASS} to forward the frame to the client (Figure~\ref{fig:hw_pipeline}). This ensures that the response reaches the requesting host while seamlessly populating the hardware cache with fresh resolution records.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[height=0.5\textheight]{figs/ChatGPT Image Aug 6, 2026, 11_05_05 PM.png}
+    \caption{Hardware-level eBPF/XDP packet processing pipeline within the SmartNIC data plane. Incoming DNS queries undergo domain extraction and time validation via \texttt{time\_map}. Valid cache hits are resolved entirely in silicon and retransmitted immediately via \texttt{XDP\_TX} (green path). On a cache miss or TTL expiration, the frame is forwarded to the host stack via \texttt{XDP\_PASS}. Incoming DNS responses dynamically update the \texttt{hw\_cache} before traversing to the client via \texttt{XDP\_PASS} (orange path).}
+    \label{fig:hw_pipeline}
+\end{figure}
+
+\subsection{Architectural Trade-offs: Why Not a Full In-Hardware Resolver?}
+
+Having detailed the eBPF/XDP offload implementation, a fundamental architectural question emerges: \textit{why offload only a caching layer instead of a fully-fledged recursive resolver into hardware?}
+
+From a workload perspective, real-world DNS traffic follows a highly skewed, Zipfian distribution heavily concentrated around a small subset of high-frequency domains~\cite{10.1145/505202.505223}. Because the vast majority of incoming queries target these popular records, offloading a lightweight caching layer alone captures nearly all potential query hits where line-rate, sub-microsecond acceleration provides systemic relief to the host. Conversely, attempting to push full recursive resolution into silicon yields diminishing returns. Recursive resolution is an inherently complex, long-running operation involving pending socket tracking, intermediate referral parsing, and timeout retries across authoritative servers. Accelerating these long-tail cache misses in hardware provides negligible performance gains, as their latency is overwhelmingly dominated by wide-area network (WAN) round-trip times (RTTs) rather than host processing overhead.
+
+Furthermore, attempting to implement stateful recursive logic is fundamentally obstructed by the low-level constraints of eBPF/XDP offloading established in Section~\ref{sec:implementation}. As highlighted in prior eBPF offload studies~\cite{tibav:41657} and confirmed by our implementation, SmartNIC execution environments enforce strict silicon and verifier boundaries. The 4,096 assembly-like instruction budget and the lack of program chaining via tail calls (\texttt{bpf\_tail\_call}) prevent decomposing complex recursive state machines into modular BPF programs. Most critically, the rigid 32-byte entry limit on offloaded maps creates an insurmountable memory footprint mismatch: maintaining active tracking contexts for recursive queries demands at least 256 bytes per record, fundamentally exceeding SmartNIC SRAM map capacities. 
+
+Consequently, our implementation proves that pairing a high-throughput hardware cache for line-rate hit absorption with host-based software recursive fallback represents the optimal architectural trade-off between hardware performance and software flexibility.
+
+\section{Evaluation}
+\label{sec:evaluation}
+This evaluation quantifies the performance and efficiency gains achieved by augmenting the eBPF-based DNS resolver with a hardware-accelerated caching layer. To isolate the exact impact of SmartNIC offloading, we compare two operational deployments of the system: a baseline driver-space execution (\texttt{driver-mode}) and the proposed hybrid architecture with hardware offloading (\texttt{offloaded-mode}). Both configurations build upon the AtesN-DS framework~(\cite{sbesc_estendido}).
+
+To ensure exact reproducibility, the AtesN-DS stack was instantiated with identical eBPF map dimensions across both deployments. Specifically, the host-side state plane was provisioned with a ring buffer (\texttt{ringbuf\_send\_packet}) with $2^{24}$ entries for asynchronous user-space event dispatching. State tracking and caching in driver space relied on an LRU hash map (\texttt{recursive\_queries}) with $65,536$ entries for client query ownerships, a primary pending query tracking map (\texttt{new\_queries}) with $4,587,576$ entries, a primary A-record cache (\texttt{cache\_arecords}) capped at $4,000,000$ entries, and an NS-record cache (\texttt{cache\_nsrecords}) provisioned with $8,000,000$ entries
+
+Using identical, realistic trace-driven workloads on a physical point-to-point testbed, this study evaluates how introducing the hardware-offloaded data plane improves throughput, latency, and host CPU efficiency compared to purely driver-space processing. For the \texttt{offloaded-mode} experiments, the multi-tier caching pipeline was provisioned with an $2,000,000$-entry \texttt{hw\_cache} map hosted directly within the SmartNIC silicon, using nearly all of the SRAM available for the cache and thereby maximizing the hardware cache capacity, while working in tandem with the driver-space resolution stack to absorb misses.
+
+The experimental testbed was provisioned as a fully isolated, closed-loop point-to-point network completely disconnected from the public Internet. By eliminating any external WAN connectivity, upstream ISP routing jitter, and fluctuating Internet latency, this air-gapped environment guarantees strict determinism, zero packet interference, and exact experimental reproducibility, ensuring that all observed performance metrics reflect solely the raw packet processing capabilities of the SmartNIC hardware and the host resolution stack. Physical interconnection between the two dedicated server nodes is established over a direct 10GbE fiber-optic link. The target resolver server is equipped with an Intel Core i7-8086K CPU (6 cores at 4.00\,GHz), 14\,GiB of RAM, Ubuntu 22.04.5 LTS, and a Netronome Agilio CX 10GbE SmartNIC (operating interchangeably in driver-mode and hardware-offload mode). The load-generating client machine features an Intel Core i7-4790 CPU (4 cores at 3.6\,GHz), 10\,GiB of RAM, Ubuntu 24.04 LTS, and an Intel X710 10GbE NIC.
+
+To evaluate resolver performance under realistic traffic distributions rather than synthetic uniform queries, we deployed the high-performance \texttt{dnspyre}~(\cite{dnspyre}) benchmarking framework driven by a real-world enterprise DNS traffic dataset collected across an active university campus network\footnote{\url{https://www.kaggle.com/datasets/daumel/dns-tunneling-dataset}}. Originally gathered across a 10-day monitoring campaign and established as a benchmark in empirical DNS fingerprinting and anomaly detection studies by~\cite{SINGH201914}, this dataset captures genuine enterprise query patterns, domain popularity skewness, and natural temporal locality. Specifically, our evaluation replays the initial 60-second operational window from the Friday capture session (representing peak weekly campus activity). This trace-driven setup subjects the hybrid resolver to a realistic blend of high-frequency popular domains that can be served directly from the SmartNIC's SRAM cache, alongside long-tail recursive requests that fall back to the host data plane. Concurrently, a custom kernel instrumentation daemon recorded host CPU utilization, distinguishing user-space execution, kernel routines, and SoftIRQ overhead. Each benchmark run was preceded by a cache-warming phase and executed for 60 seconds. To guarantee statistical significance, all experimental configurations were repeated 30 times across every concurrency level, reporting mean values and standard deviations across all metrics.
+
+\subsection{Throughput and Speedup Analysis}
+The throughput results are shown in Figure~\ref{fig:throughput}. The \texttt{driver-mode} baseline grows from 3,326\,Queries/s (199,556 queries/min) at single-connection baseline and plateaus near 101,800\,Queries/s (6.11\,M queries/min) across 128 to 8,192 concurrent connections, before settling at 99,408\,Queries/s (5.96\,M queries/min) at 16,384 connections. In contrast, the \texttt{offloaded-mode} design scales substantially faster, reaching a peak throughput of \textbf{172,468\,Queries/s} (\textbf{10.35\,M queries/min}) at 128 connections and sustaining over 151,000\,Queries/s (9.08\,M queries/min) across the entire high-load plateau up to 16,384 connections.
+
+This gap comes from the two systems' different hardware-software boundaries. In \texttt{driver-mode}, every DNS query must traverse the NIC RX queues, cross the PCIe bus, and trigger a hardware interrupt. That interrupt makes the host schedule SoftIRQ handlers to run the eBPF parser and lookup logic on a CPU core. As concurrency grows, this software-bound path becomes a bottleneck. Packet descriptors and payloads keep moving across PCIe, and interrupt handling consumes more host cycles.
+
+Conversely, the \texttt{offloaded-mode} architecture bypasses the host's hardware and software stack for cache-hit transactions. By offloading the eBPF data plane directly onto the SmartNIC's programmable Network Processing Units (NPUs) and storing the lookup tables in high-speed local SRAM memory, the system intercepts and resolves DNS queries at line rate. Because cache hits are resolved entirely on-NIC, the packets are immediately retransmitted via \texttt{XDP TX} without crossing the PCIe bus, triggering host interrupts, or consuming host CPU cycles. 
+
+This design effectively decouples incoming traffic volume from host operating system performance, yielding a dramatic reduction in host SoftIRQ overhead, a phenomenon visible in Figure~\ref{fig:cpu_softirq}. At 4 concurrent connections, this isolation yields a maximum relative speedup of \textbf{1.80}$\boldsymbol{\times}$ over the baseline (+80.38\% higher throughput, jumping from 22,847 to 41,211\,Queries/s, representing an additional 1.10\,M queries/min), as shown in Figure~\ref{fig:speedup}. Across the operational saturation plateau (64 to 4,096 connections), the offloaded architecture sustains a consistent \textbf{1.64}$\boldsymbol{\times}$ to \textbf{1.70}$\boldsymbol{\times}$ speedup (+64\% to +70\% gain), while maintaining a robust \textbf{1.52}$\boldsymbol{\times}$ speedup (+52.32\%) under peak stress of 16,384 connections.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/throughput_vs_concurrency.png}
+    \captionof{figure}{Throughput comparison between the proposed XDP-offloaded caching layer (\texttt{offloaded-mode}) and the driver-mode baseline (\texttt{driver-mode}) across increasing concurrent connections.}
+    \label{fig:throughput}
+\end{center}
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/speedup.png}
+    \captionof{figure}{Multiplicative throughput speedup factor of \texttt{offloaded-mode} over the \texttt{driver-mode} baseline across concurrency levels.}
+    \label{fig:speedup}
+\end{center}
+
+\subsection{Latency Dynamics and Trade-off Profile}
+
+To comprehensively evaluate the interaction between service rate and response time, Figure~\ref{fig:throughput_latency} presents the Throughput-Latency trade-off profile (Pareto frontier). In traditional software execution (\texttt{driver-mode}), the system reaches its saturation knee near 101,800\,Queries/s, after which further request pressure triggers steep latency inflation without throughput gains. In contrast, the hardware-offloaded architecture substantially pushes this operational frontier to the right, sustaining upwards of 166,000 to 172,468\,Queries/s within a sub-millisecond envelope. Crucially, this profile clearly demarcates two distinct operational behaviors: $(i)$ an active, sub-millisecond operating regime where the offloaded cache effortlessly accelerates request handling, and $(ii)$ an extreme-load saturation regime where physical ring-buffer queueing occurs under massive throughput surges.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/throughput_vs_latency.png}
+    \captionof{figure}{Throughput versus Mean Latency trade-off profile, showing the shifted saturation knee achieved by silicon-level offloading.}
+    \label{fig:throughput_latency}
+\end{center}
+
+Motivated by this distinct behavioral transition revealed in the trade-off profile, mean request latency is decomposed into two corresponding operational regimes: $(i)$ low-to-moderate workloads spanning up to 4,096 concurrent connections (Figure~\ref{fig:latency_low}), and $(ii)$ high-load saturation overload spanning from 4,096 to 16,384 connections (Figure~\ref{fig:latency_high}).
+
+In the low-to-moderate regime (Figure~\ref{fig:latency_low}), for workloads spanning from single-connection baseline up to \textbf{4,096 simultaneous client connections}, \texttt{offloaded-mode} consistently outperforms or matches \texttt{driver-mode} in response latency. Across the active operational plateau (32 to 2,048 connections), the offloaded mode achieves mean latency reductions ranging from \textbf{25.6\% to 38.1\%}, keeping average response times within a tight sub-millisecond band of 0.23\,ms to 0.57\,ms compared to 0.34\,ms to 0.77\,ms in the baseline. The largest mean latency reduction occurs at 64 connections, where response time drops by \textbf{38.10\%} (from 0.6345\,ms to 0.3927\,ms).
+
+In the high-concurrency regime (Figure~\ref{fig:latency_high}), an inversion in mean latency occurs beyond the 4,096 threshold. This divergence highlights the transition into physical ring-buffer queueing: because the SmartNIC processes $52\%$ to $60\%$ more queries than the baseline (sustaining 161,220 and 151,414\,Queries/s versus 100,584 and 99,408\,Queries/s in \texttt{driver-mode}), transient queueing delays accumulate in the network interface ring buffers under extreme saturation.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/latency_mean_low_concurrency.png}
+    \captionof{figure}{Mean request latency in low-to-moderate concurrency regime (up to 4,096 connections) highlighting sub-millisecond latency reduction.}
+    \label{fig:latency_low}
+\end{center}
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/latency_mean_high_concurrency.png}
+    \captionof{figure}{Mean request latency in high-load saturation overload regime (4,096 to 16,384 connections) showing queueing dynamics under massive throughput.}
+    \label{fig:latency_high}
+\end{center}
+
+\subsection{Hardware Cache Hit Rate Dynamics}
+
+The performance gains of the hybrid architecture directly stem from the filtering efficiency of the SmartNIC hardware cache layer. Figure~\ref{fig:cache_hit_rate} depicts the hardware cache hit rate across all evaluated concurrency levels. At low concurrency (1 and 2 connections), the hardware cache registers a hit rate of \textbf{59.9\%} and \textbf{59.4\%}. As concurrency ramps up, the hit rate increases to \textbf{62.3\%} (at 4 and 8 connections), \textbf{66.1\%} (at 32 connections), and stabilizes at a steady plateau of \textbf{72.2\% to 72.8\%} across the entire 64 to 16,384 concurrency range (peaking at 72.83\% at 128 connections).
+
+This stable $\sim 72.8\%$ hit rate confirms that nearly three-quarters of all incoming client requests are resolved and transmitted immediately within the network interface silicon. Crucially, analyzing the remaining $\sim 27.2\%$ of queries that trigger driver-space fallback reveals the direct impact of the hardware memory layout. Specifically, the on-chip \texttt{hw\_cache} table enforces a strict 24-byte key boundary (\texttt{char[24]}) to comply with the SmartNIC verifier's 32-byte per-entry size limitation discussed in Section~\ref{sec:implementation}. Queries targeting fully qualified domain names exceeding 24 bytes in length cannot be indexed in the hardware SRAM table and are therefore transparently forwarded to the driver-space resolution pipeline, alongside cold misses and expired TTL entries. Despite this structural constraint, the 24-byte hardware cache successfully absorbs the vast majority of real-world traffic, drastically reducing host-level interrupt generation, PCIe bus contention, and operating system overhead.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/cache_hit_rate.png}
+    \captionof{figure}{SmartNIC Hardware Cache hit rate under increasing concurrent connection levels.}
+    \label{fig:cache_hit_rate}
+\end{center}
+
+\subsection{Host CPU Efficiency and Computational Productivity}
+
+The primary objective of hardware offloading is to decouple network packet processing from the host's computing infrastructure, liberating CPU resources for general-purpose applications. This architectural decoupling is evaluated along three dimensions: the host's Software Interrupt (\textit{SoftIRQ}) overhead, the utilization profile of the most strained CPU core, global host CPU utilization, and computational efficiency, as captured in Figures~\ref{fig:cpu_softirq}, \ref{fig:max_core_usage}, \ref{fig:cpu_total}, and~\ref{fig:cpu_efficiency}.
+
+In standard eBPF/XDP driver mode, network processing forces the host OS to allocate substantial cycles to SoftIRQs to receive, parse, and route packets within kernel space. As shown in Figure~\ref{fig:cpu_softirq}, the baseline \texttt{driver-mode} configuration scales its SoftIRQ consumption rapidly, consuming up to \textbf{2.45\%} of global CPU capacity solely on packet reception under 16 concurrent connections and remaining near 2.0\% across the plateau. Conversely, the \texttt{offloaded-mode} configuration mitigates this overhead by resolving hits directly at the silicon layer: by intercepting packets on the SmartNIC and suppressing host-level interrupts, it slashes SoftIRQ overhead by up to \textbf{36.5\%} (dropping to 1.56\% at 16 connections and remaining below 1.42\% across the entire evaluation envelope).
+
+This efficiency gains further granularity when observing the mean utilization of the most heavily loaded CPU core, shown in Figure~\ref{fig:max_core_usage}. In both architectural setups, packet execution bottlenecks tend to concentrate on a single core due to network interface queue bindings and driver interrupt pinning. Under the \texttt{driver-mode} baseline, maximum core utilization climbs to \textbf{10.38\%}. In contrast, the \texttt{offloaded-mode} configuration shields the primary processing core, keeping its average utilization strictly below \textbf{7.85\%} across all evaluated scenarios (averaging 6.8\% across the plateau). By offloading the lookup engine and data plane directly to the SmartNIC, the system not only reduces global system interrupts but also mitigates localized hot-spotting on the network-bound core, confirming that the hybrid architecture decouples high-throughput DNS handling from single-core saturation limits.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/cpu_softirq_mean.png}
+    \captionof{figure}{Host CPU SoftIRQ overhead under increasing concurrency.}
+    \label{fig:cpu_softirq}
+\end{center}
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/max_core_usage_mean.png}
+    \captionof{figure}{Mean utilization of the most heavily loaded CPU core under increasing concurrency.}
+    \label{fig:max_core_usage}
+\end{center}
+
+These per-core and interrupt-level gains are consolidated at the system level in Figure~\ref{fig:cpu_total}, which reports total host CPU utilization. In the software-bound AtesN-DS \texttt{driver-mode} configuration, cumulative CPU overhead reaches \textbf{3.15\%}. The AtesN-DS \texttt{offloaded-mode} configuration, by comparison, maintains a lower utilization profile, capping total host CPU consumption strictly below \textbf{2.15\%} across all evaluated scenarios. Across the operational plateau (16 to 4,096 connections), offloading the caching pipeline to the SmartNIC yields a total host CPU reduction of \textbf{25\% to 33.6\%}.
+
+To quantify the computational productivity of this design, Figure~\ref{fig:cpu_efficiency} plots the system's computational efficiency, defined as the number of Queries/s delivered per 1\% of host CPU consumed ($\text{QPS} / \text{Host CPU \%}$). At 4 connections, the hardware offload delivers \textbf{+141.6\%} higher efficiency over the baseline. Across the operational plateau, the offloaded architecture consistently sustains over \textbf{91,000\,Queries/s per 1\% CPU}, compared to only $\sim 40,000$\,Queries/s per 1\% CPU in \texttt{driver-mode}, a sustained \textbf{+120\% to +130\%} efficiency improvement that underscores the substantial infrastructure savings enabled by line-rate SmartNIC offloading.
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/cpu_total_mean.png}
+    \captionof{figure}{Global host CPU utilization under increasing concurrency.}
+    \label{fig:cpu_total}
+\end{center}
+
+\begin{center}
+    \includegraphics[width=0.85\textwidth]{results/cpu_efficiency.png}
+    \captionof{figure}{Computational efficiency in Queries/s delivered per 1\% Host CPU consumed under increasing concurrency.}
+    \label{fig:cpu_efficiency}
+\end{center}
+
+\subsection{Control-Plane Daemon Overhead and Cache Saturation Dynamics}
+\label{sec:saturation_eval}
+
+To verify that background cache maintenance does not compromise the line-rate packet forwarding pipeline, this section evaluates the operational footprint of the host-side control daemons (\texttt{time\_updater} and \texttt{cleaner\_daemon}) and assesses cache eviction dynamics under working-set saturation exceeding the SmartNIC's hardware capacity. To guarantee statistical significance, all evaluations were conducted across \textbf{30 independent repetitions}, executing as single-threaded processes pinned to a single host core (Core~0).
+
+\textbf{Cache Saturation and Eviction Dynamics.} Because the offloaded resolver relies on a fixed hardware table of \textbf{2,000,000 entries}, an unmanaged hash map inherently rejects new insertions with \texttt{-E2BIG} once filled, freezing the cache state and halting adaptation to novel queries. Under working-set saturation, an unmanaged baseline suffers a catastrophic \textbf{100\% insertion failure rate} ($200{,}000$ drops out of $200{,}000$ burst attempts).
+
+In contrast, running the AtesN-DS watermark cleaner ($H = 90\%$, $L = 80\%$) as the system default prevents saturation entirely. The cleaner operates in two phases: Phase~1 purges zero-loss expired records (\textbf{100,000 entries}, or \textbf{5\%}), while Phase~2 senses that live occupancy exceeds the 90\% threshold and evicts candidate records with the shortest remaining TTL via \texttt{qsort} down to the 80\% low watermark (\textbf{300,000 entries}). By dynamically maintaining a \textbf{20\% headroom} (\textbf{400,000 free slots} at 80\% occupancy, with a \textbf{200,000-slot buffer} before reaching the 90\% trigger), the managed cache absorbs novel domain bursts of up to 400,000 queries—including the evaluated \textbf{200,000-query burst}—with strictly \textbf{0.0\% rejection} (\textbf{100\% admission rate}), sustaining continuous cache adaptation without packet loss.
+
+\textbf{Host CPU and Interconnect Footprint.} Figure~\ref{fig:daemons_cpu_dist} details the CPU consumption of both control-plane daemons. The background \texttt{time\_updater} daemon synchronizes the scalar Unix timestamp in \texttt{time\_map} at \textbf{1\,Hz}, consuming negligible host resources: a mere \textbf{0.031\%} of a single core (\textbf{0.0026\%} of the 12-thread host server) and \textbf{24\,B/s} of PCIe traffic ($<0.001\%$ bus utilization).
+
+For the \texttt{cleaner\_daemon}, paced batching ($B = 256$ lookups, $\Delta t = 1,500\,\mu\text{s}$) caps the hardware traversal rate at $\sim$\textbf{73,000 lookups/s} to interleave sweeps with cooperative sleeps, yielding the host CPU and PCIe interconnect. During an active sweep of the full \textbf{2,000,000-entry} hardware table—including the inspection and sorting of \textbf{400,000 evictions}—single-core CPU utilization averages \textbf{54.5\%} (Core~0). In the context of the overall 12-thread host server, this represents only \textbf{4.54\%} of total capacity during sweeps, and dilutes to an effective average global overhead of just \textbf{2.08\%} over a representative 60\,s maintenance cycle (\textbf{25.0\%} of a single core).
+
+Furthermore, Figure~\ref{fig:daemons_pcie_lat} details the PCIe interconnect overhead and sweep latency. The cleaner's PCIe Gen3 $\times8$ data throughput averages \textbf{3.74\,MB/s}, consuming merely \textbf{0.094\%} of the available 4,000\,MB/s bus bandwidth (\textbf{$<0.1\%$}). The entire 2,000,000-entry sweep completes in \textbf{27.4\,s} (\textbf{27.35\,s} median), demonstrating bounded latency and strictly minimal tail variance. Crucially, because packet forwarding runs entirely within the SmartNIC's internal processing cores and memory crossbars, host DMA requests over PCIe operate asynchronously without causing line-rate stalls, packet drops, or forwarding jitter.
+
+\begin{center}
+    \includegraphics[width=0.92\textwidth]{results/daemons_cpu_percentiles_ci.png}
+    \captionof{figure}{Host CPU utilization by the cleaner and time updater daemons.}
+    \label{fig:daemons_cpu_dist}
+\end{center}
+
+\begin{center}
+    \includegraphics[width=0.92\textwidth]{results/daemons_pcie_and_latency_percentiles_ci.png}
+    \captionof{figure}{PCIe bus throughput and sweep duration for the cleaner daemon.}
+    \label{fig:daemons_pcie_lat}
+\end{center}
+
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+This paper presented a hybrid, multi-tier DNS resolver architecture that extends the AtesN-DS framework by integrating an eBPF/XDP driver-space recursive engine with an XDP hardware-offloaded caching layer running directly inside a programmable SmartNIC. The primary objective was to offload key DNS resolution tasks onto dedicated silicon, simultaneously maximizing packet processing performance and alleviating resource pressure on the host infrastructure. By resolving cache hits directly on the SmartNIC data plane, the proposed design effectively isolates the host operating system from query processing overhead for the vast majority of incoming traffic.
+
+Evaluating whether offloading the resolver's caching layer to hardware is worth the engineering complexity yields a clear, affirmative conclusion. Implementing this architecture demonstrates that the primary bottleneck in stateful SmartNIC offloading is not the physical silicon capability, but rather adapting application semantics to fit the constrained eBPF offload runtime environment. Although overcoming limitations, such as the unavailability of time-based eBPF helpers (e.g., \texttt{bpf\_ktime\_get\_ns()}) and the absence of native LRU map support (\texttt{BPF\_MAP\_TYPE\_LRU\_HASH}), requires hybrid design patterns like periodic host clock synchronization and user-space housekeeping daemons, these architectural trade-offs prove remarkably efficient. The main takeaway is that offloading does not need to handle 100\% of complex application logic in hardware to be effective; even a constrained, application-agnostic hardware cache operating transparently in front of the resolution engine provides immense system relief. By filtering high-frequency hits at line rate, the host operating system is shielded from CPU interrupt storms and PCIe bus traversals, transforming the traditional network stack into a highly deterministic processing engine.
+
+These architectural dividends were empirically validated on a physical point-to-point testbed driven by a real-world campus network trace, where experimental evaluations confirmed the substantial performance and resource efficiency gains of this hardware-decoupled design. At 4 concurrent connections, the hardware-accelerated caching layer achieved a maximum throughput speedup of \textbf{1.80}$\boldsymbol{\times}$ (+80.38\% gain) compared to the standard driver-mode baseline, reaching a peak overall capacity of \textbf{172,468\,Queries/s} (\textbf{10.35\,M queries/min}) and sustaining a robust \textbf{1.52}$\boldsymbol{\times}$ speedup at 16,384 concurrent connections. In terms of response latency, the proposed architecture reduced mean response times by up to \textbf{38.10\%} for workloads up to 4,096 connections, keeping average latency strictly in the sub-millisecond range across the operational plateau while expanding the throughput-latency saturation knee beyond 166,000\,Queries/s. The SmartNIC hardware cache attained a stable hit rate of \textbf{72.2\% to 72.8\%}, resolving over 7.5 million requests directly in silicon and transparently delegating only long-tail requests (such as queries exceeding the 24-byte hardware key limit) and cold misses to the driver fallback. From an infrastructural perspective, shifting query handling to hardware slashed host SoftIRQ utilization by up to \textbf{36.5\%}, boosted computational efficiency by \textbf{+120\% to +141.6\%} (consistently sustaining over \textbf{91,000\,Queries/s per 1\% host CPU}), and kept global server CPU consumption strictly below \textbf{2.15\%} (representing a \textbf{25\% to 33.6\%} reduction in total host CPU demand across the saturation plateau), while capping the utilization of the most strained network core below \textbf{7.85\%}.
+
+For future work, we plan to investigate dynamic, low-overhead cache state synchronization algorithms to further alleviate control plane overhead during high-frequency update bursts. Additionally, we intend to explore automated multi-block parsing optimizations to support complex DNS query types, such as stateful TCP fallbacks and DNSSEC validation, directly within the constrained hardware limits of programmable SmartNICs without triggering host fallback paths.
+\printcredits
+
+%% Loading bibliography style file
+%\bibliographystyle{model1-num-names}
+\bibliographystyle{cas-model2-names}
+
+% Loading bibliography database
+\bibliography{cas-refs}
+
+
+%\vskip3pt
+
+% \bio{}
+% Author biography without author photo.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% \endbio
+
+% \bio{figs/cas-pic1}
+% Author biography with author photo.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% \endbio
+
+% \vskip3pc
+
+% \bio{figs/cas-pic1}
+% Author biography with author photo.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% Author biography. Author biography. Author biography.
+% \endbio
+
+
+\end{document}
+

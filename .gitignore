@@ -2,7 +2,10 @@
 
 data*/
 data*
-
+!data/
+data/*
+!data/daemons_statistical_30_runs.csv
+!data/saturation_eviction_comparison.csv
 
 bin/
 
@@ -23,3 +26,13 @@ nohup*
 *.txt
 
 *.pcap
+
+__pycache__/
+*.py[cod]
+
+# Images and vector graphics
+*.png
+*.jpg
+*.jpeg
+*.svg
+

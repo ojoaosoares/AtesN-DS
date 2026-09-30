@@ -73,8 +73,8 @@ enum packet_action {
 #define DNS_FLAG_RESPONSE_BASE  0x8180
 #define DNS_RCODE_MASK          0x000F
 
-// Cache TTL grace period
-#define DNS_TTL_GRACE_SEC       1000
+// Negative cache default TTL (RFC 2308)
+#define DEFAULT_NXDOMAIN_TTL_SEC 60
 
 // DNS Processing Status (Return codes internal to logic)
 #define TO_DNS_PORT              2
