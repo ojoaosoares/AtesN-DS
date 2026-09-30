@@ -40,44 +40,6 @@ static __always_inline __u8 get_domain_sw(void *data, __u64 *offset, void *data_
     return ACCEPT;
 }
 
-static __always_inline __u8 get_domain_hw(void *data, __u64 *offset, void *data_end, struct dns_domain_hw *query, __u8 *domain_size)
-{
-    __u8 *content = (__u8 *)((__u8 *)data + *offset);
-    *offset += sizeof(__u8);
-    if ((void *)((__u8 *)data + *offset) > data_end)
-        return DROP;
-
-    if (*(content) == 0)
-        return DROP;
-
-    __builtin_memset(query->name, 0, MAX_DNS_NAME_LENGTH_HW);
-    size_t size;
-    #pragma unroll
-    for (size = 0; (size < MAX_DNS_NAME_LENGTH_HW && *(content + size) != 0); size++)
-    {
-        query->name[size] = *(char *)(content + size);
-        if ((void *)((__u8 *)data + ++(*offset)) > data_end)
-            return DROP;
-    }
-    (*domain_size) = (__u8) size;
-
-    if (size == MAX_DNS_NAME_LENGTH_HW && *(content + size) != 0)
-        return PASS;
-
-    content = (__u8 *)((__u8 *)data + *offset);
-    *offset += (sizeof(__u8) * 4);
-    if ((void *)((__u8 *)data + *offset) > data_end)
-        return DROP;
-
-    if (bpf_ntohs(*((__u16 *) content)) ^ A_RECORD_TYPE)
-        return PASS;
-
-    content += 2;
-    if (bpf_ntohs(*((__u16 *) content)) ^ DNS_CLASS_IN)
-        return PASS;
-    
-    return ACCEPT;
-}
 
 static __always_inline __u8 write_query(void *data, __u64 *offset, void *data_end, struct dns_domain_sw *query) {
     __u8 *content = (__u8 *)data + *offset;

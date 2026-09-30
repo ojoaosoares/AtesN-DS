@@ -38,20 +38,43 @@ enum packet_action {
 };
 
 // -----------------------------------------------------------------------------
-// Network Protocol Constants
+// Network Protocol Constants & Offsets
 // -----------------------------------------------------------------------------
-#define MAX_UDP_SIZE        512
-#define IPV4                0x0800
-#define IP_FRAGMENTED_MASK  65343
-#define UDP_PROTOCOL        0x11
-#define UDP_NO_ERROR        0x0
+#define MAX_UDP_SIZE            512
+#define IPV4                    0x0800
+#define IP_FRAGMENTED_MASK      65343
+#define UDP_PROTOCOL            0x11
+#define UDP_NO_ERROR            0x0
+
+#define ETH_HLEN_BYTES          14
+#define IPV4_HLEN_BYTES         20
+#define UDP_HLEN_BYTES          8
+#define DNS_HLEN_BYTES          12
+
+#define IPV4_OFFSET             ETH_HLEN_BYTES
+#define UDP_OFFSET              (ETH_HLEN_BYTES + IPV4_HLEN_BYTES)
+#define DNS_OFFSET              (ETH_HLEN_BYTES + IPV4_HLEN_BYTES + UDP_HLEN_BYTES)
+#define DNS_QUESTION_OFFSET     (DNS_OFFSET + DNS_HLEN_BYTES)
+
+// DNS Question Tail: null byte (1) + QTYPE (2) + QCLASS (2)
+#define DNS_QTAIL_LEN           5
+// Minimum valid DNS query packet length: 54 + 2 (min 1-char label) + 5 = 61
+#define DNS_MIN_QUERY_LEN       (DNS_QUESTION_OFFSET + 2 + DNS_QTAIL_LEN)
 
 // -----------------------------------------------------------------------------
 // DNS Message Constants
 // -----------------------------------------------------------------------------
-#define DNS_PORT            53
-#define MAX_DNS_PAYLOAD     500
-#define DNS_POINTER_OFFSET  0xc00c
+#define DNS_PORT                53
+#define MAX_DNS_PAYLOAD         500
+#define DNS_POINTER_OFFSET      0xc00c
+
+// DNS Header Flags & Masks
+#define DNS_FLAG_QR             0x8000
+#define DNS_FLAG_RESPONSE_BASE  0x8180
+#define DNS_RCODE_MASK          0x000F
+
+// Cache TTL grace period
+#define DNS_TTL_GRACE_SEC       1000
 
 // DNS Processing Status (Return codes internal to logic)
 #define TO_DNS_PORT              2
@@ -84,7 +107,7 @@ enum packet_action {
 #define RCODE_NXDOMAIN      3
 
 // DNS Length Limits
-#define MAX_DNS_NAME_LENGTH_HW 24
+#define MAX_DNS_NAME_LENGTH_HW 38
 #define MAX_DNS_NAME_LENGTH_SW 255
 #define MAX_SUBDOMAIN_LENGTH   127
 #define MAX_DNS_LABELS         127

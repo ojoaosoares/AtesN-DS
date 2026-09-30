@@ -29,6 +29,7 @@ SKELETON  = ${INCLUDE_FOLDER}dns.skel.h
 TARGET    = ${BIN_FOLDER}atesnds
 SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
+HEADERS   = $(wildcard $(INCLUDE_FOLDER)*.h)
 PROG_MOUNT_PATH = /sys/fs/bpf
 # time_updater
 TIME_SRC  = $(SRC_FOLDER)time_updater.c
@@ -42,19 +43,19 @@ all: ${TARGET}
 run: ${TARGET}
 	sudo ${TARGET} -a ${IP} -i ${DEV} -m ${MAC}
 
-${TARGET}: ${MAIN} ${SKELETON}
+${TARGET}: ${MAIN} ${SKELETON} $(HEADERS)
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf
 
 ${SKELETON}: ${OBJ_FOLDER}dns.o
 	bpftool gen skeleton $< name dns | tee $@
 
-${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
+${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c $(HEADERS)
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 # ------------------------------------------------
 # time_updater (userspace, atualiza time_map)
 # ------------------------------------------------
 time-updater: $(TIME_BIN)
-$(TIME_BIN): $(TIME_SRC)
+$(TIME_BIN): $(TIME_SRC) $(HEADERS)
 	clang-15 -O2 -Wall -o $@ $< -lbpf
 run-time-updater: $(TIME_BIN)
 	sudo rm -f $(PROG_MOUNT_PATH)/time_map
@@ -68,7 +69,7 @@ run-time-updater: $(TIME_BIN)
 
 build-hw: $(HW_OBJ)
 
-$(HW_OBJ): $(HW_SRC)
+$(HW_OBJ): $(HW_SRC) $(HEADERS)
 	$(CC) -O2 -target bpf -c $< -o $@ -g \
 		-I $(INCLUDE_FOLDER) \
 		-D __TARGET_ARCH_x86 \
@@ -77,7 +78,7 @@ $(HW_OBJ): $(HW_SRC)
 load-hw: $(HW_OBJ)
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
 	sudo rm -f $(PROG_PIN) $(PROG_MOUNT_PATH)/time_map $(PROG_MOUNT_PATH)/level_one_cache
-	sudo bpftool prog load $(HW_OBJ) $(PROG_PIN) \
+	sudo bpftool -d prog load $(HW_OBJ) $(PROG_PIN) \
 		type xdp \
 		dev $(HW_DEV)
 	sudo bpftool net attach xdpoffload \
