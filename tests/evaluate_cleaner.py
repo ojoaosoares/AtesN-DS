@@ -81,6 +81,9 @@ def benchmark_cleaner_daemon(map_entries=2000000, batch_size=256, sleep_us=1500)
     active_duty_cycle = lookup_time_per_batch / total_time_per_batch
     cpu_pct = active_duty_cycle * 100.0
 
+    sweep_interval_sec = 60.0
+    effective_avg_cpu = cpu_pct * (full_sweep_duration_sec / max(sweep_interval_sec, full_sweep_duration_sec))
+
     result = {
         "daemon": "cleaner_daemon",
         "map_size_entries": map_entries,
@@ -89,12 +92,36 @@ def benchmark_cleaner_daemon(map_entries=2000000, batch_size=256, sleep_us=1500)
         "map_access_rate_lookups_per_sec": round(access_rate_qps, 0),
         "pcie_bandwidth_mb_s": round(pcie_mb_s, 2),
         "pcie_gen3_x8_utilization_pct": round((pcie_mb_s / 4000.0) * 100.0, 4),
-        "cpu_utilization_pct": round(cpu_pct, 2),
+        "sweep_cpu_utilization_pct": round(cpu_pct, 2),
+        "effective_avg_cpu_pct_60s_interval": round(effective_avg_cpu, 2),
         "full_2M_sweep_duration_sec": round(full_sweep_duration_sec, 2),
-        "datapath_impact": "None (consumed < 0.05% of 4 GB/s PCIe bandwidth)"
+        "datapath_impact": f"None (consumed < {max(0.01, round((pcie_mb_s / 4000.0) * 100.0, 2))}% of PCIe bandwidth)"
     }
     print(json.dumps(result, indent=2))
     return result
+
+
+def compare_cleaner_profiles(map_entries=2000000):
+    """Compares different pacing profiles for paper sensitivity analysis."""
+    print(f"\n=== Cleaner Daemon Profile Sensitivity Comparison (2M Entries) ===")
+    profiles = [
+        ("Aggressive", 512, 500),
+        ("Balanced (Default)", 256, 1500),
+        ("Conservative / Low-Power", 128, 3000),
+    ]
+    print(f"{'Profile':<25} | {'Batch':<6} | {'Sleep':<7} | {'Lookups/s':<11} | {'PCIe MB/s':<10} | {'PCIe %':<7} | {'Sweep Time':<11} | {'Sweep CPU %':<11}")
+    print("-" * 105)
+    for name, b_sz, s_us in profiles:
+        lookup_t = b_sz * 0.0000015
+        sleep_t = s_us / 1e6
+        tot_t = lookup_t + sleep_t
+        qps = (1.0 / tot_t) * b_sz
+        pcie_mb = (qps * 62.0) / (1024.0 * 1024.0)
+        pcie_pct = (pcie_mb / 4000.0) * 100.0
+        sw_dur = map_entries / qps
+        cpu_pct = (lookup_t / tot_t) * 100.0
+        print(f"{name:<25} | {b_sz:<6} | {s_us:<5}µs | {int(qps):<11,d} | {pcie_mb:<10.2f} | {pcie_pct:<6.3f}% | {sw_dur:<9.2f}s | {cpu_pct:<10.2f}%")
+
 
 
 def evaluate_saturation_behavior(capacity=2000000, working_set=3000000):
@@ -150,6 +177,7 @@ def main():
 
     benchmark_time_updater()
     benchmark_cleaner_daemon(args.map_size, args.batch_size, args.sleep_us)
+    compare_cleaner_profiles(args.map_size)
     evaluate_saturation_behavior(args.map_size, int(args.map_size * 1.5))
 
 
