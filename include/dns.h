@@ -107,7 +107,7 @@ enum packet_action {
 #define RCODE_NXDOMAIN      3
 
 // DNS Length Limits
-#define MAX_DNS_NAME_LENGTH_HW 38
+#define MAX_DNS_NAME_LENGTH_HW 50
 #define MAX_DNS_NAME_LENGTH_SW 255
 #define MAX_SUBDOMAIN_LENGTH   127
 #define MAX_DNS_LABELS         127
@@ -290,6 +290,15 @@ struct event_prefetch {
     __u32 ip;
     __u16 id;
     __u16 port;
+};
+
+/**
+ * @brief Event for Asymmetric Cache Ingestion to SmartNIC (Hardware Sync)
+ */
+struct hw_cache_sync_event {
+    char name[MAX_DNS_NAME_LENGTH_HW];
+    __be32 ip;
+    __u32 timestamp;
 };
 
 #endif

@@ -47,20 +47,11 @@ int dns_filter(struct xdp_md *ctx) {
     if (dns->questions != bpf_htons(1))
         return XDP_PASS;
 
-    __u8 is_response = (dns->flags & bpf_htons(DNS_FLAG_QR)) != 0;
+    if (dns->flags & bpf_htons(DNS_FLAG_QR))
+        return XDP_PASS;
 
-    if (!is_response) {
-        if (udp->dest != bpf_htons(DNS_PORT) || dns->name_servers != 0)
-            return XDP_PASS;
-    } else {
-        if (udp->source != bpf_htons(DNS_PORT))
-            return XDP_PASS;
-        __u16 rcode = bpf_ntohs(dns->flags) & DNS_RCODE_MASK;
-        if (rcode != RCODE_NOERROR && rcode != RCODE_NXDOMAIN)
-            return XDP_PASS;
-        if (rcode == RCODE_NOERROR && dns->answer_count == 0)
-            return XDP_PASS;
-    }
+    if (udp->dest != bpf_htons(DNS_PORT) || dns->name_servers != 0)
+        return XDP_PASS;
 
     __u8 *content = (__u8 *)data + DNS_QUESTION_OFFSET;
     if (*content == 0)
@@ -83,16 +74,20 @@ int dns_filter(struct xdp_md *ctx) {
         domain_hw.name[i] = (char)c;
     }
 
+    if (size == MAX_DNS_NAME_LENGTH_HW)
+        return XDP_PASS;
+
     if ((void *)(content + size + DNS_QTAIL_LEN) > data_end)
         return XDP_DROP;
-
-    if (size == MAX_DNS_NAME_LENGTH_HW && content[size] != 0)
-        return XDP_PASS;
 
     __be16 *qtype  = (__be16 *)(content + size + 1);
     __be16 *qclass = (__be16 *)(content + size + 3);
 
     if (*qtype != bpf_htons(A_RECORD_TYPE) || *qclass != bpf_htons(DNS_CLASS_IN))
+        return XDP_PASS;
+
+    struct a_record_hw *arecord = bpf_map_lookup_elem(&level_one_cache, domain_hw.name);
+    if (!arecord)
         return XDP_PASS;
 
     __u32 key = 0;
@@ -101,69 +96,35 @@ int dns_filter(struct xdp_md *ctx) {
         return XDP_PASS;
     __u32 now_value = *now;
 
-    if (is_response)
+    __u32 diff = 0;
+    if (now_value < arecord->timestamp)
+        diff = arecord->timestamp - now_value;
+
+    if (diff < MINIMUM_TTL)
     {
-        struct dns_response *resp = (struct dns_response *)(content + size + DNS_QTAIL_LEN);
-        struct a_record_hw cache_record = {0};
-
-        __u16 rcode = bpf_ntohs(dns->flags) & DNS_RCODE_MASK;
-        if (dns->answer_count != 0)
-        {
-            if ((void *)(resp + 1) > data_end)
-                return XDP_DROP;
-
-            if (resp->record_type == bpf_htons(A_RECORD_TYPE) && resp->record_class == bpf_htons(DNS_CLASS_IN))
-            {
-                cache_record.ip = resp->ip;
-                cache_record.timestamp = now_value + bpf_ntohl(resp->ttl);
-                bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
-            }
-        }
-        else if (rcode == RCODE_NXDOMAIN)
-        {
-            cache_record.ip = 0;
-            cache_record.timestamp = now_value + DEFAULT_NXDOMAIN_TTL_SEC;
-            bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
-        }
-
+        bpf_map_delete_elem(&level_one_cache, domain_hw.name);
         return XDP_PASS;
     }
 
-    struct a_record_hw *arecord = bpf_map_lookup_elem(&level_one_cache, domain_hw.name);
-    if (arecord)
+    __s16 newsize = ((__u8 *)data + DNS_QUESTION_OFFSET + size + DNS_QTAIL_LEN) - (__u8 *)data_end;
+    __u8 status = RCODE_NXDOMAIN;
+
+    if (arecord->ip != 0)
     {
-        __u32 diff = 0;
-        if (now_value < arecord->timestamp)
-            diff = arecord->timestamp - now_value;
-
-        if (diff < MINIMUM_TTL)
-        {
-            bpf_map_delete_elem(&level_one_cache, domain_hw.name);
-            return XDP_PASS;
-        }
-
-        __s16 newsize = ((__u8 *)data + DNS_QUESTION_OFFSET + size + DNS_QTAIL_LEN) - (__u8 *)data_end;
-        __u8 status = RCODE_NXDOMAIN;
-
-        if (arecord->ip != 0)
-        {
-            newsize += sizeof(struct dns_response);
-            status = RCODE_NOERROR;
-        }
-
-        if (bpf_xdp_adjust_tail(ctx, (int)newsize) < 0)
-            return XDP_PASS;
-
-        data     = (void *)(long)ctx->data;
-        data_end = (void *)(long)ctx->data_end;
-
-        if (send_dns_response_hw(data, data_end, arecord->ip, diff, status, (__u8)size) == DROP)
-            return XDP_DROP;
-
-        return XDP_TX;
+        newsize += sizeof(struct dns_response);
+        status = RCODE_NOERROR;
     }
 
-    return XDP_PASS;
+    if (bpf_xdp_adjust_tail(ctx, (int)newsize) < 0)
+        return XDP_PASS;
+
+    data     = (void *)(long)ctx->data;
+    data_end = (void *)(long)ctx->data_end;
+
+    if (send_dns_response_hw(data, data_end, arecord->ip, diff, status, (__u8)size) == DROP)
+        return XDP_DROP;
+
+    return XDP_TX;
 }
 
 char _license[] SEC("license") = "GPL";
