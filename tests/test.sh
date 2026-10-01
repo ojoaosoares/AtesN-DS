@@ -131,6 +131,7 @@ for MODE in "${MODES[@]}"; do
           echo '[REMOTE] Matando processos...'
 
           sudo -n pkill atesnds 2>/dev/null || true
+          sudo -n pkill atesnds_daemon 2>/dev/null || true
           sudo -n pkill time_updater 2>/dev/null || true
           sudo -n pkill sample_server.py 2>/dev/null || true
 
@@ -193,13 +194,13 @@ for MODE in "${MODES[@]}"; do
           ssh "${REMOTE_USER}@${REMOTE_HOST}" \
             "tmux capture-pane -t hw -p -S -100"
 
-          echo "-> Verificando time_updater..."
+          echo "-> Verificando atesnds_daemon / time_updater..."
 
           if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-              "pgrep -af time_updater"; then
+              "pgrep -af 'atesnds_daemon|time_updater'"; then
 
               echo
-              echo "❌ ERRO: time_updater NÃO está rodando!"
+              echo "❌ ERRO: atesnds_daemon / time_updater NÃO está rodando!"
               echo
               echo "===== SAÍDA DO TMUX hw ====="
 
@@ -317,6 +318,7 @@ for MODE in "${MODES[@]}"; do
         ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" "
             sudo -n pkill sample_server.py 2>/dev/null || true
             sudo -n pkill atesnds 2>/dev/null || true
+            sudo -n pkill atesnds_daemon 2>/dev/null || true
             sudo -n pkill time_updater 2>/dev/null || true
 
             tmux kill-session -t srv 2>/dev/null || true

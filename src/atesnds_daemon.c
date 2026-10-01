@@ -99,17 +99,19 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("======================================================================\n");
-    printf("  🚀 Starting AtesN-DS Unified Control-Plane Runtime (Modular)        \n");
-    printf("======================================================================\n");
-    printf("  SmartNIC Cache Pin: %s\n", g_ctx.cfg.hw_cache_path);
-    printf("  SmartNIC Time Pin:  %s\n", g_ctx.cfg.time_map_path);
-    printf("  Host RingBuf Pin:   %s\n", g_ctx.cfg.ringbuf_path);
-    printf("  Hardware Capacity:  %u entries (High=%u%%, Low=%u%%)\n",
-           g_ctx.cfg.hw_cache_capacity, g_ctx.cfg.high_watermark_pct, g_ctx.cfg.low_watermark_pct);
-    printf("  Core Assignment:    Ingest=Core %d, Governance=Core %d (Core 0 Network Isolated)\n",
-           g_ctx.cfg.ingest_core, g_ctx.cfg.governance_core);
-    printf("======================================================================\n");
+    if (g_ctx.cfg.verbose) {
+        printf("======================================================================\n");
+        printf("  🚀 Starting AtesN-DS Unified Control-Plane Runtime (Modular)        \n");
+        printf("======================================================================\n");
+        printf("  SmartNIC Cache Pin: %s\n", g_ctx.cfg.hw_cache_path);
+        printf("  SmartNIC Time Pin:  %s\n", g_ctx.cfg.time_map_path);
+        printf("  Host RingBuf Pin:   %s\n", g_ctx.cfg.ringbuf_path);
+        printf("  Hardware Capacity:  %u entries (High=%u%%, Low=%u%%)\n",
+               g_ctx.cfg.hw_cache_capacity, g_ctx.cfg.high_watermark_pct, g_ctx.cfg.low_watermark_pct);
+        printf("  Core Assignment:    Ingest=Core %d, Governance=Core %d (Core 0 Network Isolated)\n",
+               g_ctx.cfg.ingest_core, g_ctx.cfg.governance_core);
+        printf("======================================================================\n");
+    }
 
     /* Open SmartNIC BPF Maps */
     g_ctx.hw_cache_fd = bpf_obj_get(g_ctx.cfg.hw_cache_path);
@@ -187,13 +189,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("  ✅ AtesN-DS Unified Control-Plane Runtime is active.\n");
-    printf("  Press Ctrl+C to terminate.\n\n");
+    if (g_ctx.cfg.verbose) {
+        printf("  ✅ AtesN-DS Unified Control-Plane Runtime is active.\n");
+        printf("  Press Ctrl+C to terminate.\n\n");
+    }
 
-    /* Main coordination loop: log summary every 10 seconds */
+    /* Main coordination loop: log summary every 10 seconds if verbose */
     while (g_ctx.running) {
         sleep(10);
-        if (g_ctx.running) {
+        if (g_ctx.running && g_ctx.cfg.verbose) {
             printf("[AtesN-DS Status] Ingested: %lu | Expired Deleted: %lu | LRU Evicted: %lu | Active Occupancy: %lu entries (Zero-PCIe-Reads)\n",
                    g_ctx.total_ingested, g_ctx.total_expired_deleted, g_ctx.total_lru_evicted, g_ctx.wheel->total_entries);
         }

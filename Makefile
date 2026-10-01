@@ -155,7 +155,22 @@ time-updater: daemon
 cleaner: daemon
 # ------------------------------------------------
 
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
 install:
+	@echo "Installing ates CLI to $(BINDIR)..."
+	@sudo install -d $(BINDIR)
+	@sudo ln -sf $(CURDIR)/ates.py $(BINDIR)/ates
+	@sudo ln -sf $(CURDIR)/ates.py $(BINDIR)/ates.py
+	@echo "✅ ates CLI successfully installed! You can now run 'ates' or 'ates.py' from any directory."
+
+uninstall:
+	@echo "Uninstalling ates CLI from $(BINDIR)..."
+	@sudo rm -f $(BINDIR)/ates $(BINDIR)/ates.py
+	@echo "✅ Uninstalled successfully."
+
+install-deps:
 	sudo chmod +x ${INSTALL} && sudo ${INSTALL}
 
 load:

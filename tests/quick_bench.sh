@@ -59,6 +59,7 @@ for MODE in "${MODES[@]}"; do
       tmux kill-session -t hw 2>/dev/null || true
 
       sudo -n pkill atesnds 2>/dev/null || true
+      sudo -n pkill atesnds_daemon 2>/dev/null || true
       sudo -n pkill time_updater 2>/dev/null || true
       sudo -n pkill sample_server.py 2>/dev/null || true
 
@@ -107,6 +108,7 @@ for MODE in "${MODES[@]}"; do
     echo "-> Encerrando processos remotos..."
     ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" "
       sudo -n pkill atesnds 2>/dev/null || true
+      sudo -n pkill atesnds_daemon 2>/dev/null || true
       sudo -n pkill time_updater 2>/dev/null || true
       tmux kill-session -t ates 2>/dev/null || true
       tmux kill-session -t hw 2>/dev/null || true

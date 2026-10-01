@@ -168,8 +168,6 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     if (query_response != QUERY_RETURN) {
-        
-        bpf_printk("Received response for domain: %s\n", dnsquery->query.name);
         dnsquery->id.port = get_dest_port(data);
 
         bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
@@ -181,8 +179,6 @@ int dns_filter(struct xdp_md *ctx) {
     if (miss_cnt) {
         *miss_cnt += 1;
     }
-
-    bpf_printk("Received query for domain: %s\n", dnsquery->query.name);
 
     dnsquery->id.port = get_source_port(data);
 
