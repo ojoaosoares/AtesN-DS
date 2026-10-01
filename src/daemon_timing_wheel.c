@@ -63,7 +63,15 @@ struct wheel_node *timing_wheel_pop_expired(struct timing_wheel *w, uint32_t cur
     uint32_t popped = 0;
 
     pthread_mutex_lock(&w->lock);
-    if (w->last_tick == 0) w->last_tick = current_time;
+    if (w->last_tick == 0 || current_time < w->last_tick) {
+        w->last_tick = current_time;
+    }
+
+    /* Prevent iterating more than capacity if system lagged */
+    uint32_t ticks = current_time - w->last_tick;
+    if (ticks >= w->capacity) {
+        w->last_tick = current_time - w->capacity + 1;
+    }
 
     /* Drain all buckets from last_tick up to current_time */
     for (uint32_t t = w->last_tick; t <= current_time; t++) {

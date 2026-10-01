@@ -74,6 +74,34 @@ run-daemon: $(DAEMON_BIN)
 	sudo $(DAEMON_BIN) -v
 
 # ------------------------------------------------
+# Unit tests (CLI & Daemon modules)
+# ------------------------------------------------
+TEST_DAEMON_SRC = tests/test_daemon_unit.c
+TEST_DAEMON_BIN = $(BIN_FOLDER)test_daemon_unit
+
+$(TEST_DAEMON_BIN): $(TEST_DAEMON_SRC) $(SRC_FOLDER)daemon_timing_wheel.c $(SRC_FOLDER)daemon_ingest.c $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< $(SRC_FOLDER)daemon_timing_wheel.c $(SRC_FOLDER)daemon_ingest.c -I $(INCLUDE_FOLDER) -lbpf -pthread
+
+test-daemon: $(TEST_DAEMON_BIN)
+	@echo "=========================================================="
+	@echo "🧪 Running Native C Daemon Unit Tests"
+	@echo "=========================================================="
+	@$(TEST_DAEMON_BIN)
+
+test-cli:
+	@echo "=========================================================="
+	@echo "🧪 Running Python Unit Tests (CLI & Architecture)"
+	@echo "=========================================================="
+	@python3 -m unittest discover -s tests -p "test_*.py"
+
+test: $(TEST_DAEMON_BIN) test-cli
+	@echo ""
+	@echo "=========================================================="
+	@echo "🧪 Running Native C Daemon Unit Tests"
+	@echo "=========================================================="
+	@$(TEST_DAEMON_BIN)
+
+# ------------------------------------------------
 # Control-plane benchmarks & plotting
 # ------------------------------------------------
 RUNS ?= 30

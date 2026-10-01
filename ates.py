@@ -354,20 +354,73 @@ def show_status(interface):
         ("Host hw_sync_ringbuf", PIN_HW_SYNC),
         ("Host ringbuf_send_packet", PIN_RESOLVER),
     ]:
-        exists = path.exists()
-        badge = f"{Color.GREEN}Pinned{Color.RESET}" if exists else f"{Color.YELLOW}Unpinned{Color.RESET}"
+        try:
+            exists = path.exists()
+            badge = f"{Color.GREEN}Pinned{Color.RESET}" if exists else f"{Color.YELLOW}Unpinned{Color.RESET}"
+        except PermissionError:
+            badge = f"{Color.YELLOW}Unpinned (Requires Root){Color.RESET}"
+        except OSError:
+            badge = f"{Color.YELLOW}Unpinned{Color.RESET}"
         print(f"    - {name:25s}: {badge} ({path})")
 
-    # Check recent daemon metrics if log exists
-    if LOG_DAEMON.exists():
-        print("\n  Recent Daemon Telemetry:")
-        try:
+    # Check recent daemon metrics if log exists and is readable
+    try:
+        if LOG_DAEMON.exists() and os.access(LOG_DAEMON, os.R_OK):
+            print("\n  Recent Daemon Telemetry:")
             tail = subprocess.run(["tail", "-n", "3", str(LOG_DAEMON)], capture_output=True, text=True).stdout
             for line in tail.strip().splitlines():
                 print(f"    {line}")
-        except Exception:
-            pass
+    except Exception:
+        pass
     print("=" * 65)
+
+
+# ==============================================================================
+# Unit Test Runner
+# ==============================================================================
+def run_tests(args):
+    print("=" * 65)
+    print("🧪 AtesN-DS Unit Test Suite")
+    print("=" * 65)
+    run_all = not args.cli and not args.daemon
+    success_all = True
+
+    if args.cli or run_all:
+        info("Running CLI & Daemon Architecture Unit Tests (Python)...")
+        res = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", str(ROOT_DIR / "tests"), "-p", "test_*.py"],
+            cwd=ROOT_DIR
+        )
+        if res.returncode == 0:
+            success("Python Unit Tests: PASSED")
+        else:
+            error("Python Unit Tests: FAILED")
+            success_all = False
+
+    if args.daemon or run_all:
+        info("Running C Control-Plane Daemon Native Unit Tests...")
+        test_bin = BIN_DIR / "test_daemon_unit"
+        if not test_bin.exists():
+            print("  Attempting to compile bin/test_daemon_unit...")
+            subprocess.run(["make", "-C", str(ROOT_DIR), "bin/test_daemon_unit"])
+
+        if test_bin.exists():
+            res = subprocess.run([str(test_bin)])
+            if res.returncode == 0:
+                success("Native C Daemon Unit Tests: PASSED")
+            else:
+                error("Native C Daemon Unit Tests: FAILED")
+                success_all = False
+        else:
+            warn("bin/test_daemon_unit binary not found or compilation skipped.")
+            warn("To compile and run C unit tests directly on host: make test-daemon")
+
+    print("=" * 65)
+    if success_all:
+        success("Test execution completed successfully!")
+    else:
+        error("Some unit tests failed.")
+        sys.exit(1)
 
 
 # ==============================================================================
@@ -425,6 +478,11 @@ def main():
     # Command: verify
     subparsers.add_parser("verify", help="Run the full hardware & driver BPF verifier suite (make check)")
 
+    # Command: test
+    p_test = subparsers.add_parser("test", help="Run unit test suite for CLI and Daemons")
+    p_test.add_argument("--cli", action="store_true", help="Run only Python unit tests (CLI & Daemon simulation)")
+    p_test.add_argument("--daemon", action="store_true", help="Run only native C daemon unit tests")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -473,6 +531,8 @@ def main():
         subprocess.run(cmd)
     elif args.command == "verify":
         subprocess.run(["./verify.sh"], cwd=ROOT_DIR)
+    elif args.command == "test":
+        run_tests(args)
 
 
 if __name__ == "__main__":
