@@ -295,6 +295,9 @@ struct event_prefetch {
 /**
  * @brief Event for Asymmetric Cache Ingestion to SmartNIC (Hardware Sync)
  */
+#define HW_SYNC_RINGBUF_SIZE  (4 * 1024 * 1024)  /* 4 MB: Absorbs >58,000 sync events (>3.5x peak 16,384 concurrency) */
+#define RESOLVER_RINGBUF_SIZE (8 * 1024 * 1024)  /* 8 MB: Absorbs >29,000 prefetch/error events (>1.78x peak 16,384 concurrency) */
+
 struct hw_cache_sync_event {
     char name[MAX_DNS_NAME_LENGTH_HW];
     __be32 ip;

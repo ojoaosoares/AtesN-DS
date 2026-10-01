@@ -357,6 +357,12 @@ int main(int argc, char *argv[]) {
     printf("Program attached successfully\n");
     printf("CTRL + C to stop\n");
 
+    struct bpf_map *hw_sync_map = bpf_object__find_map_by_name(skel->obj, "hw_sync_ringbuf");
+    if (hw_sync_map) {
+        unlink("/sys/fs/bpf/hw_sync_ringbuf");
+        bpf_map__pin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
+    }
+
     struct send_packets_context sctx = {
         .saddr = myip
     };
@@ -373,6 +379,9 @@ int main(int argc, char *argv[]) {
     }
     
 cleanup: 
+    if (hw_sync_map) {
+        bpf_map__unpin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
+    }
     dns__destroy(skel);
     return 0;
 }

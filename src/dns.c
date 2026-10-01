@@ -24,8 +24,23 @@
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
+    __uint(max_entries, RESOLVER_RINGBUF_SIZE);
 } ringbuf_send_packet SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, HW_SYNC_RINGBUF_SIZE);
+} hw_sync_ringbuf SEC(".maps");
+
+static __always_inline void notify_hw_cache(const char *name, __be32 ip, __u64 timestamp) {
+    struct hw_cache_sync_event *evt = bpf_ringbuf_reserve(&hw_sync_ringbuf, sizeof(*evt), 0);
+    if (!evt)
+        return;
+    __builtin_memcpy(evt->name, name, MAX_DNS_NAME_LENGTH_HW);
+    evt->ip = ip;
+    evt->timestamp = (__u32)timestamp;
+    bpf_ringbuf_submit(evt, 0);
+}
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -399,6 +414,7 @@ int dns_response(struct xdp_md *ctx)
                     return XDP_DROP;
 
                 bpf_map_update_elem(&cache_arecords, dnsquery->query.name, &cache_record, BPF_ANY);
+                notify_hw_cache(dnsquery->query.name, cache_record.ip, cache_record.timestamp);
             }
 
             if (!powner->ip)
@@ -831,6 +847,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     default:
 
                         bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
+                        notify_hw_cache(query->query.name, cache_record.ip, cache_record.timestamp);
 
                         if (hide_in_dest_ip_safe(data, data_end, RCODE_NXDOMAIN) == DROP)
                             return XDP_DROP;
@@ -935,6 +952,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (cache_record.timestamp)
                 {
                     bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
+                    notify_hw_cache(query->query.name, cache_record.ip, cache_record.timestamp);
                 }
 
                 if (cache_record.ip == 0)

@@ -1,0 +1,83 @@
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include "daemon_ingest.h"
+
+int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
+    struct daemon_ctx *d = (struct daemon_ctx *)ctx;
+    if (len < sizeof(struct hw_cache_sync_event)) return 0;
+
+    const struct hw_cache_sync_event *evt = (const struct hw_cache_sync_event *)data;
+
+    /* Ensure clean 50-byte zero-padded key */
+    char key[MAX_DNS_NAME_LENGTH_HW] = {0};
+    memcpy(key, evt->name, sizeof(key));
+
+    /* 1. Register in Host DRAM Timing Wheel */
+    timing_wheel_insert(d->wheel, key, evt->timestamp);
+
+    /* 2. Write to SmartNIC level_one_cache via PCIe DMA */
+    struct a_record_hw rec = {
+        .timestamp = evt->timestamp,
+        .ip = evt->ip
+    };
+
+    if (d->hw_cache_fd >= 0) {
+        int ret = bpf_map_update_elem(d->hw_cache_fd, key, &rec, BPF_ANY);
+        if (ret == 0) {
+            d->total_ingested++;
+        }
+    }
+
+    return 0;
+}
+
+void *ingest_worker_thread(void *arg) {
+    struct daemon_ctx *d = (struct daemon_ctx *)arg;
+    pin_to_core(d->cfg.ingest_core);
+
+    if (d->cfg.verbose)
+        printf("[Ingest Worker] Thread started on core %d (Lockless Ingestion)\n", d->cfg.ingest_core);
+
+    while (d->running) {
+        if (!d->rb) {
+            if (d->ringbuf_map_fd < 0) {
+                d->ringbuf_map_fd = bpf_obj_get(d->cfg.ringbuf_path);
+            }
+            if (d->ringbuf_map_fd >= 0) {
+                d->rb = ring_buffer__new(d->ringbuf_map_fd, handle_hw_sync_sample, d, NULL);
+                if (d->rb && d->cfg.verbose) {
+                    printf("[Ingest Worker] Connected to ring buffer '%s'\n", d->cfg.ringbuf_path);
+                }
+            }
+            if (!d->rb) {
+                sleep(1);
+                continue;
+            }
+        }
+
+        int err = ring_buffer__poll(d->rb, 50 /* timeout_ms */);
+        if (err < 0 && err != -EINTR) {
+            if (d->cfg.verbose)
+                fprintf(stderr, "[Ingest Worker] Ring buffer poll returned %d. Reconnecting...\n", err);
+            ring_buffer__free(d->rb);
+            d->rb = NULL;
+            if (d->ringbuf_map_fd >= 0) {
+                close(d->ringbuf_map_fd);
+                d->ringbuf_map_fd = -1;
+            }
+            sleep(1);
+        }
+    }
+
+    if (d->rb) {
+        ring_buffer__free(d->rb);
+        d->rb = NULL;
+    }
+
+    if (d->cfg.verbose)
+        printf("[Ingest Worker] Exiting...\n");
+    return NULL;
+}

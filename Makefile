@@ -32,14 +32,17 @@ SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
 HEADERS   = $(filter-out $(SKELETON), $(wildcard $(INCLUDE_FOLDER)*.h))
 PROG_MOUNT_PATH = /sys/fs/bpf
-# time_updater
-TIME_SRC  = $(SRC_FOLDER)time_updater.c
-TIME_BIN  = $(BIN_FOLDER)time_updater
 $(shell mkdir -p $(OBJ_FOLDER))
 $(shell mkdir -p $(BIN_FOLDER))
 $(shell mkdir -p $(DATA_FOLDER))
 
 all: ${TARGET}
+
+build-all: build-hw all daemon
+
+check: verify
+verify:
+	@./verify.sh
 
 run: ${TARGET}
 	sudo ${TARGET} -a ${IP} -i ${DEV} -m ${MAC}
@@ -53,28 +56,22 @@ ${SKELETON}: ${OBJ_FOLDER}dns.o
 ${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c $(HEADERS)
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 # ------------------------------------------------
-# time_updater (userspace, atualiza time_map)
+# atesnds_daemon (Unified Modular Multithreaded Control-Plane Runtime)
 # ------------------------------------------------
-time-updater: $(TIME_BIN)
-$(TIME_BIN): $(TIME_SRC) $(HEADERS)
-	clang-15 -O2 -Wall -o $@ $< -lbpf
-run-time-updater: $(TIME_BIN)
-	sudo rm -f $(PROG_MOUNT_PATH)/time_map
-	sudo bpftool map pin id $(TIME_MAP_ID) $(PROG_MOUNT_PATH)/time_map
-	sudo $(TIME_BIN) $(PROG_MOUNT_PATH)/time_map
+DAEMON_SRCS = $(SRC_FOLDER)daemon_timing_wheel.c \
+              $(SRC_FOLDER)daemon_ingest.c \
+              $(SRC_FOLDER)daemon_cleaner.c \
+              $(SRC_FOLDER)daemon_prefetch.c \
+              $(SRC_FOLDER)atesnds_daemon.c
+DAEMON_OBJS = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(DAEMON_SRCS))
+DAEMON_BIN  = $(BIN_FOLDER)atesnds_daemon
 
-# ------------------------------------------------
-# cleaner_daemon (userspace, limpa expiração e LRU em level_one_cache)
-# ------------------------------------------------
-CLEANER_SRC = $(SRC_FOLDER)cleaner_daemon.c
-CLEANER_BIN = $(BIN_FOLDER)cleaner_daemon
+daemon: $(DAEMON_BIN)
+$(DAEMON_BIN): $(DAEMON_SRCS) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $(DAEMON_SRCS) -I $(INCLUDE_FOLDER) -lbpf -pthread
 
-cleaner: $(CLEANER_BIN)
-$(CLEANER_BIN): $(CLEANER_SRC) $(HEADERS)
-	clang-15 -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf
-
-run-cleaner: $(CLEANER_BIN)
-	sudo $(CLEANER_BIN) -v
+run-daemon: $(DAEMON_BIN)
+	sudo $(DAEMON_BIN) -v
 
 # ------------------------------------------------
 # Control-plane benchmarks & plotting
@@ -121,6 +118,8 @@ $(HW_OBJ): $(HW_SRC) $(HEADERS)
 
 load-hw: $(HW_OBJ)
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
+	sudo bpftool net detach xdp dev $(HW_DEV) 2>/dev/null || true
+	sudo ip link set dev $(HW_DEV) xdp off 2>/dev/null || true
 	sudo rm -f $(PROG_PIN) $(PROG_MOUNT_PATH)/time_map $(PROG_MOUNT_PATH)/level_one_cache
 	sudo bpftool -d prog load $(HW_OBJ) $(PROG_PIN) \
 		type xdp \
@@ -128,22 +127,32 @@ load-hw: $(HW_OBJ)
 	sudo bpftool net attach xdpoffload \
 		pinned $(PROG_PIN) \
 		dev $(HW_DEV)
-	sudo rm -f $(PROG_MOUNT_PATH)/time_map
+	@HW_CACHE_ID=$$(sudo bpftool map show 2>/dev/null | grep "name level_one_cache" | head -n1 | cut -d: -f1 || true); \
+	if [ -n "$$HW_CACHE_ID" ]; then \
+		sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache; \
+		sudo bpftool map pin id "$$HW_CACHE_ID" $(PROG_MOUNT_PATH)/level_one_cache 2>/dev/null || true; \
+	fi
+	@TIME_ID=$$(sudo bpftool map show 2>/dev/null | grep "name time_map" | head -n1 | cut -d: -f1 || true); \
+	if [ -n "$$TIME_ID" ]; then \
+		sudo rm -f $(PROG_MOUNT_PATH)/time_map; \
+		sudo bpftool map pin id "$$TIME_ID" $(PROG_MOUNT_PATH)/time_map 2>/dev/null || true; \
+	fi
 	
 unload-hw:
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
 	sudo rm -f $(PROG_PIN)
 	sudo rm -f $(PROG_MOUNT_PATH)/time_map
 	sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache
+	sudo rm -f $(PROG_MOUNT_PATH)/hw_sync_ringbuf
+	sudo rm -f $(PROG_MOUNT_PATH)/ringbuf_send_packet
 reload-hw: unload-hw build-hw load-hw
 
+load-and-run-daemon: load-hw daemon
+	sudo $(DAEMON_BIN)
 
-load-and-run-time-updater:
-		$(MAKE) load-hw
-		$(MAKE) run-time-updater TIME_MAP_ID=$$(sudo bpftool map show | \
-					grep "name time_map" | \
-							head -n1 | \
-									cut -d: -f1)
+load-and-run-time-updater: load-and-run-daemon
+time-updater: daemon
+cleaner: daemon
 # ------------------------------------------------
 
 install:
