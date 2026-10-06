@@ -40,6 +40,23 @@ void timing_wheel_destroy(struct timing_wheel *w) {
     free(w);
 }
 
+void timing_wheel_clear(struct timing_wheel *w) {
+    if (!w) return;
+    pthread_mutex_lock(&w->lock);
+    for (uint32_t i = 0; i < w->capacity; i++) {
+        struct wheel_node *cur = w->buckets[i];
+        while (cur) {
+            struct wheel_node *tmp = cur;
+            cur = cur->next;
+            free(tmp);
+        }
+        w->buckets[i] = NULL;
+    }
+    w->total_entries = 0;
+    w->last_tick = 0;
+    pthread_mutex_unlock(&w->lock);
+}
+
 int timing_wheel_insert(struct timing_wheel *w, const char *name, uint32_t expire_time) {
     struct wheel_node *node = malloc(sizeof(struct wheel_node));
     if (!node) return -ENOMEM;
@@ -129,4 +146,81 @@ struct wheel_node *timing_wheel_pop_min_ttl(struct timing_wheel *w, uint32_t cur
 
     if (count) *count = evicted;
     return evict_head;
+}
+
+struct wheel_node *timing_wheel_pop_victims(struct timing_wheel *w, uint32_t current_time,
+                                            uint32_t target_count, uint32_t *count) {
+    if (!w || target_count == 0) {
+        if (count) *count = 0;
+        return NULL;
+    }
+
+    struct wheel_node *head = NULL;
+    uint32_t popped = 0;
+
+    pthread_mutex_lock(&w->lock);
+    if (w->total_entries == 0) {
+        pthread_mutex_unlock(&w->lock);
+        if (count) *count = 0;
+        return NULL;
+    }
+
+    if (w->last_tick == 0 || current_time < w->last_tick) {
+        w->last_tick = current_time;
+    }
+
+    uint32_t ticks = current_time - w->last_tick;
+    if (ticks >= w->capacity) {
+        w->last_tick = current_time - w->capacity + 1;
+    }
+
+    /* Phase 1: Pop expired entries from last_tick up to current_time */
+    for (uint32_t t = w->last_tick; t <= current_time && popped < target_count; t++) {
+        uint32_t bucket = t % w->capacity;
+        struct wheel_node *cur = w->buckets[bucket];
+        struct wheel_node *prev = NULL;
+
+        while (cur && popped < target_count) {
+            struct wheel_node *next = cur->next;
+            if (cur->expire_time <= current_time) {
+                if (prev) {
+                    prev->next = next;
+                } else {
+                    w->buckets[bucket] = next;
+                }
+                cur->next = head;
+                head = cur;
+                popped++;
+                if (w->total_entries > 0) w->total_entries--;
+            } else {
+                prev = cur;
+            }
+            cur = next;
+        }
+        if (!w->buckets[bucket]) {
+            w->last_tick = t + 1;
+        }
+    }
+
+    /* Phase 2: If target not yet met, pop entries with earliest future expiration (min-TTL) */
+    if (popped < target_count) {
+        for (uint32_t offset = 1; offset < w->capacity && popped < target_count; offset++) {
+            uint32_t bucket = (current_time + offset) % w->capacity;
+            struct wheel_node *cur = w->buckets[bucket];
+            while (cur && popped < target_count) {
+                struct wheel_node *next = cur->next;
+                w->buckets[bucket] = next;
+
+                cur->next = head;
+                head = cur;
+                popped++;
+                if (w->total_entries > 0) w->total_entries--;
+                cur = next;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&w->lock);
+    if (count) *count = popped;
+    return head;
 }

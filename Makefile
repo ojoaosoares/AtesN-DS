@@ -2,7 +2,6 @@
 CC = clang-15
 CXXFLAGS = -g -target bpf -O2
 # LIBBPF = /usr/lib64/libbpf.so
-export PYTHONPATH := /home/soares/snap/antigravity-cli/common/pyenv/local/lib/python3.14/dist-packages:$(PYTHONPATH)
 
 # folders
 INCLUDE_FOLDER = ./include/
@@ -130,6 +129,25 @@ plot-daemons:
 	python3 graphs/plot_statistical_distributions.py
 
 plot-distributions: plot-daemons
+
+
+# ------------------------------------------------
+# Passive Eviction Benchmark (Active Sweep vs. Passive On-Write)
+# ------------------------------------------------
+BENCH_PASSIVE_SRC = tests/bench_passive_eviction.c
+BENCH_PASSIVE_BIN = $(BIN_FOLDER)bench_passive_eviction
+
+bench-passive: $(BENCH_PASSIVE_BIN)
+$(BENCH_PASSIVE_BIN): $(BENCH_PASSIVE_SRC) $(SRC_FOLDER)daemon_timing_wheel.c $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< $(SRC_FOLDER)daemon_timing_wheel.c -I $(INCLUDE_FOLDER) -lbpf -pthread -lm
+
+run-bench-passive: $(BENCH_PASSIVE_BIN)
+	$(BENCH_PASSIVE_BIN) -n $(ENTRIES) -r $(RUNS) -m 50000 -e 100000
+
+plot-passive:
+	python3 graphs/plot_passive_eviction.py
+
+eval-passive: bench-passive run-bench-passive plot-passive
 
 
 # ------------------------------------------------

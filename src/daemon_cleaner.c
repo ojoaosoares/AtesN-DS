@@ -31,17 +31,15 @@ void *governance_worker_thread(void *arg) {
         return NULL;
     }
 
-    uint64_t expirations = 0;
-    uint32_t high_watermark = (d->cfg.hw_cache_capacity * d->cfg.high_watermark_pct) / 100;
-    uint32_t low_watermark  = (d->cfg.hw_cache_capacity * d->cfg.low_watermark_pct) / 100;
+    uint64_t timer_ticks = 0;
 
     while (d->running) {
-        ssize_t s = read(tfd, &expirations, sizeof(expirations));
+        ssize_t s = read(tfd, &timer_ticks, sizeof(timer_ticks));
         if (s <= 0 || !d->running) break;
 
         uint32_t now = (uint32_t)time(NULL);
 
-        /* 1. Synchronize Hardware Clock (time_map) at 1 Hz */
+        /* Synchronize Hardware Clock (time_map) at 1 Hz via single 4-byte PCIe DMA write */
         uint32_t zero_key = 0;
         if (d->time_map_fd >= 0) {
             if (bpf_map_update_elem(d->time_map_fd, &zero_key, &now, BPF_ANY) != 0) {
@@ -58,49 +56,10 @@ void *governance_worker_thread(void *arg) {
             }
         }
 
-        if (d->hw_cache_fd < 0) {
-            d->hw_cache_fd = bpf_obj_get(d->cfg.hw_cache_path);
-        }
-
-        /* 2. Zero-PCIe-Read Expiration: Pop expired keys directly from DRAM */
-        uint32_t expired_count = 0;
-        uint32_t del_pacing = 0;
-        struct wheel_node *exp_list = timing_wheel_pop_expired(d->wheel, now, &expired_count);
-        while (exp_list) {
-            struct wheel_node *next = exp_list->next;
-            if (d->hw_cache_fd >= 0) {
-                bpf_map_delete_elem(d->hw_cache_fd, exp_list->name);
-            }
-            free(exp_list);
-            exp_list = next;
-            d->total_expired_deleted++;
-            if (++del_pacing % 256 == 0) usleep(100);
-        }
-
-        if (d->cfg.verbose && expired_count > 0) {
-            printf("[Governance] Purged %u expired entries from SmartNIC (Zero-PCIe-Reads)\n", expired_count);
-        }
-
-        /* 3. Dual-Watermark Proactive Eviction */
-        uint64_t current_occ = d->wheel->total_entries;
-        if (current_occ > high_watermark) {
-            uint32_t needed_evictions = (uint32_t)(current_occ - low_watermark);
-            uint32_t lru_evicted = 0;
-            del_pacing = 0;
-            struct wheel_node *lru_list = timing_wheel_pop_min_ttl(d->wheel, now, needed_evictions, &lru_evicted);
-            while (lru_list) {
-                struct wheel_node *next = lru_list->next;
-                bpf_map_delete_elem(d->hw_cache_fd, lru_list->name);
-                free(lru_list);
-                lru_list = next;
-                d->total_lru_evicted++;
-                if (++del_pacing % 256 == 0) usleep(100);
-            }
-
-            if (d->cfg.verbose) {
-                printf("[Governance] Watermark Triggered: Occ=%lu (High=%u, Low=%u) -> Proactively evicted %u entries\n",
-                       current_occ, high_watermark, low_watermark, lru_evicted);
-            }
+        if (d->cfg.verbose && (timer_ticks % 10 == 0)) {
+            uint64_t occ = d->wheel ? d->wheel->total_entries : 0;
+            printf("[Governance 1Hz] Clock Synced (now=%u) | Cache Occ: %lu/%u | Passive Evictions: %lu\n",
+                   now, occ, d->cfg.hw_cache_capacity, d->total_passive_evicted);
         }
     }
 

@@ -198,8 +198,8 @@ int main(int argc, char *argv[]) {
     while (g_ctx.running) {
         sleep(10);
         if (g_ctx.running && g_ctx.cfg.verbose) {
-            printf("[AtesN-DS Status] Ingested: %lu | Expired Deleted: %lu | LRU Evicted: %lu | Active Occupancy: %lu entries (Zero-PCIe-Reads)\n",
-                   g_ctx.total_ingested, g_ctx.total_expired_deleted, g_ctx.total_lru_evicted, g_ctx.wheel->total_entries);
+            printf("[AtesN-DS Status] Ingested: %lu | Passive Evicted (On-Write): %lu | Occupancy: %lu/%u (Zero-PCIe-Reads)\n",
+                   g_ctx.total_ingested, g_ctx.total_passive_evicted, g_ctx.wheel->total_entries, g_ctx.cfg.hw_cache_capacity);
         }
     }
 

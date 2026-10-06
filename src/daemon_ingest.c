@@ -16,15 +16,32 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
     char key[MAX_DNS_NAME_LENGTH_HW] = {0};
     memcpy(key, evt->name, sizeof(key));
 
-    /* 1. Register in Host DRAM Timing Wheel */
-    timing_wheel_insert(d->wheel, key, evt->timestamp);
-
-    /* 2. Write to SmartNIC level_one_cache via PCIe DMA */
     struct a_record_hw rec = {
         .timestamp = evt->timestamp,
         .ip = evt->ip
     };
 
+    if (d->wheel && d->wheel->total_entries >= d->cfg.hw_cache_capacity) {
+        uint32_t now = (uint32_t)time(NULL);
+        uint32_t count = 0;
+
+        struct wheel_node *victim = timing_wheel_pop_victims(d->wheel, now, 1, &count);
+        while (victim) {
+            struct wheel_node *next = victim->next;
+            if (d->hw_cache_fd >= 0) {
+                bpf_map_delete_elem(d->hw_cache_fd, victim->name);
+            }
+            free(victim);
+            d->total_passive_evicted++;
+            victim = next;
+        }
+    }
+
+    if (d->wheel) {
+        timing_wheel_insert(d->wheel, key, evt->timestamp);
+    }
+
+    /* 2. Write to SmartNIC level_one_cache via PCIe DMA */
     if (d->hw_cache_fd >= 0) {
         int ret = bpf_map_update_elem(d->hw_cache_fd, key, &rec, BPF_ANY);
         if (ret == 0) {

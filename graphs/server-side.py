@@ -47,6 +47,11 @@ for file in files:
             metrics[metric_name] = float(row["mean"]) if "mean" in row else float(row["value"])
             if "std" in row:
                 metrics[f"{metric_name}_std"] = float(row["std"])
+            if "ci95" in row and pd.notna(row["ci95"]):
+                metrics[f"{metric_name}_ci95"] = float(row["ci95"])
+            elif "std" in row:
+                # Fallback: compute 95% CI from std assuming n=30 runs (t_crit=2.0452)
+                metrics[f"{metric_name}_ci95"] = 2.0452 * (float(row["std"]) / (30.0 ** 0.5))
 
         rows.append(metrics)
 
@@ -75,6 +80,8 @@ if (
     irq_mean = df["cpu_irq_mean"] if "cpu_irq_mean" in df.columns else 0.0
     softirq_std = df["cpu_softirq_mean_std"] if "cpu_softirq_mean_std" in df.columns else 0.0
     irq_std = df["cpu_irq_mean_std"] if "cpu_irq_mean_std" in df.columns else 0.0
+    softirq_ci = df["cpu_softirq_mean_ci95"] if "cpu_softirq_mean_ci95" in df.columns else (softirq_std / (30.0 ** 0.5)) * 2.0452
+    irq_ci = df["cpu_irq_mean_ci95"] if "cpu_irq_mean_ci95" in df.columns else (irq_std / (30.0 ** 0.5)) * 2.0452
 
     df["cpu_total_mean"] = (
         df["cpu_user_mean"]
@@ -90,6 +97,15 @@ if (
                 + df["cpu_system_mean_std"] ** 2
                 + softirq_std ** 2
                 + irq_std ** 2
+            ) ** 0.5
+        )
+    if "cpu_user_mean_ci95" in df.columns and "cpu_system_mean_ci95" in df.columns:
+        df["cpu_total_mean_ci95"] = (
+            (
+                df["cpu_user_mean_ci95"] ** 2
+                + df["cpu_system_mean_ci95"] ** 2
+                + softirq_ci ** 2
+                + irq_ci ** 2
             ) ** 0.5
         )
 
@@ -141,21 +157,33 @@ def plot_metric(metric, ylabel, filename):
             label=cache,
         )
 
-        std_col = f"{metric}_std"
+        ci_col = f"{metric}_ci95"
 
-        if std_col in subset.columns:
-            std = subset[std_col].fillna(0).to_numpy()
-
+        if ci_col in subset.columns:
+            ci = subset[ci_col].fillna(0).to_numpy()
             plt.fill_between(
                 x,
-                y - std,
-                y + std,
-                alpha=0.30,
+                y - ci,
+                y + ci,
+                alpha=0.25,
+            )
+        elif f"{metric}_std" in subset.columns:
+            ci = (subset[f"{metric}_std"].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+            plt.fill_between(
+                x,
+                y - ci,
+                y + ci,
+                alpha=0.25,
             )
 
     plt.xlabel("Concurrent Connections")
     plt.ylabel(ylabel)
-    plt.title(f"{metric} (Mean ± Std Dev)")
+    plt.title(f"{metric} (Mean ± 95% Confidence Interval)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300)
+    plt.close()
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()

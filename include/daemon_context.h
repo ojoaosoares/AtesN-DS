@@ -50,6 +50,7 @@ struct daemon_ctx {
     uint64_t total_ingested;
     uint64_t total_expired_deleted;
     uint64_t total_lru_evicted;
+    uint64_t total_passive_evicted;
 };
 
 static inline void pin_to_core(int core_id) {
