@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <linux/types.h>
 #include <linux/in.h>
+#include <linux/bpf.h>
 
 // -----------------------------------------------------------------------------
 // Compatibility & Helpers

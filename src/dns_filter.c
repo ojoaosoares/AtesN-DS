@@ -1,6 +1,6 @@
+#include <linux/bpf.h>
 #include "dns.h"
 #include "net_format.h"
-#include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/udp.h>

@@ -18,9 +18,9 @@ fi
 # CONFIGURAÇÃO
 #########################
 
-REMOTE_USER="soares"
-REMOTE_HOST="150.164.2.81"
-REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
+REMOTE_USER="joaosoares"
+REMOTE_HOST="150.164.2.93"
+REMOTE_BASE_DIR="/home/joaosoares/Documents/Github/AtesN-DS"
 
 # Parâmetros para benchmark rápido
 NUM_RUNS=1
@@ -31,7 +31,7 @@ REMOTE_SERVER_IP="192.168.0.1"
 REMOTE_MAC_ADDR="3c:fd:fe:03:02:00"
 REMOTE_DNS_SERVER="199.7.83.42"
 
-LOCAL_INTERFACE="enp1s0f0np0"
+LOCAL_INTERFACE="enp1s0f0"
 LOCAL_CLIENT_IP="192.168.0.2"
 
 REMOTE_PYTHON="python3"
@@ -90,10 +90,21 @@ for MODE in "${MODES[@]}"; do
 
     echo "-> Iniciando atesnds no servidor..."
     ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
-      "cd '${REMOTE_BASE_DIR}' && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER}'"
+      "cd '${REMOTE_BASE_DIR}' && tmux new-session -d -s ates 'sudo -n ./bin/atesnds -a ${REMOTE_SERVER_IP} -i ${REMOTE_INTERFACE} -m ${REMOTE_MAC_ADDR} -s ${REMOTE_DNS_SERVER} -v'"
 
     sleep 3
 
+    echo "-> Verificando se atesnds está rodando..."
+    if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" "pgrep -af atesnds" >/dev/null 2>&1; then
+        echo "❌ ERRO: atesnds NÃO está rodando no servidor!"
+        echo "===== SAÍDA DO TMUX ates ====="
+        ssh "${REMOTE_USER}@${REMOTE_HOST}" "tmux capture-pane -t ates -p -S -100" || true
+        echo "===== SAÍDA DO TMUX hw ====="
+        ssh "${REMOTE_USER}@${REMOTE_HOST}" "tmux capture-pane -t hw -p -S -100" || true
+        exit 1
+    fi
+
+    echo "-> atesnds está rodando com sucesso."
     echo "-> Executando dnspyre client (warmup + medição de 10s)..."
     CLIENT_OUTPUT_FILE="${LOCAL_RESULTS_DIR_CLIENT}/client_output_${MODE}_${CONCURRENCY}.csv"
 

@@ -11,9 +11,9 @@ PROJECT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 #########################
 
 # Conexão Remota
-REMOTE_USER="soares"
-REMOTE_HOST="150.164.2.81"
-REMOTE_BASE_DIR="/home/soares/Documentos/AtesN-DS"
+REMOTE_USER="joaosoares"
+REMOTE_HOST="150.164.2.93"
+REMOTE_BASE_DIR="/home/joaosoares/Documents/Github/AtesN-DS"
 
 # Parâmetros do Benchmark
 NUM_RUNS=30
@@ -26,7 +26,7 @@ REMOTE_SERVER_IP="192.168.0.1"
 REMOTE_MAC_ADDR="3c:fd:fe:03:02:00"
 REMOTE_DNS_SERVER="199.7.83.42"
 
-LOCAL_INTERFACE="enp1s0f0np0"
+LOCAL_INTERFACE="enp1s0f0"
 LOCAL_CLIENT_IP="192.168.0.2"
 
 # Scripts e Diretórios

@@ -11,6 +11,8 @@
 #include <getopt.h>
 #include <netinet/ip.h>
 #include <linux/if_link.h>
+#include <sys/resource.h>
+#include <errno.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include "dns.h"
@@ -23,6 +25,13 @@
 #define MAX_IP_STRING_LENGTH 16
 
 static const char *standard_recursive_server = "8.8.8.8";
+static bool g_verbose = false;
+
+static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args) {
+    if (level == LIBBPF_DEBUG && !g_verbose)
+        return 0;
+    return vfprintf(stderr, format, args);
+}
 
 struct send_packets_context {
     __u32 saddr;
@@ -161,8 +170,6 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
     return 0;
 }
 
-static bool g_verbose = false;
-
 static int handle_ringbuf_event(void *ctx, void *data, size_t len) {
     struct send_packets_context *myctx = ctx;
 
@@ -243,6 +250,15 @@ void tutorial() {
 }
 
 int main(int argc, char *argv[]) {
+    setlinebuf(stdout);
+    setlinebuf(stderr);
+    libbpf_set_print(libbpf_print_fn);
+
+    struct rlimit rlim = {RLIM_INFINITY, RLIM_INFINITY};
+    if (setrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
+        perror("setrlimit(RLIMIT_MEMLOCK)");
+    }
+
     int opt, index = 0;
     char recursive[MAX_IP_STRING_LENGTH], mac_address[18];
     memset(recursive, 0, sizeof(recursive));
@@ -315,41 +331,62 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    printf("[ATES-INIT] Step 1/6: Opening BPF skeleton...\n");
+    fflush(stdout);
     struct dns *skel = dns__open();
     if (!skel) {
-        fprintf(stderr, "[ERROR] Failed to open BPF skeleton\n");
+        fprintf(stderr, "[ERROR] Failed to open BPF skeleton (errno %d: %s)\n", errno, strerror(errno));
+        fflush(stderr);
         return 1;
     }
+    printf("[ATES-INIT] BPF skeleton opened successfully (%p)\n", (void*)skel);
+    fflush(stdout);
 
     if (sw_cache_size > 0) {
+        printf("[CONFIG] Resizing cache_arecords to %u entries...\n", sw_cache_size);
+        fflush(stdout);
         bpf_map__set_max_entries(skel->maps.cache_arecords, sw_cache_size);
-        if (g_verbose) printf("[CONFIG] Set cache_arecords max_entries to %u\n", sw_cache_size);
     }
     if (ns_cache_size > 0) {
+        printf("[CONFIG] Resizing cache_nsrecords to %u entries...\n", ns_cache_size);
+        fflush(stdout);
         bpf_map__set_max_entries(skel->maps.cache_nsrecords, ns_cache_size);
-        if (g_verbose) printf("[CONFIG] Set cache_nsrecords max_entries to %u\n", ns_cache_size);
     }
     if (queries_size > 0) {
+        printf("[CONFIG] Resizing new_queries to %u entries...\n", queries_size);
+        fflush(stdout);
         bpf_map__set_max_entries(skel->maps.new_queries, queries_size);
-        if (g_verbose) printf("[CONFIG] Set new_queries max_entries to %u\n", queries_size);
     }
 
-    if (dns__load(skel)) {
-        fprintf(stderr, "[ERROR] Failed to load BPF skeleton\n");
+    printf("[ATES-INIT] Step 2/6: Loading BPF skeleton into kernel (allocating maps & verifying progs)...\n");
+    fflush(stdout);
+    int load_err = dns__load(skel);
+    if (load_err) {
+        fprintf(stderr, "[ERROR] Failed to load BPF skeleton into kernel (err %d, errno %d: %s)\n",
+                load_err, errno, strerror(errno));
+        fflush(stderr);
         dns__destroy(skel);
         return 1;
     }
+    printf("[ATES-INIT] BPF skeleton loaded successfully into kernel!\n");
+    fflush(stdout);
 
+    printf("[ATES-INIT] Step 3/6: Checking BSS global variables...\n");
+    fflush(stdout);
     if (!skel->bss) {
         fprintf(stderr, "[ERROR] BPF skeleton has no BSS (global variables)\n");
+        fflush(stderr);
         dns__destroy(skel);
         return 1;
     }
 
+    printf("[ATES-INIT] Step 4/6: Configuring network globals (Server IP, MAC, Upstream)...\n");
+    fflush(stdout);
     skel->bss->serverip = myip;
     convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
     inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
+    printf("[ATES-INIT] Step 5/6: Populating tail call programs map...\n");
     struct {
         int key;
         struct bpf_program *prog;
@@ -375,15 +412,36 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    printf("[ATES-INIT] Step 6/6: Attaching XDP program to interface %d...\n", index);
     int fd = bpf_program__fd(skel->progs.dns_filter);
+    int exit_code = 0;
     struct bpf_link_create_opts opts = {};
     opts.sz = sizeof(opts);
     
     int link_fd = bpf_link_create(fd, index, BPF_XDP, &opts);
     if (link_fd < 0) {
-        if (bpf_program__attach_xdp(skel->progs.dns_filter, index) < 0) {
-            fprintf(stderr, "[ERROR] Failed to attach XDP program to interface\n");
-            goto cleanup;
+        if (g_verbose) {
+            fprintf(stderr, "[DEBUG] bpf_link_create failed (errno %d: %s), trying bpf_program__attach_xdp...\n", errno, strerror(errno));
+        }
+        struct bpf_link *link = bpf_program__attach_xdp(skel->progs.dns_filter, index);
+        long link_err = libbpf_get_error(link);
+        if (!link || link_err) {
+            if (g_verbose) {
+                fprintf(stderr, "[DEBUG] bpf_program__attach_xdp failed (err %ld), trying bpf_xdp_attach...\n", link_err);
+            }
+            int attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_DRV_MODE, NULL);
+            if (attach_err < 0) {
+                attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_SKB_MODE, NULL);
+            }
+            if (attach_err < 0) {
+                attach_err = bpf_xdp_attach(index, fd, 0, NULL);
+            }
+            if (attach_err < 0) {
+                fprintf(stderr, "[ERROR] Failed to attach XDP program to interface %d (errno %d: %s)\n",
+                        index, errno, strerror(errno));
+                exit_code = 1;
+                goto cleanup;
+            }
         }
     }
 
@@ -406,6 +464,7 @@ int main(int argc, char *argv[]) {
     rb = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf_send_packet), handle_ringbuf_event, &sctx, NULL);
     if (!rb) {
         fprintf(stderr, "Failed to create ring buffer\n");
+        exit_code = 1;
         goto cleanup;
     }
 
@@ -418,5 +477,6 @@ cleanup:
         bpf_map__unpin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
     }
     dns__destroy(skel);
-    return 0;
+    return exit_code;
 }
+

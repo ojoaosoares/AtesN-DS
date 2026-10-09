@@ -277,9 +277,47 @@ def start_services(args, foreground=False):
         except KeyboardInterrupt:
             print("\nShutting down gracefully...")
         finally:
+            time.sleep(0.5)
             tail_proc.kill()
+            if proxy_proc.poll() is not None:
+                p_code = proxy_proc.poll()
+                sig_desc = ""
+                if p_code == -9:
+                    sig_desc = " [SIGKILL - likely Linux OOM-killer! Check 'dmesg -T | grep -i oom']"
+                elif p_code == -11:
+                    sig_desc = " [SIGSEGV - Segmentation fault! Check 'dmesg -T | grep -i segfault']"
+                error(f"Proxy process (atesnds) terminated with exit code {p_code}{sig_desc}!")
+                if LOG_PROXY.exists():
+                    p_content = LOG_PROXY.read_text().strip()
+                    if p_content:
+                        print(f"\n{Color.RED}--- Proxy Output ({LOG_PROXY}) ---{Color.RESET}\n{p_content}\n")
+            if daemon_proc.poll() is not None:
+                d_code = daemon_proc.poll()
+                error(f"Daemon process (atesnds_daemon) terminated with exit code {d_code}!")
+                if LOG_DAEMON.exists():
+                    d_content = LOG_DAEMON.read_text().strip()
+                    if d_content:
+                        print(f"\n{Color.RED}--- Daemon Output ({LOG_DAEMON}) ---{Color.RESET}\n{d_content}\n")
             stop_services(args.interface)
     else:
+        time.sleep(2)
+        if proxy_proc.poll() is not None or daemon_proc.poll() is not None:
+            if proxy_proc.poll() is not None:
+                p_code = proxy_proc.poll()
+                sig_desc = ""
+                if p_code == -9:
+                    sig_desc = " [SIGKILL - likely Linux OOM-killer! Check 'dmesg -T | grep -i oom']"
+                elif p_code == -11:
+                    sig_desc = " [SIGSEGV - Segmentation fault! Check 'dmesg -T | grep -i segfault']"
+                error(f"Proxy process (atesnds) failed to start (exit code {p_code}{sig_desc})!")
+                if LOG_PROXY.exists():
+                    print(LOG_PROXY.read_text())
+            if daemon_proc.poll() is not None:
+                error(f"Daemon process (atesnds_daemon) failed to start (exit code {daemon_proc.poll()})!")
+                if LOG_DAEMON.exists():
+                    print(LOG_DAEMON.read_text())
+            stop_services(args.interface)
+            sys.exit(1)
         print(f"\nTip: Use '{Color.CYAN}./ates status{Color.RESET}' to check health, or '{Color.CYAN}sudo ./ates stop{Color.RESET}' to shut down.")
 
 
