@@ -1,20 +1,36 @@
 #!/bin/bash
-# Este script deve ser executado com privilégios de superusuário
+# Este script deve ser executado com privilégios de superusuário (sudo)
 
-sudo systemctl daemon-reload -y
+set -e
 
-# Atualize a lista de pacotes
+if [ "$EUID" -ne 0 ]; then
+    echo "[ERRO] Este script deve ser executado como root (ex: sudo ./init.sh)"
+    exit 1
+fi
+
+echo "======================================================================"
+echo "  Instalação de Dependências do AtesN-DS"
+echo "======================================================================"
+
+echo "[1/4] Removendo compilações manuais legadas da libbpf em /usr/local..."
+# Remove versões compiladas manualmente que causam conflitos de ABI e segfaults
+rm -rf /usr/local/libbpf
+rm -f /usr/local/lib/libbpf.so* /usr/local/lib/libbpf.a
+rm -rf /usr/local/include/bpf
+ldconfig
+
+echo "[2/4] Atualizando lista de pacotes do sistema..."
 apt-get update
 
-# Instale as dependências
+echo "[3/4] Instalando dependências e libbpf oficial dos repositórios..."
 apt-get install -y \
     make \
     llvm \
     git \
     pkg-config \
-    libelf-dev \
     vim \
     clang \
+    clang-15 \
     net-tools \
     curl \
     gcc-multilib \
@@ -26,38 +42,15 @@ apt-get install -y \
     build-essential \
     bison \
     linux-tools-$(uname -r) \
-    linux-tools-generic
+    linux-tools-generic \
+    libbpf-dev \
+    bpftool
 
-# Instale e configure a libbpf
-LIBBPF_REPO="https://github.com/libbpf/libbpf.git"
-LIBBPF_DIR="/usr/local/libbpf"
-INCLUDE_DIR="/usr/local/include/bpf"
-LIB_DIR="/usr/local/lib"
-
-# Clone o repositório do libbpf
-git clone $LIBBPF_REPO $LIBBPF_DIR
-
-# Compile e instale o libbpf
-cd $LIBBPF_DIR/src
-make
-
-# Crie os diretórios para os cabeçalhos e biblioteca
-mkdir -p $INCLUDE_DIR
-mkdir -p $LIB_DIR
-
-# Copie os arquivos de cabeçalho e a biblioteca
-cp *.h $INCLUDE_DIR
-cp ../LICENSE $INCLUDE_DIR
-cp libbpf.a $LIB_DIR
-cp libbpf.so $LIB_DIR
-
-# Atualize o cache de bibliotecas compartilhadas
+echo "[4/4] Atualizando serviços e cache de bibliotecas compartilhadas..."
+systemctl daemon-reload
 ldconfig
 
-echo "Instalação e configuração do libbpf concluídas com sucesso."
-
-# Volte para o diretório inicial ou o diretório do seu projeto
-cd -
-
-# Mensagem de conclusão
-echo "Instalação de todas as dependências concluída com sucesso."
+echo "======================================================================"
+echo "  Instalação concluída com sucesso!"
+echo "  libbpf-dev oficial instalado e configurado via sistema de pacotes."
+echo "======================================================================"

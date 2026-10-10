@@ -46,8 +46,10 @@ Other Netronome cards may work but have not been tested. Non-Netronome NICs are 
 The project includes an installation script to automatically set up all required dependencies.
 
 ```bash
-chmod +x install.sh
-sudo ./install.sh
+chmod +x init.sh
+sudo ./init.sh
+# Ou utilize o alvo do Makefile:
+# sudo make install-deps
 ```
 
 ---
