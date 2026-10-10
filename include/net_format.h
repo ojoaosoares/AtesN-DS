@@ -77,14 +77,15 @@ static __always_inline __u8 send_dns_response_hw(void *data, void *data_end, __u
     if ((void *)((__u8 *)data + DNS_QUESTION_OFFSET) > data_end)
         return DROP;
 
-    // 1. Swap Ethernet MACs
-    struct ethhdr *eth = (struct ethhdr *)data;
-    __u32 tmp_mac4 = *(__u32 *)eth->h_dest;
-    __u16 tmp_mac2 = *(__u16 *)(eth->h_dest + 4);
-    *(__u32 *)eth->h_dest = *(__u32 *)eth->h_source;
-    *(__u16 *)(eth->h_dest + 4) = *(__u16 *)(eth->h_source + 4);
-    *(__u32 *)eth->h_source = tmp_mac4;
-    *(__u16 *)(eth->h_source + 4) = tmp_mac2;
+    // 1. Swap Ethernet MACs (16-bit aligned words)
+    __u16 *eth16 = (__u16 *)data;
+    __u16 m0 = eth16[0], m1 = eth16[1], m2 = eth16[2];
+    eth16[0] = eth16[3];
+    eth16[1] = eth16[4];
+    eth16[2] = eth16[5];
+    eth16[3] = m0;
+    eth16[4] = m1;
+    eth16[5] = m2;
 
     // 2. Swap IP addresses & update TTL/Length/Checksum (RFC 1624)
     struct iphdr *ipv4 = (struct iphdr *)((__u8 *)data + IPV4_OFFSET);
@@ -95,11 +96,12 @@ static __always_inline __u8 send_dns_response_hw(void *data, void *data_end, __u
     __u16 old_ttl_proto = *((__u16 *)&ipv4->ttl);
     __u16 old_tot_len   = ipv4->tot_len;
 
+    __u16 ip_tot_len = (__u16)(((__u8 *)data_end - (__u8 *)data) - ETH_HLEN_BYTES);
     ipv4->ttl     = 255;
-    ipv4->tot_len = bpf_htons((__u16)(((__u8 *)data_end - (__u8 *)data) - ETH_HLEN_BYTES));
+    ipv4->tot_len = bpf_htons(ip_tot_len);
 
     __u32 csum  = (__u32)((__u16)~ipv4->check);
-    csum       += (__u32)((__u16)~old_ttl_proto) + (__u32)((UDP_PROTOCOL << 8) | 255);
+    csum       += (__u32)((__u16)~old_ttl_proto) + 0x11ff;
     csum       += (__u32)((__u16)~old_tot_len)   + (__u32)ipv4->tot_len;
     csum        = (csum >> 16) + (csum & 0xffff);
     csum       += (csum >> 16);
@@ -110,7 +112,7 @@ static __always_inline __u8 send_dns_response_hw(void *data, void *data_end, __u
     __be16 tmp_port = udp->source;
     udp->source = udp->dest;
     udp->dest   = tmp_port;
-    udp->len    = bpf_htons((__u16)(((__u8 *)data_end - (__u8 *)data) - UDP_OFFSET));
+    udp->len    = bpf_htons((__u16)(ip_tot_len - IPV4_HLEN_BYTES));
     udp->check  = 0;
 
     // 4. DNS Header

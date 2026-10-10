@@ -31,8 +31,7 @@ int dns_filter(struct xdp_md *ctx) {
     if ((void *)((__u8 *)data + DNS_MIN_QUERY_LEN) > data_end)
         return XDP_PASS;
 
-    struct ethhdr *eth = (struct ethhdr *)data;
-    if (eth->h_proto != bpf_htons(ETH_P_IP))
+    if (*(__be16 *)((__u8 *)data + offsetof(struct ethhdr, h_proto)) != bpf_htons(ETH_P_IP))
         return XDP_PASS;
 
     struct iphdr *ipv4 = (struct iphdr *)((__u8 *)data + IPV4_OFFSET);
@@ -61,7 +60,19 @@ int dns_filter(struct xdp_md *ctx) {
     size_t size = MAX_DNS_NAME_LENGTH_HW;
 
     #pragma unroll
-    for (size_t i = 0; i < MAX_DNS_NAME_LENGTH_HW; i++)
+    for (size_t i = 0; i < 7; i++)
+    {
+        __u8 c = content[i];
+        if (c == 0) {
+            size = i;
+            asm volatile("" : "+r"(size));
+            goto found_null;
+        }
+        domain_hw.name[i] = (char)c;
+    }
+
+    #pragma unroll
+    for (size_t i = 7; i < MAX_DNS_NAME_LENGTH_HW; i++)
     {
         if ((void *)(content + i + 1) > data_end)
             return XDP_DROP;
@@ -69,13 +80,15 @@ int dns_filter(struct xdp_md *ctx) {
         __u8 c = content[i];
         if (c == 0) {
             size = i;
-            break;
+            asm volatile("" : "+r"(size));
+            goto found_null;
         }
         domain_hw.name[i] = (char)c;
     }
 
-    if (size == MAX_DNS_NAME_LENGTH_HW)
-        return XDP_PASS;
+    return XDP_PASS;
+
+found_null:
 
     if ((void *)(content + size + DNS_QTAIL_LEN) > data_end)
         return XDP_DROP;
@@ -106,16 +119,18 @@ int dns_filter(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
-    __s16 newsize = ((__u8 *)data + DNS_QUESTION_OFFSET + size + DNS_QTAIL_LEN) - (__u8 *)data_end;
+    int cur_len = (__u8 *)data_end - (__u8 *)data;
+    int target_len = DNS_QUESTION_OFFSET + size + DNS_QTAIL_LEN;
     __u8 status = RCODE_NXDOMAIN;
 
     if (arecord->ip != 0)
     {
-        newsize += sizeof(struct dns_response);
+        target_len += sizeof(struct dns_response);
         status = RCODE_NOERROR;
     }
 
-    if (bpf_xdp_adjust_tail(ctx, (int)newsize) < 0)
+    int newsize = target_len - cur_len;
+    if (bpf_xdp_adjust_tail(ctx, newsize) < 0)
         return XDP_PASS;
 
     data     = (void *)(long)ctx->data;

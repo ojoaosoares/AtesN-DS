@@ -180,31 +180,31 @@ static bool test_timing_wheel_pop_min_ttl(void) {
 }
 
 /* ------------------------------------------------------------------------- */
-/* 5. Test 50-Byte Hardware Key Boundary and Zero-Padding Integrity          */
+/* 5. Test Hardware Key Boundary and Zero-Padding Integrity                  */
 /* ------------------------------------------------------------------------- */
-static bool test_hw_50b_key_boundary(void) {
-    printf("[TEST] Hardware 50B Key Boundary & Zero-Padding\n");
+static bool test_hw_key_boundary(void) {
+    printf("[TEST] Hardware %dB Key Boundary & Zero-Padding\n", MAX_DNS_NAME_LENGTH_HW);
 
     struct timing_wheel *w = timing_wheel_create(1000);
     TEST_ASSERT(w != NULL, "wheel creation failed");
     w->last_tick = 19000;
 
-    /* Create exact 50-byte key (49 chars + null) */
-    char full_50b_key[MAX_DNS_NAME_LENGTH_HW];
+    /* Create exact MAX_DNS_NAME_LENGTH_HW key */
+    char full_hw_key[MAX_DNS_NAME_LENGTH_HW];
     for (int i = 0; i < MAX_DNS_NAME_LENGTH_HW - 1; i++) {
-        full_50b_key[i] = 'a' + (i % 26);
+        full_hw_key[i] = 'a' + (i % 26);
     }
-    full_50b_key[MAX_DNS_NAME_LENGTH_HW - 1] = '\0';
+    full_hw_key[MAX_DNS_NAME_LENGTH_HW - 1] = '\0';
 
-    int ret = timing_wheel_insert(w, full_50b_key, 20000);
-    TEST_ASSERT(ret == 0, "insert 50b key failed");
+    int ret = timing_wheel_insert(w, full_hw_key, 20000);
+    TEST_ASSERT(ret == 0, "insert hw key failed");
 
     uint32_t count = 0;
     struct wheel_node *node = timing_wheel_pop_expired(w, 25000, &count);
     TEST_ASSERT(count == 1, "popped count must be 1");
     TEST_ASSERT(node != NULL, "node must not be null");
-    TEST_ASSERT(memcmp(node->name, full_50b_key, MAX_DNS_NAME_LENGTH_HW) == 0,
-                "50-byte key data must be preserved byte-for-byte");
+    TEST_ASSERT(memcmp(node->name, full_hw_key, MAX_DNS_NAME_LENGTH_HW) == 0,
+                "hardware key data must be preserved byte-for-byte");
 
     free(node);
     timing_wheel_destroy(w);
@@ -282,7 +282,7 @@ int main(void) {
     all_ok &= test_timing_wheel_insert();
     all_ok &= test_timing_wheel_pop_expired();
     all_ok &= test_timing_wheel_pop_min_ttl();
-    all_ok &= test_hw_50b_key_boundary();
+    all_ok &= test_hw_key_boundary();
     all_ok &= test_ingest_event_handler();
     all_ok &= test_dual_watermark_math();
 

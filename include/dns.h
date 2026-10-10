@@ -108,7 +108,7 @@ enum packet_action {
 #define RCODE_NXDOMAIN      3
 
 // DNS Length Limits
-#define MAX_DNS_NAME_LENGTH_HW 50
+#define MAX_DNS_NAME_LENGTH_HW 56
 #define MAX_DNS_NAME_LENGTH_SW 255
 #define MAX_SUBDOMAIN_LENGTH   127
 #define MAX_DNS_LABELS         127
@@ -148,7 +148,7 @@ struct dns_header {
     __be16 answer_count;
     __be16 name_servers;
     __be16 additional_records;
-} __attribute__((packed));
+};
 
 /**
  * @brief DNS Resource Record (Answer/Authority/Additional)
