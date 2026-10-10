@@ -18,6 +18,10 @@ test/
 tests/
 quick_data*/
 
+# Firmware packages and binaries
+firmware/
+*.deb
+
 nohup*
 
 *.o
