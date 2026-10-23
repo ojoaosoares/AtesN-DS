@@ -12,20 +12,44 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
 
     const struct hw_cache_sync_event *evt = (const struct hw_cache_sync_event *)data;
 
-    /* Ensure clean 50-byte zero-padded key */
+    /* Ensure clean 56-byte zero-padded key */
     char key[MAX_DNS_NAME_LENGTH_HW] = {0};
-    memcpy(key, evt->name, sizeof(key));
+    size_t nlen = 0;
+    while (nlen < MAX_DNS_NAME_LENGTH_HW && evt->name[nlen] != 0) {
+        key[nlen] = evt->name[nlen];
+        nlen++;
+    }
+    if (nlen < MAX_DNS_NAME_LENGTH_HW) {
+        key[nlen] = 0;
+    }
+
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t hw_timestamp = evt->timestamp;
+
+    /* If timestamp was generated via bpf_ktime_get_ns() (monotonic uptime),
+     * convert to Unix epoch matching SmartNIC time_map */
+    if (hw_timestamp < 1000000000U) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint32_t mono_now = (uint32_t)ts.tv_sec;
+        uint32_t ttl = (hw_timestamp > mono_now) ? (hw_timestamp - mono_now) : 300;
+        hw_timestamp = now + ttl;
+    }
 
     struct a_record_hw rec = {
-        .timestamp = evt->timestamp,
+        .timestamp = hw_timestamp,
         .ip = evt->ip
     };
 
-    if (d->wheel && d->wheel->total_entries >= d->cfg.hw_cache_capacity) {
-        uint32_t now = (uint32_t)time(NULL);
+    uint32_t capacity = d->cfg.hw_cache_capacity ? d->cfg.hw_cache_capacity : DEFAULT_HW_CACHE_CAPACITY;
+    if (d->wheel && d->wheel->total_entries >= capacity) {
         uint32_t count = 0;
 
-        struct wheel_node *victim = timing_wheel_pop_victims(d->wheel, now, 1, &count);
+        struct wheel_node *victim = timing_wheel_pop_expired(d->wheel, now, &count);
+        if (!victim) {
+            /* Hardware SRAM is full of valid (unexpired) hot entries; keep hot working set in SRAM */
+            return 0;
+        }
         while (victim) {
             struct wheel_node *next = victim->next;
             if (d->hw_cache_fd >= 0) {
@@ -38,14 +62,17 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
     }
 
     if (d->wheel) {
-        timing_wheel_insert(d->wheel, key, evt->timestamp);
+        timing_wheel_insert(d->wheel, key, hw_timestamp);
     }
 
-    /* 2. Write to SmartNIC level_one_cache via PCIe DMA */
+    /* 2. Write to SmartNIC level_one_cache via PCIe DMA (paced to prevent NFP CMSG ring timeout) */
     if (d->hw_cache_fd >= 0) {
         int ret = bpf_map_update_elem(d->hw_cache_fd, key, &rec, BPF_ANY);
         if (ret == 0) {
             d->total_ingested++;
+            if ((d->total_ingested & 31) == 0) {
+                usleep(1000);
+            }
         }
     }
 

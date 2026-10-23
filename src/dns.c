@@ -32,7 +32,9 @@ struct {
     __uint(max_entries, HW_SYNC_RINGBUF_SIZE);
 } hw_sync_ringbuf SEC(".maps");
 
-static __always_inline void notify_hw_cache(const char *name, __be32 ip, __u64 timestamp) {
+static __always_inline void notify_hw_cache(const char *name, __u8 domain_size, __be32 ip, __u64 timestamp) {
+    if (domain_size > MAX_DNS_NAME_LENGTH_HW)
+        return;
     struct hw_cache_sync_event *evt = bpf_ringbuf_reserve(&hw_sync_ringbuf, sizeof(*evt), 0);
     if (!evt)
         return;
@@ -101,6 +103,14 @@ struct {
 
 } dns_misses SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct overload_ctrl);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} overload_ctrl SEC(".maps");
+
 // Include recursive logic AFTER maps so it can access them
 #include "dns_owner.h"
 #include "dns_authoritative.h"
@@ -135,6 +145,22 @@ int dns_filter(struct xdp_md *ctx) {
             return XDP_PASS;
         default:
             break;
+    }
+
+    // -------------------------------------------------------------------------
+    // Adaptive Overload Shedding (Early Pre-Lookup Check)
+    // -------------------------------------------------------------------------
+    __u32 ovl_zero = 0;
+    struct overload_ctrl *ctrl = bpf_map_lookup_elem(&overload_ctrl, &ovl_zero);
+    if (ctrl && ctrl->is_overloaded) {
+        if (ctrl->shed_mode == SHED_EARLY_PRE_LOOKUP) {
+            return XDP_PASS;
+        }
+        if (ctrl->shed_mode == SHED_PROPORTIONAL && ctrl->shed_ratio > 0) {
+            if ((bpf_get_prandom_u32() % 100) < ctrl->shed_ratio) {
+                return XDP_PASS;
+            }
+        }
     }
 
     __u32 zero = 0;
@@ -234,6 +260,11 @@ int dns_filter(struct xdp_md *ctx) {
         else {
             bpf_map_delete_elem(&cache_arecords, dnsquery->query.name);
         }
+    }
+
+    // If overloaded and configured to shed misses, immediately fallback to userspace resolver
+    if (ctrl && ctrl->is_overloaded && ctrl->shed_mode == SHED_MISSES_ONLY) {
+        return XDP_PASS;
     }
 
     __u32 ip = recursive_server_ip;
@@ -410,7 +441,7 @@ int dns_response(struct xdp_md *ctx)
                     return XDP_DROP;
 
                 bpf_map_update_elem(&cache_arecords, dnsquery->query.name, &cache_record, BPF_ANY);
-                notify_hw_cache(dnsquery->query.name, cache_record.ip, cache_record.timestamp);
+                notify_hw_cache(dnsquery->query.name, dnsquery->query.domain_size, cache_record.ip, cache_record.timestamp);
             }
 
             if (!powner->ip)
@@ -843,7 +874,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     default:
 
                         bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
-                        notify_hw_cache(query->query.name, cache_record.ip, cache_record.timestamp);
+                        notify_hw_cache(query->query.name, query->query.domain_size, cache_record.ip, cache_record.timestamp);
 
                         if (hide_in_dest_ip_safe(data, data_end, RCODE_NXDOMAIN) == DROP)
                             return XDP_DROP;
@@ -948,7 +979,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (cache_record.timestamp)
                 {
                     bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
-                    notify_hw_cache(query->query.name, cache_record.ip, cache_record.timestamp);
+                    notify_hw_cache(query->query.name, query->query.domain_size, cache_record.ip, cache_record.timestamp);
                 }
 
                 if (cache_record.ip == 0)

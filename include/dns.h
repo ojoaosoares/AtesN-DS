@@ -135,6 +135,21 @@ enum tail_prog_index {
 };
 
 // -----------------------------------------------------------------------------
+// Adaptive Hybrid Overload Control
+// -----------------------------------------------------------------------------
+#define SHED_DISABLED            0
+#define SHED_MISSES_ONLY         1
+#define SHED_EARLY_PRE_LOOKUP    2
+#define SHED_PROPORTIONAL        3
+
+struct overload_ctrl {
+    __u32 is_overloaded;  // 0 = normal processing, 1 = overload shedding active
+    __u32 shed_mode;      // SHED_DISABLED, SHED_MISSES_ONLY, SHED_EARLY_PRE_LOOKUP, SHED_PROPORTIONAL
+    __u32 shed_ratio;     // 0..100 percentage of queries to shed in proportional mode
+    __u32 pad;
+};
+
+// -----------------------------------------------------------------------------
 // DNS Protocol Structures
 // -----------------------------------------------------------------------------
 

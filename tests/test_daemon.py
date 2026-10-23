@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 import ates
 
-MAX_DNS_NAME_LENGTH_HW = 50
+MAX_DNS_NAME_LENGTH_HW = 56
 
 
 class MockTimingWheel:
@@ -179,38 +179,38 @@ class TestDaemonArchitecture(unittest.TestCase):
     def test_hw_sync_event_binary_serialization(self):
         """Verify binary format and memory layout matching C struct hw_cache_sync_event."""
         # C struct layout:
-        # char name[50];
-        # 2 bytes alignment padding
+        # char name[56];
         # __be32 ip;
         # __u32 timestamp;
-        # Total size: 60 bytes
+        # Total size: 64 bytes (56 + 4 + 4)
         domain = "netflix.com"
         raw_name = domain.encode("ascii").ljust(MAX_DNS_NAME_LENGTH_HW, b"\x00")
-        self.assertEqual(len(raw_name), 50)
+        self.assertEqual(len(raw_name), 56)
 
         ip_int = 0x0100007F  # 127.0.0.1 in network byte order
         timestamp = 1718000000
 
         # Pack matching struct hw_cache_sync_event
-        packed = struct.pack("=50s2xII", raw_name, ip_int, timestamp)
-        self.assertEqual(len(packed), 60)
+        packed = struct.pack("=56sII", raw_name, ip_int, timestamp)
+        self.assertEqual(len(packed), 64)
 
         # Unpack and verify
-        unpacked_name, unpacked_ip, unpacked_ts = struct.unpack("=50s2xII", packed)
+        unpacked_name, unpacked_ip, unpacked_ts = struct.unpack("=56sII", packed)
         clean_name = unpacked_name.rstrip(b"\x00").decode("ascii")
         self.assertEqual(clean_name, domain)
         self.assertEqual(unpacked_ip, ip_int)
         self.assertEqual(unpacked_ts, timestamp)
 
-    def test_quiet_mode_default_flags(self):
-        """Verify that default daemon execution passes quiet mode without -v."""
-        parser = ates.argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        p_start = subparsers.add_parser("start")
-        p_start.add_argument("-v", "--verbose", action="store_true")
-
-        args = parser.parse_args(["start"])
-        self.assertFalse(args.verbose, "Verbose mode must be False by default for quiet operation")
+    def test_dns_listener_binary_help(self):
+        """Verify that bin/dns_listener binary compiles and runs help message cleanly."""
+        listener_bin = ROOT_DIR / "bin" / "dns_listener"
+        if listener_bin.exists():
+            import subprocess
+            res = subprocess.run([str(listener_bin), "-h"], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("AtesN-DS Decoupled DNS Listener", res.stdout)
+            self.assertIn("--interface", res.stdout)
+            self.assertIn("--ringbuf", res.stdout)
 
 
 if __name__ == "__main__":

@@ -456,6 +456,11 @@ int main(int argc, char *argv[]) {
         bpf_map__pin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
     }
 
+    struct bpf_map *ovl_map = bpf_object__find_map_by_name(skel->obj, "overload_ctrl");
+    if (ovl_map && !bpf_map__is_pinned(ovl_map)) {
+        bpf_map__pin(ovl_map, "/sys/fs/bpf/overload_ctrl");
+    }
+
     struct send_packets_context sctx = {
         .saddr = myip
     };
@@ -475,6 +480,9 @@ int main(int argc, char *argv[]) {
 cleanup: 
     if (hw_sync_map) {
         bpf_map__unpin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
+    }
+    if (ovl_map) {
+        bpf_map__unpin(ovl_map, "/sys/fs/bpf/overload_ctrl");
     }
     dns__destroy(skel);
     return exit_code;

@@ -16,9 +16,10 @@
 #include "dns.h"
 #include "daemon_timing_wheel.h"
 
-#define DEFAULT_HW_CACHE_PATH  "/sys/fs/bpf/level_one_cache"
-#define DEFAULT_TIME_MAP_PATH  "/sys/fs/bpf/time_map"
-#define DEFAULT_RINGBUF_PATH   "/sys/fs/bpf/hw_sync_ringbuf"
+#define DEFAULT_HW_CACHE_PATH      "/sys/fs/bpf/level_one_cache"
+#define DEFAULT_TIME_MAP_PATH      "/sys/fs/bpf/time_map"
+#define DEFAULT_RINGBUF_PATH       "/sys/fs/bpf/hw_sync_ringbuf"
+#define DEFAULT_HW_CACHE_CAPACITY  32768  /* Sized for SmartNIC on-chip SRAM fabric */
 
 struct daemon_config {
     char hw_cache_path[256];

@@ -12,13 +12,13 @@ import matplotlib.pyplot as plt
 
 plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
 plt.rcParams.update({
-    'font.size': 12,
-    'axes.labelsize': 13,
-    'axes.titlesize': 14,
-    'xtick.labelsize': 11,
-    'ytick.labelsize': 11,
-    'legend.fontsize': 11,
-    'figure.titlesize': 15,
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 17,
+    'xtick.labelsize': 15,
+    'ytick.labelsize': 15,
+    'legend.fontsize': 13.5,
+    'figure.titlesize': 18,
     'font.family': 'sans-serif'
 })
 
@@ -36,8 +36,8 @@ df = pd.read_csv(SUM_CSV)
 # Create 3-panel horizontal figure
 fig, axes = plt.subplots(1, 3, figsize=(18, 5.2))
 
-colors = {250000: "#1f77b4", 400000: "#d62728"}
-markers = {250000: "o", 400000: "s"}
+colors = {250000: "#1f77b4", 400000: "#ff7f0e", 500000: "#d62728"}
+markers = {250000: "o", 400000: "s", 500000: "^"}
 
 # Panel 1: Throughput and Loss
 ax1 = axes[0]

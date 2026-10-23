@@ -4,6 +4,16 @@ import glob
 import os
 import re
 
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 13,
+    'figure.titlesize': 18
+})
+
 # =====================================================
 # LEITURA DOS DADOS
 # =====================================================
@@ -18,10 +28,18 @@ for file in files:
         continue
     seen_files.add(name)
 
-    if "no_hw_cache" in name:
-        cache_type = "No HW Cache"
+    if "unbound_standalone" in name:
+        cache_type = "Unbound (Standalone)"
+    elif "unbound_hw_cache" in name:
+        cache_type = "Unbound + HW Cache"
+    elif "ates_driver" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
+    elif "ates_hw_cache" in name:
+        cache_type = "AtesN-DS (Offloaded-Mode)"
+    elif "no_hw_cache" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
     elif "hw_cache" in name:
-        cache_type = "HW Cache"
+        cache_type = "AtesN-DS (Offloaded-Mode)"
     else:
         continue
 
@@ -179,11 +197,6 @@ def plot_metric(metric, ylabel, filename):
     plt.xlabel("Concurrent Connections")
     plt.ylabel(ylabel)
     plt.title(f"{metric} (Mean ± 95% Confidence Interval)")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    plt.close()
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()

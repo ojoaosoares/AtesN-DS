@@ -42,7 +42,7 @@ static void print_usage(const char *prog) {
     printf("  -c, --cache <path>        Path to pinned SmartNIC level_one_cache (default: %s)\n", DEFAULT_HW_CACHE_PATH);
     printf("  -t, --time-map <path>     Path to pinned SmartNIC time_map (default: %s)\n", DEFAULT_TIME_MAP_PATH);
     printf("  -r, --ringbuf <path>      Path to pinned host hw_sync_ringbuf (default: %s)\n", DEFAULT_RINGBUF_PATH);
-    printf("  -n, --capacity <entries>  SmartNIC hardware cache capacity (default: 2000000)\n");
+    printf("  -n, --capacity <entries>  SmartNIC hardware cache capacity (default: auto-detected, or %u)\n", DEFAULT_HW_CACHE_CAPACITY);
     printf("  -H, --high-watermark <%%>  High watermark percentage for eviction (default: 90)\n");
     printf("  -L, --low-watermark <%%>   Low watermark percentage target (default: 80)\n");
     printf("  --ingest-core <id>        CPU Core for Ingestion Worker (default: 1)\n");
@@ -60,7 +60,8 @@ int main(int argc, char *argv[]) {
     strncpy(g_ctx.cfg.time_map_path, DEFAULT_TIME_MAP_PATH, sizeof(g_ctx.cfg.time_map_path)-1);
     strncpy(g_ctx.cfg.ringbuf_path, DEFAULT_RINGBUF_PATH, sizeof(g_ctx.cfg.ringbuf_path)-1);
     strncpy(g_ctx.cfg.resolver_ringbuf_path, "/sys/fs/bpf/ringbuf_send_packet", sizeof(g_ctx.cfg.resolver_ringbuf_path)-1);
-    g_ctx.cfg.hw_cache_capacity = 2000000;
+    bool capacity_specified = false;
+    g_ctx.cfg.hw_cache_capacity = DEFAULT_HW_CACHE_CAPACITY;
     g_ctx.cfg.high_watermark_pct = 90;
     g_ctx.cfg.low_watermark_pct = 80;
     g_ctx.cfg.ingest_core = 1;
@@ -88,7 +89,10 @@ int main(int argc, char *argv[]) {
         case 'c': strncpy(g_ctx.cfg.hw_cache_path, optarg, sizeof(g_ctx.cfg.hw_cache_path)-1); break;
         case 't': strncpy(g_ctx.cfg.time_map_path, optarg, sizeof(g_ctx.cfg.time_map_path)-1); break;
         case 'r': strncpy(g_ctx.cfg.ringbuf_path, optarg, sizeof(g_ctx.cfg.ringbuf_path)-1); break;
-        case 'n': g_ctx.cfg.hw_cache_capacity = atoi(optarg); break;
+        case 'n':
+            g_ctx.cfg.hw_cache_capacity = atoi(optarg);
+            capacity_specified = true;
+            break;
         case 'H': g_ctx.cfg.high_watermark_pct = atoi(optarg); break;
         case 'L': g_ctx.cfg.low_watermark_pct = atoi(optarg); break;
         case 1001: g_ctx.cfg.ingest_core = atoi(optarg); break;
@@ -96,6 +100,23 @@ int main(int argc, char *argv[]) {
         case 'v': g_ctx.cfg.verbose = true; break;
         case 'h': print_usage(argv[0]); return 0;
         default:  print_usage(argv[0]); return 1;
+        }
+    }
+
+    /* Open SmartNIC BPF Maps */
+    g_ctx.hw_cache_fd = bpf_obj_get(g_ctx.cfg.hw_cache_path);
+    if (g_ctx.hw_cache_fd < 0) {
+        fprintf(stderr, "[ERROR] Could not open SmartNIC cache map at '%s': %s\n",
+                g_ctx.cfg.hw_cache_path, strerror(errno));
+        fprintf(stderr, "Ensure 'make load-hw' is executed before launching runtime.\n");
+        return 1;
+    }
+
+    struct bpf_map_info map_info = {0};
+    uint32_t map_info_len = sizeof(map_info);
+    if (bpf_obj_get_info_by_fd(g_ctx.hw_cache_fd, &map_info, &map_info_len) == 0 && map_info.max_entries > 0) {
+        if (!capacity_specified) {
+            g_ctx.cfg.hw_cache_capacity = map_info.max_entries;
         }
     }
 
@@ -111,15 +132,6 @@ int main(int argc, char *argv[]) {
         printf("  Core Assignment:    Ingest=Core %d, Governance=Core %d (Core 0 Network Isolated)\n",
                g_ctx.cfg.ingest_core, g_ctx.cfg.governance_core);
         printf("======================================================================\n");
-    }
-
-    /* Open SmartNIC BPF Maps */
-    g_ctx.hw_cache_fd = bpf_obj_get(g_ctx.cfg.hw_cache_path);
-    if (g_ctx.hw_cache_fd < 0) {
-        fprintf(stderr, "[ERROR] Could not open SmartNIC cache map at '%s': %s\n",
-                g_ctx.cfg.hw_cache_path, strerror(errno));
-        fprintf(stderr, "Ensure 'make load-hw' is executed before launching runtime.\n");
-        return 1;
     }
 
     g_ctx.time_map_fd = bpf_obj_get(g_ctx.cfg.time_map_path);

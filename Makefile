@@ -26,10 +26,11 @@ PROG_PIN       = $(PROG_MOUNT_PATH)/xdp_prog
 # all sources, objs, and header files
 MAIN      = ${SRC_FOLDER}dns_userspace.c
 SKELETON  = ${INCLUDE_FOLDER}dns.skel.h
+LISTENER_SKEL = ${INCLUDE_FOLDER}dns_listener.skel.h
 TARGET    = ${BIN_FOLDER}atesnds
 SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
-HEADERS   = $(filter-out $(SKELETON), $(wildcard $(INCLUDE_FOLDER)*.h))
+HEADERS   = $(filter-out $(SKELETON) $(LISTENER_SKEL), $(wildcard $(INCLUDE_FOLDER)*.h))
 PROG_MOUNT_PATH = /sys/fs/bpf
 $(shell mkdir -p $(OBJ_FOLDER))
 $(shell mkdir -p $(BIN_FOLDER))
@@ -37,7 +38,7 @@ $(shell mkdir -p $(DATA_FOLDER))
 
 all: ${TARGET}
 
-build-all: build-hw all daemon
+build-all: build-hw all daemon listener
 
 check: verify
 verify:
@@ -71,6 +72,28 @@ $(DAEMON_BIN): $(DAEMON_SRCS) $(HEADERS)
 
 run-daemon: $(DAEMON_BIN)
 	sudo $(DAEMON_BIN) -v
+
+# ------------------------------------------------
+# dns_listener (Decoupled DNS Listener for Unbound)
+# ------------------------------------------------
+LISTENER_BPF_SRC = $(SRC_FOLDER)dns_listener.bpf.c
+LISTENER_BPF_OBJ = $(OBJ_FOLDER)dns_listener.bpf.o
+LISTENER_SRC     = $(SRC_FOLDER)dns_listener.c
+LISTENER_BIN     = $(BIN_FOLDER)dns_listener
+
+listener: $(LISTENER_BIN)
+
+$(LISTENER_SKEL): $(LISTENER_BPF_OBJ)
+	bpftool gen skeleton $< name dns_listener > $@
+
+$(LISTENER_BPF_OBJ): $(LISTENER_BPF_SRC) $(HEADERS)
+	$(CC) -O2 -target bpf -g -c $< -o $@ -I $(INCLUDE_FOLDER)
+
+$(LISTENER_BIN): $(LISTENER_SRC) $(LISTENER_SKEL) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf
+
+run-listener: $(LISTENER_BIN)
+	sudo $(LISTENER_BIN) -v -i $(DEV)
 
 # ------------------------------------------------
 # Unit tests (CLI & Daemon modules)

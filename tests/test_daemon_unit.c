@@ -220,21 +220,23 @@ static bool test_ingest_event_handler(void) {
     struct daemon_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.wheel = timing_wheel_create(1000);
-    ctx.wheel->last_tick = 29000;
+    ctx.cfg.hw_cache_capacity = DEFAULT_HW_CACHE_CAPACITY;
+    uint32_t now = (uint32_t)time(NULL);
+    ctx.wheel->last_tick = now - 5;
     ctx.hw_cache_fd = -1; /* Simulated without hardware map */
 
     struct hw_cache_sync_event evt;
     memset(&evt, 0, sizeof(evt));
     strncpy(evt.name, "ingest-test.org", sizeof(evt.name) - 1);
     evt.ip = 0x0100007f; /* 127.0.0.1 */
-    evt.timestamp = 30000;
+    evt.timestamp = now + 10;
 
     int ret = handle_hw_sync_sample(&ctx, &evt, sizeof(evt));
     TEST_ASSERT(ret == 0, "sample handler return code must be 0");
     TEST_ASSERT(ctx.wheel->total_entries == 1, "event must be registered in timing wheel");
 
     uint32_t count = 0;
-    struct wheel_node *node = timing_wheel_pop_expired(ctx.wheel, 35000, &count);
+    struct wheel_node *node = timing_wheel_pop_expired(ctx.wheel, now + 15, &count);
     TEST_ASSERT(count == 1, "registered node must be popped");
     TEST_ASSERT(strcmp(node->name, "ingest-test.org") == 0, "domain name must match");
 

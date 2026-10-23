@@ -3,18 +3,38 @@ import matplotlib.pyplot as plt
 import glob
 import os
 import re
-
 import math
+
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 13,
+    'figure.titlesize': 18
+})
 
 rows = []
 
 for file in glob.glob("*.csv"):
     name = os.path.basename(file)
 
-    if "no_hw_cache" in name:
-        cache_type = "No HW Cache"
+    if "server" in name:
+        continue
+
+    if "unbound_standalone" in name:
+        cache_type = "Unbound (Standalone)"
+    elif "unbound_hw_cache" in name:
+        cache_type = "Unbound + HW Cache"
+    elif "ates_driver" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
+    elif "ates_hw_cache" in name:
+        cache_type = "AtesN-DS (Offloaded-Mode)"
+    elif "no_hw_cache" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
     elif "hw_cache" in name:
-        cache_type = "HW Cache"
+        cache_type = "AtesN-DS (Offloaded-Mode)"
     else:
         continue
 
@@ -226,45 +246,54 @@ if "totalRequests" in df.columns:
 # Speedup
 # =====================================================
 
-if "HW Cache" in df["cache_type"].values and "No HW Cache" in df["cache_type"].values:
-    hw = (
-        df[df["cache_type"] == "HW Cache"]
-        .set_index("concurrency")
-        .sort_index()
-    )
+pairs_to_check = [
+    ("AtesN-DS (Offload Speedup)", "AtesN-DS (Offloaded-Mode)", "AtesN-DS (Driver-Mode)"),
+    ("Unbound (HW Accel Speedup)", "Unbound + HW Cache", "Unbound (Standalone)"),
+    ("HW Cache Speedup", "HW Cache", "No HW Cache"),
+]
 
-    no_hw = (
-        df[df["cache_type"] == "No HW Cache"]
-        .set_index("concurrency")
-        .sort_index()
-    )
+speedup_plotted = False
+plt.figure(figsize=(12, 6))
 
-    common = hw.index.intersection(no_hw.index)
-
-    if not common.empty and "queriesPerSecond" in hw.columns:
-        speedup = (
-            hw.loc[common, "queriesPerSecond"]
-            / no_hw.loc[common, "queriesPerSecond"]
+for label, num_type, den_type in pairs_to_check:
+    if num_type in df["cache_type"].values and den_type in df["cache_type"].values:
+        hw = (
+            df[df["cache_type"] == num_type]
+            .set_index("concurrency")
+            .sort_index()
         )
-
-        plt.figure(figsize=(12, 6))
-
-        plt.plot(
-            common,
-            speedup,
-            marker="o",
-            linewidth=2,
+        no_hw = (
+            df[df["cache_type"] == den_type]
+            .set_index("concurrency")
+            .sort_index()
         )
+        common = hw.index.intersection(no_hw.index)
+        if not common.empty and "queriesPerSecond" in hw.columns and "queriesPerSecond" in no_hw.columns:
+            speedup = (
+                hw.loc[common, "queriesPerSecond"]
+                / no_hw.loc[common, "queriesPerSecond"]
+            )
+            plt.plot(
+                common,
+                speedup,
+                marker="o",
+                linewidth=2,
+                label=label,
+            )
+            speedup_plotted = True
 
-        plt.axhline(1.0, linestyle="--")
-
-        plt.xlabel("Concurrent Connections")
-        plt.ylabel("Speedup")
-        plt.title("HW Cache Speedup")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig("speedup.png", dpi=300)
-        plt.close()
+if speedup_plotted:
+    plt.axhline(1.0, linestyle="--", color="gray", alpha=0.7)
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Speedup Ratio")
+    plt.title("Hardware Acceleration Speedup vs Software Baseline")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("speedup.png", dpi=300)
+    plt.close()
+else:
+    plt.close()
 
 print("\nGráficos gerados:")
 print("throughput_vs_concurrency.png")

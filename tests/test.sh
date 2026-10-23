@@ -17,14 +17,14 @@ REMOTE_BASE_DIR="/home/joaosoares/Documents/Github/AtesN-DS"
 
 # Parâmetros do Benchmark
 NUM_RUNS=30
-DURATION=60
+DURATION=180
 # Warmup é obrigatório nos testes
 
 # Configuração de Rede
 REMOTE_INTERFACE="enp1s0np1"
 REMOTE_SERVER_IP="192.168.0.1"
 REMOTE_MAC_ADDR="3c:fd:fe:03:02:00"
-REMOTE_DNS_SERVER="199.7.83.42"
+REMOTE_DNS_SERVER="192.168.0.2"
 
 LOCAL_INTERFACE="enp1s0f0"
 LOCAL_CLIENT_IP="192.168.0.2"
@@ -46,8 +46,12 @@ LOCAL_FINAL_RESULTS_DIR="${PROJECT_DIR}/${DATA_DATE}"
 CONCURRENCY_LEVELS=(512 896 1280 1792 2560 3584 5120 7168 10240 16384)
 # CONCURRENCY_LEVELS=(754)
 
-MODES=("hw_cache")
-# MODES=("hw_cache")
+# Modos de Avaliação:
+# 1. unbound_standalone : Unbound sozinho em user-space
+# 2. unbound_hw_cache   : Unbound com DNS Listener e HW Cache na SmartNIC
+# 3. ates_driver        : AtesN-DS sozinho em driver-mode (XDP_DRV)
+# 4. ates_hw_cache      : AtesN-DS com HW Cache integrado na SmartNIC (XDP_HW)
+MODES=("unbound_standalone" "unbound_hw_cache" "ates_driver" "ates_hw_cache")
 
 #########################
 # TRATAMENTO DE ERROS
@@ -127,13 +131,17 @@ for MODE in "${MODES[@]}"; do
           tmux kill-session -t srv 2>/dev/null || true
           tmux kill-session -t ates 2>/dev/null || true
           tmux kill-session -t hw 2>/dev/null || true
+          tmux kill-session -t listener 2>/dev/null || true
+          tmux kill-session -t unbound 2>/dev/null || true
 
           echo '[REMOTE] Matando processos...'
 
           sudo -n pkill atesnds 2>/dev/null || true
           sudo -n pkill atesnds_daemon 2>/dev/null || true
+          sudo -n pkill dns_listener 2>/dev/null || true
           sudo -n pkill time_updater 2>/dev/null || true
           sudo -n pkill sample_server.py 2>/dev/null || true
+          sudo -n systemctl stop unbound 2>/dev/null || sudo -n pkill -9 unbound 2>/dev/null || true
 
           echo '[REMOTE] Executando unload-hw...'
 
@@ -172,77 +180,81 @@ for MODE in "${MODES[@]}"; do
         # 2. INICIALIZAÇÃO
         #########################
 
-        echo "-> Inicializando ambiente no servidor remoto..."
+        echo "-> Inicializando ambiente no servidor remoto para o modo ${MODE}..."
 
-        if [ "${MODE}" = "hw_cache" ]; then
+        case "${MODE}" in
+          "unbound_standalone")
+            echo "-> Iniciando Unbound Standalone..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" "
+              sudo -n systemctl restart unbound 2>/dev/null || sudo -n unbound -c /etc/unbound/unbound.conf 2>/dev/null || sudo -n unbound
+            "
+            sleep 2
+            ;;
 
-          echo "-> Iniciando load-and-run-time-updater..."
+          "unbound_hw_cache")
+            echo "-> Iniciando SmartNIC HW Cache e daemon de sincronização..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
+              "cd '${REMOTE_BASE_DIR}' && \
+               tmux new-session -d -s hw 'sudo -n make load-and-run-time-updater'"
+            sleep 3
+            echo "-> Iniciando Decoupled DNS Listener na interface ${REMOTE_INTERFACE}..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
+              "cd '${REMOTE_BASE_DIR}' && \
+               tmux new-session -d -s listener 'sudo -n ./bin/dns_listener -i ${REMOTE_INTERFACE} -v'"
+            sleep 2
+            echo "-> Iniciando Unbound com HW Cache..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" "
+              sudo -n systemctl restart unbound 2>/dev/null || sudo -n unbound -c /etc/unbound/unbound.conf 2>/dev/null || sudo -n unbound
+            "
+            sleep 2
+            ;;
 
-          ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
-            "cd '${REMOTE_BASE_DIR}' && \
-             tmux new-session -d -s hw 'sudo -n make load-and-run-time-updater'"
+          "ates_driver"|"no_hw_cache")
+            echo "-> Iniciando AtesN-DS em modo driver (XDP_DRV)..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
+              "cd '${REMOTE_BASE_DIR}' && \
+               tmux new-session -d -s ates \
+               'sudo -n ./bin/atesnds \
+                -a ${REMOTE_SERVER_IP} \
+                -i ${REMOTE_INTERFACE} \
+                -m ${REMOTE_MAC_ADDR} \
+                -s ${REMOTE_DNS_SERVER}'"
+            sleep 3
+            if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" "pgrep -af atesnds" >/dev/null 2>&1; then
+                echo "❌ ERRO: atesnds NÃO está rodando!"
+                ssh "${REMOTE_USER}@${REMOTE_HOST}" "tmux capture-pane -t ates -p -S -100" || true
+                exit 1
+            fi
+            ;;
 
-          sleep 3
+          "ates_hw_cache"|"hw_cache")
+            echo "-> Iniciando SmartNIC HW Cache e daemon de sincronização..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
+              "cd '${REMOTE_BASE_DIR}' && \
+               tmux new-session -d -s hw 'sudo -n make load-and-run-time-updater'"
+            sleep 3
+            echo "-> Iniciando AtesN-DS com HW Cache integrado..."
+            ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
+              "cd '${REMOTE_BASE_DIR}' && \
+               tmux new-session -d -s ates \
+               'sudo -n ./bin/atesnds \
+                -a ${REMOTE_SERVER_IP} \
+                -i ${REMOTE_INTERFACE} \
+                -m ${REMOTE_MAC_ADDR} \
+                -s ${REMOTE_DNS_SERVER}'"
+            sleep 3
+            if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" "pgrep -af atesnds" >/dev/null 2>&1; then
+                echo "❌ ERRO: atesnds NÃO está rodando!"
+                ssh "${REMOTE_USER}@${REMOTE_HOST}" "tmux capture-pane -t ates -p -S -100" || true
+                exit 1
+            fi
+            ;;
 
-          echo "-> Verificando sessão tmux 'hw'..."
-
-          ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-            "tmux has-session -t hw"
-
-          echo "-> Saída do tmux 'hw':"
-
-          ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-            "tmux capture-pane -t hw -p -S -100"
-
-          echo "-> Verificando atesnds_daemon / time_updater..."
-
-          if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-              "pgrep -af 'atesnds_daemon|time_updater'"; then
-
-              echo
-              echo "❌ ERRO: atesnds_daemon / time_updater NÃO está rodando!"
-              echo
-              echo "===== SAÍDA DO TMUX hw ====="
-
-              ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-                "tmux capture-pane -t hw -p -S -200"
-
-              exit 1
-          fi
-
-          echo "-> time_updater está rodando."
-
-        fi
-
-        #########################
-        # ATES
-        #########################
-
-        echo "-> Iniciando atesnds..."
-
-        ssh -tt "${REMOTE_USER}@${REMOTE_HOST}" \
-          "cd '${REMOTE_BASE_DIR}' && \
-           tmux new-session -d -s ates \
-           'sudo -n ./bin/atesnds \
-            -a ${REMOTE_SERVER_IP} \
-            -i ${REMOTE_INTERFACE} \
-            -m ${REMOTE_MAC_ADDR} \
-            -s ${REMOTE_DNS_SERVER}'"
-
-        sleep 3
-
-        echo "-> Verificando atesnds..."
-
-        if ! ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-            "pgrep -af atesnds"; then
-
-            echo "❌ ERRO: atesnds NÃO está rodando!"
-
-            ssh "${REMOTE_USER}@${REMOTE_HOST}" \
-              "tmux capture-pane -t ates -p -S -100"
-
+          *)
+            echo "❌ ERRO: Modo desconhecido: ${MODE}"
             exit 1
-        fi
+            ;;
+        esac
 
         #########################
         # SAMPLE SERVER
@@ -319,11 +331,15 @@ for MODE in "${MODES[@]}"; do
             sudo -n pkill sample_server.py 2>/dev/null || true
             sudo -n pkill atesnds 2>/dev/null || true
             sudo -n pkill atesnds_daemon 2>/dev/null || true
+            sudo -n pkill dns_listener 2>/dev/null || true
             sudo -n pkill time_updater 2>/dev/null || true
+            sudo -n systemctl stop unbound 2>/dev/null || sudo -n pkill -9 unbound 2>/dev/null || true
 
             tmux kill-session -t srv 2>/dev/null || true
             tmux kill-session -t ates 2>/dev/null || true
             tmux kill-session -t hw 2>/dev/null || true
+            tmux kill-session -t listener 2>/dev/null || true
+            tmux kill-session -t unbound 2>/dev/null || true
         "
 
         echo "--> Fim da RUN ${run}"

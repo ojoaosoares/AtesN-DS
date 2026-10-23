@@ -7,9 +7,13 @@
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 
+#ifndef HW_CACHE_MAX_ENTRIES
+#define HW_CACHE_MAX_ENTRIES 32768 /* Sized for on-chip SRAM fabric (NFP-3800 ~2.3 MB) */
+#endif
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 2000000);
+    __uint(max_entries, HW_CACHE_MAX_ENTRIES);
     __uint(key_size, MAX_DNS_NAME_LENGTH_HW);
     __uint(map_flags, 0);
     __uint(value_size, sizeof(struct a_record_hw));
