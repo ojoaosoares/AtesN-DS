@@ -461,6 +461,12 @@ int main(int argc, char *argv[]) {
         bpf_map__pin(ovl_map, "/sys/fs/bpf/overload_ctrl");
     }
 
+    struct bpf_map *cache_map = bpf_object__find_map_by_name(skel->obj, "cache_arecords");
+    if (cache_map) {
+        unlink("/sys/fs/bpf/cache_arecords");
+        bpf_map__pin(cache_map, "/sys/fs/bpf/cache_arecords");
+    }
+
     struct send_packets_context sctx = {
         .saddr = myip
     };
@@ -483,6 +489,9 @@ cleanup:
     }
     if (ovl_map) {
         bpf_map__unpin(ovl_map, "/sys/fs/bpf/overload_ctrl");
+    }
+    if (cache_map) {
+        bpf_map__unpin(cache_map, "/sys/fs/bpf/cache_arecords");
     }
     dns__destroy(skel);
     return exit_code;

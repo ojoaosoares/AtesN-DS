@@ -37,11 +37,15 @@ nohup*
 __pycache__/
 *.py[cod]
 
-# Images and vector graphics
+# Images, plots and vector graphics
 *.png
 *.jpg
 *.jpeg
 *.svg
+*.pdf
+results/
+
+
 
 # LaTeX documents and build artifacts
 *.tex

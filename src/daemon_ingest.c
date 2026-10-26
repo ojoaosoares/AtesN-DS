@@ -45,11 +45,7 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
     if (d->wheel && d->wheel->total_entries >= capacity) {
         uint32_t count = 0;
 
-        struct wheel_node *victim = timing_wheel_pop_expired(d->wheel, now, &count);
-        if (!victim) {
-            /* Hardware SRAM is full of valid (unexpired) hot entries; keep hot working set in SRAM */
-            return 0;
-        }
+        struct wheel_node *victim = timing_wheel_pop_victims(d->wheel, now, 1, &count);
         while (victim) {
             struct wheel_node *next = victim->next;
             if (d->hw_cache_fd >= 0) {

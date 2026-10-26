@@ -18,6 +18,7 @@ import shutil
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
@@ -76,9 +77,10 @@ MODE_ORDER = ['unbound_standalone', 'unbound_hw_cache', 'ates_driver', 'ates_hw_
 
 def parse_rate(val):
     try:
-        return int(val)
+        v = int(val)
+        return 999999999 if v == 0 else v
     except:
-        return 99999999
+        return 999999999
 
 RATE_ORDER = sorted(df['target_qps'].astype(str).unique(), key=parse_rate)
 RATE_LABELS = []
@@ -139,8 +141,8 @@ for idx, mode in enumerate(MODE_ORDER):
     for r in RATE_ORDER:
         row = mdf[mdf['target_qps'] == r]
         if not row.empty:
-            qps_means.append(row['achieved_qps_mean'].values[0] / 1000.0)
-            qps_stds.append(row['achieved_qps_std'].values[0] / 1000.0)
+            qps_means.append(row['achieved_qps_mean'].values[0] / 1000000.0)
+            qps_stds.append(row['achieved_qps_std'].values[0] / 1000000.0)
         else:
             qps_means.append(0.0)
             qps_stds.append(0.0)
@@ -149,8 +151,11 @@ for idx, mode in enumerate(MODE_ORDER):
     ax.bar(pos, qps_means, width, yerr=qps_stds, capsize=4,
            label=MODE_LABELS[mode], color=MODE_COLORS[mode], edgecolor='black', linewidth=0.8)
 
-ax.set_ylabel("Achieved Throughput (kQPS)")
-ax.set_title(f"2-Core DNS Server Throughput Scaling ({dataset_title}, n={reps_val}, 180s per run)")
+ax.set_ylabel("Achieved Throughput (MQPS)")
+ax.set_xlim(-0.65, len(RATE_ORDER) - 0.35)
+ax.set_ylim(0, 8.5)
+ax.set_yticks(np.arange(0, 9.0, 1.0))
+ax.set_title("Achieved DNS Throughput vs. Offered Load", fontweight='bold', pad=10)
 ax.set_xticks(x_indices)
 ax.set_xticklabels(RATE_LABELS)
 ax.set_xlabel("Target Load Level")
@@ -160,40 +165,95 @@ plt.tight_layout()
 save_and_sync(fig, f"{prefix}2core_throughput_bars")
 
 # ==============================================================================
-# Figure 2: Tail Latency (p99 and p99.9 in ms) vs Target Rate
+# Figure 2a: Tail Latency (p99 in ms) vs Target Rate - SEPARATE
 # ==============================================================================
-fig, ax = plt.subplots(figsize=(9.5, 5.8))
+fig, ax = plt.subplots(figsize=(9, 5.5))
+ticks = [2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100]
 
 for mode in MODE_ORDER:
     mdf = df[df['mode'] == mode].copy()
     mdf['target_qps'] = mdf['target_qps'].astype(str)
     
     p99_vals = []
-    p99_9_vals = []
     for r in RATE_ORDER:
         row = mdf[mdf['target_qps'] == r]
         if not row.empty:
             p99_vals.append(row['lat_p99_ms'].values[0])
-            p99_9_vals.append(row['lat_p99_9_ms'].values[0])
         else:
             p99_vals.append(np.nan)
+            
+    ax.plot(x_indices, p99_vals, marker='o', linewidth=2.2, markersize=7, linestyle='-',
+            label=MODE_LABELS[mode], color=MODE_COLORS[mode])
+
+ax.set_ylabel("Tail Latency $p_{99}$ (ms) [Log Scale]")
+ax.set_yscale('log')
+ax.set_ylim(1.8, 135)
+ax.set_yticks(ticks)
+ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
+ax.yaxis.set_minor_formatter(ticker.NullFormatter())
+ax.set_title("Tail Latency $p_{99}$ vs. Offered Load", fontweight='bold', pad=10)
+ax.set_xticks(x_indices)
+ax.set_xticklabels(RATE_LABELS)
+ax.set_xlabel("Target Load Level")
+ax.grid(True, which='both', linestyle='--', alpha=0.5)
+ax.legend(loc='upper right', framealpha=0.93, fontsize=9.5)
+plt.tight_layout()
+save_and_sync(fig, f"{prefix}2core_tail_latency_p99")
+
+# ==============================================================================
+# Figure 2b: Tail Latency (p99.9 in ms) vs Target Rate - SEPARATE
+# ==============================================================================
+fig, ax = plt.subplots(figsize=(9, 5.5))
+
+for mode in MODE_ORDER:
+    mdf = df[df['mode'] == mode].copy()
+    mdf['target_qps'] = mdf['target_qps'].astype(str)
+    
+    p99_9_vals = []
+    for r in RATE_ORDER:
+        row = mdf[mdf['target_qps'] == r]
+        if not row.empty:
+            p99_9_vals.append(row['lat_p99_9_ms'].values[0])
+        else:
             p99_9_vals.append(np.nan)
             
-    # Solid line with filled circle for p99
-    ax.plot(x_indices, p99_vals, marker='o', linewidth=2.2, markersize=6.5, linestyle='-',
-            label=f"{MODE_LABELS[mode]} ($p_{{99}}$)", color=MODE_COLORS[mode])
-    # Dashed line with open triangle for p99.9
-    ax.plot(x_indices, p99_9_vals, marker='^', linewidth=1.8, markersize=6.5, linestyle='--',
-            fillstyle='none', label=f"{MODE_LABELS[mode]} ($p_{{99.9}}$)", color=MODE_COLORS[mode], alpha=0.85)
+    ax.plot(x_indices, p99_9_vals, marker='^', linewidth=2.2, markersize=7, linestyle='-',
+            label=MODE_LABELS[mode], color=MODE_COLORS[mode])
 
-ax.set_ylabel("Response Latency (ms) [Log Scale]")
+ax.set_ylabel("Tail Latency $p_{99.9}$ (ms) [Log Scale]")
 ax.set_yscale('log')
-ax.set_title(f"Tail Latency ($p_{{99}}$ and $p_{{99.9}}$) Across Offered Load ({dataset_title}, n={reps_val})")
+ax.set_ylim(1.8, 135)
+ax.set_yticks(ticks)
+ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
+ax.yaxis.set_minor_formatter(ticker.NullFormatter())
+ax.set_title("Tail Latency $p_{99.9}$ vs. Offered Load", fontweight='bold', pad=10)
 ax.set_xticks(x_indices)
 ax.set_xticklabels(RATE_LABELS)
 ax.set_xlabel("Target Load Level")
 ax.grid(True, which='both', linestyle='--', alpha=0.4)
-ax.legend(loc='upper left', ncol=2, framealpha=0.93, fontsize=9.2)
+ax.legend(loc='upper right', framealpha=0.93, fontsize=9.5)
+plt.tight_layout()
+save_and_sync(fig, f"{prefix}2core_tail_latency_p99_9")
+
+# Also maintain combined figure for reference
+fig, ax = plt.subplots(figsize=(9.5, 5.8))
+for mode in MODE_ORDER:
+    mdf = df[df['mode'] == mode].copy()
+    mdf['target_qps'] = mdf['target_qps'].astype(str)
+    p99_vals = [mdf[mdf['target_qps'] == r]['lat_p99_ms'].values[0] if not mdf[mdf['target_qps'] == r].empty else np.nan for r in RATE_ORDER]
+    p99_9_vals = [mdf[mdf['target_qps'] == r]['lat_p99_9_ms'].values[0] if not mdf[mdf['target_qps'] == r].empty else np.nan for r in RATE_ORDER]
+    ax.plot(x_indices, p99_vals, marker='o', linewidth=2.2, markersize=6.5, linestyle='-',
+            label=f"{MODE_LABELS[mode]} ($p_{{99}}$)", color=MODE_COLORS[mode])
+    ax.plot(x_indices, p99_9_vals, marker='^', linewidth=1.8, markersize=6.5, linestyle='--',
+            fillstyle='none', label=f"{MODE_LABELS[mode]} ($p_{{99.9}}$)", color=MODE_COLORS[mode], alpha=0.85)
+ax.set_ylabel("Response Latency (ms) [Log Scale]")
+ax.set_yscale('log')
+ax.set_title("Tail Latency vs. Offered Load", fontweight='bold', pad=10)
+ax.set_xticks(x_indices)
+ax.set_xticklabels(RATE_LABELS)
+ax.set_xlabel("Target Load Level")
+ax.grid(True, which='both', linestyle='--', alpha=0.4)
+ax.legend(loc='upper right', ncol=2, framealpha=0.93, fontsize=9.2)
 plt.tight_layout()
 save_and_sync(fig, f"{prefix}2core_tail_latency")
 
@@ -204,7 +264,7 @@ fig, ax = plt.subplots(figsize=(9, 5.5))
 
 for mode in MODE_ORDER:
     mdf = df[df['mode'] == mode].copy()
-    mdf['qps_k'] = mdf['achieved_qps_mean'] / 1000.0
+    mdf['qps_m'] = mdf['achieved_qps_mean'] / 1000000.0
     
     # Calculate utilization of dedicated Core 0 and Core 1
     if 'srv_c0_busy_mean' in mdf.columns and 'srv_c1_busy_mean' in mdf.columns:
@@ -212,14 +272,16 @@ for mode in MODE_ORDER:
     else:
         mdf['dedicated_cpu'] = mdf['srv_all_busy_mean']
         
-    mdf = mdf.sort_values('qps_k')
+    mdf = mdf.sort_values('qps_m')
     
-    ax.plot(mdf['qps_k'], mdf['dedicated_cpu'], marker='s', linewidth=2.2, markersize=7,
+    ax.plot(mdf['qps_m'], mdf['dedicated_cpu'], marker='s', linewidth=2.2, markersize=7,
             label=MODE_LABELS[mode], color=MODE_COLORS[mode])
 
-ax.set_xlabel("Achieved Throughput (kQPS)")
-ax.set_ylabel("Dedicated Server Core Utilization (%) [Cores 0 & 1]")
-ax.set_title(f"Server CPU Saturation Curve (Cores 0 & 1, 4 RSS Queues, n={reps_val})")
+ax.set_xlabel("Achieved Throughput (MQPS)")
+ax.set_xlim(-0.35, 8.35)
+ax.set_xticks(np.arange(0, 9.0, 1.0))
+ax.set_ylabel("Dedicated Server Core Utilization (%)")
+ax.set_title("Server CPU Saturation Curve", fontweight='bold', pad=10)
 ax.grid(True, linestyle='--', alpha=0.5)
 ax.legend(loc='lower right', framealpha=0.92)
 plt.tight_layout()
@@ -249,13 +311,13 @@ for mode in MODE_ORDER:
             label=MODE_LABELS[mode], color=MODE_COLORS[mode])
 
 ax.set_ylabel("Packet Loss Rate (%)")
-ax.set_title(f"Packet Loss Rate vs. Offered Load ({dataset_title}, n={reps_val}, 180s per run)")
+ax.set_title("Packet Loss Rate vs. Offered Load", fontweight='bold', pad=10)
 ax.set_xticks(x_indices)
 ax.set_xticklabels(RATE_LABELS)
 ax.set_xlabel("Target Load Level")
 ax.set_ylim(-2, 105)
 ax.grid(True, linestyle='--', alpha=0.5)
-ax.legend(loc='upper left', framealpha=0.92)
+ax.legend(loc='center right', bbox_to_anchor=(0.96, 0.68), framealpha=0.95)
 plt.tight_layout()
 save_and_sync(fig, f"{prefix}2core_packet_loss")
 

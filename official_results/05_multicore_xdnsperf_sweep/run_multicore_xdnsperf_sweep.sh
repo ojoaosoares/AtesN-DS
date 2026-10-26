@@ -224,14 +224,28 @@ EOF"
             ;;
         esac
 
-        # Warmup
-        echo "-> Executando Warmup no HW Cache e Host..."
-        ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
-            dnsperf -s ${SERVER_IP} -d ${CLIENT_TRACE_FILE} -n 1 -c 64 -T 4 -q 2000 -Q 3000 -b 16384 >/dev/null 2>&1 || true
-            dnsperf -s ${SERVER_IP} -d ${CLIENT_ISP_WARMUP} -n 1 -c 128 -T 8 -q 5000 -Q 10000 -b 16384 >/dev/null 2>&1 || true
-        "
-        sleep 2
-        echo "   • Warmup concluído!"
+        # Pre-população dos Caches Instantaneamente (Abordagem 1)
+        echo "-> [PRELOAD] Pre-populando Caches Instantaneamente (Abordagem 1)..."
+        case "${MODE}" in
+          "unbound_standalone")
+            "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+            ;;
+          "unbound_hw_cache")
+            "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+            "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+            ;;
+          "ates_driver")
+            "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+            "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+            ;;
+          "ates_hw_cache")
+            "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+            "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+            "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+            ;;
+        esac
+        sleep 1
+        echo "   • Caches pre-populados com sucesso!"
 
         for RATE in "${RATES[@]}"; do
             RATE_LABEL="${RATE}"
@@ -271,6 +285,7 @@ EOF"
                         -d ${DURATION} \
                         -r ${RATE} \
                         -f ${CLIENT_TRACE_FILE} \
+                        --ednsopt=10:11223344556677889900aabb \
                         --csv
                 " 2>&1 || true)
 

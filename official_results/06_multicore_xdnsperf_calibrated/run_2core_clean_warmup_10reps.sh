@@ -41,19 +41,19 @@ NUM_CORES=2
 SERVER_CORES="0,1"
 SERVER_TASKSET="0,1"
 
-MODES_TO_TEST=("unbound_standalone" "ates_driver" "unbound_hw_cache" "ates_hw_cache")
+MODES_TO_TEST=("ates_hw_cache" "unbound_hw_cache" "ates_driver" "unbound_standalone")
 if [ $# -ge 1 ] && [ -n "$1" ]; then
     IFS=' ' read -r -a MODES_TO_TEST <<< "$1"
 fi
 
-RATES=(200000 500000 1000000 2000000 3000000)
+RATES=(500000 1000000 3000000 5000000 0)
 if [ $# -ge 2 ] && [ -n "$2" ]; then
     IFS=' ' read -r -a RATES <<< "$2"
 fi
 
 REPS=${REPS:-10}
 DURATION=${DURATION:-180}
-CLIENT_WORKERS=4
+CLIENT_WORKERS=${CLIENT_WORKERS:-6}
 
 RAW_CSV="${RAW_CSV:-${OUT_DIR}/raw_2core_clean_warmup_10reps.csv}"
 SUMMARY_CSV="${SUMMARY_CSV:-${OUT_DIR}/summary_2core_clean_warmup_10reps.csv}"
@@ -95,7 +95,16 @@ with open(summary_path, 'w', newline='') as f:
         "srv_all_busy_mean", "srv_softirq_mean", "client_cpu_busy_mean"
     ])
 
-    for (cores, mode, target_qps), rows in sorted(data.items()):
+    def sort_key(item):
+        cores, mode, tq = item[0]
+        try:
+            val = int(tq)
+            rate_num = 999999999 if val == 0 else val
+        except:
+            rate_num = 999999999
+        return (cores, mode, rate_num)
+
+    for (cores, mode, target_qps), rows in sorted(data.items(), key=sort_key):
         qps_vals = [float(r['achieved_qps']) for r in rows]
         loss_vals = [float(r['packet_loss_pct']) for r in rows]
         lat_mean_vals = [float(r['lat_mean_ms']) for r in rows]
@@ -124,72 +133,116 @@ with open(summary_path, 'w', newline='') as f:
             f"{np.mean(all_vals):.1f}", f"{np.mean(soft_vals):.1f}", f"{np.mean(cli_vals):.1f}"
         ])
 PYEOF
+    export SUMMARY_CSV RAW_CSV
+    python3 "${OUT_DIR}/plot_2core_calibrated.py" "${SUMMARY_CSV}" "${OUT_DIR}" >/dev/null 2>&1 || true
 }
+
+ensure_driver_state() {
+    local NEED_DRV="$1"
+    if [ "${NEED_DRV}" -eq 0 ]; then
+        if ip link show "${SERVER_IFACE}" | grep -q "xdpdrv"; then
+            echo "   [DRIVER] Desanexando xdpdrv de ${SERVER_IFACE} (modo sem Driver)..."
+            sudo -n ip link set dev "${SERVER_IFACE}" xdpdrv off 2>/dev/null || sudo -n bpftool net detach xdp dev "${SERVER_IFACE}" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+}
+
+ensure_hw_offload_state() {
+    local NEED_HW="$1"
+    local IS_ATTACHED=0
+    if ip link show "${SERVER_IFACE}" | grep -q "xdpoffload"; then
+        IS_ATTACHED=1
+    fi
+
+    if [ "${NEED_HW}" -eq 1 ]; then
+        if [ "${IS_ATTACHED}" -eq 0 ]; then
+            echo "   [HW] Anexando dns_filter offload a ${SERVER_IFACE}..."
+            sudo -n bpftool net attach xdpoffload pinned /sys/fs/bpf/xdp_prog dev "${SERVER_IFACE}" 2>/dev/null || {
+                echo "   [HW] Carregando prog_pin inicial do firmware..."
+                cd "${SERVER_BASE_DIR}" && sudo -n make load-hw >/dev/null 2>&1
+            }
+            sleep 1
+        fi
+    else
+        if [ "${IS_ATTACHED}" -eq 1 ]; then
+            echo "   [HW] Desanexando dns_filter offload de ${SERVER_IFACE} (modo sem HW)..."
+            sudo -n bpftool net detach xdpoffload dev "${SERVER_IFACE}" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+}
+
+CURRENT_LOADED_MODE=""
 
 reset_clean_and_warmup() {
     local MODE="$1"
-    echo "   [RESET] 1. Matando daemons antigos..."
-    sudo -n killall -9 atesnds atesnds_daemon dns_listener 2>/dev/null || true
-    sudo -n pkill -9 -x "atesnds|atesnds_daemon|dns_listener" 2>/dev/null || true
+    if [ "${CURRENT_LOADED_MODE}" != "${MODE}" ]; then
+        echo "   [SWITCH] Transição de Modo: '${CURRENT_LOADED_MODE}' -> '${MODE}'..."
+        echo "   [RESET] 1. Matando daemons antigos..."
+        sudo -n killall -9 atesnds atesnds_daemon dns_listener 2>/dev/null || true
+        sudo -n pkill -9 -x "atesnds|atesnds_daemon|dns_listener" 2>/dev/null || true
 
-    echo "   [RESET] 2. Desanexando XDP Offload / Driver e destruindo mapas BPF..."
-    sudo -n bpftool net detach xdpoffload dev "${SERVER_IFACE}" 2>/dev/null || true
-    sudo -n bpftool net detach xdp dev "${SERVER_IFACE}" 2>/dev/null || true
-    sudo -n ip link set dev "${SERVER_IFACE}" xdp off 2>/dev/null || true
-    sudo -n rm -rf /sys/fs/bpf/dns/*
+        case "${MODE}" in
+          "unbound_standalone")
+            ensure_hw_offload_state 0
+            ensure_driver_state 0
+            ;;
+          "ates_driver")
+            ensure_hw_offload_state 0
+            ensure_driver_state 0
+            nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds" -a "${SERVER_IP}" -i "${SERVER_IFACE}" -m "${CLIENT_MAC}" -s "${CLIENT_IP}" >/dev/null 2>&1 &
+            sleep 2
+            sudo -n python3 "${SERVER_BASE_DIR}/tests/manage_overload.py" normal 2>/dev/null || true
+            ;;
+          "unbound_hw_cache")
+            ensure_driver_state 0
+            ensure_hw_offload_state 1
+            nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/dns_listener" -i "${SERVER_IFACE}" >/dev/null 2>&1 &
+            sleep 1
+            nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds_daemon" >/dev/null 2>&1 &
+            sleep 2
+            ;;
+          "ates_hw_cache")
+            ensure_hw_offload_state 1
+            nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds" -a "${SERVER_IP}" -i "${SERVER_IFACE}" -m "${CLIENT_MAC}" -s "${CLIENT_IP}" >/dev/null 2>&1 &
+            sleep 2
+            nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds_daemon" >/dev/null 2>&1 &
+            sleep 2
+            sudo -n python3 "${SERVER_BASE_DIR}/tests/manage_overload.py" normal 2>/dev/null || true
+            ;;
+        esac
+        CURRENT_LOADED_MODE="${MODE}"
+    else
+        echo "   [REUSE] Modo '${MODE}' já ativo. Mantendo daemons e estado de hardware."
+    fi
 
-    echo "   [RESET] 3. Limpando cache do Unbound..."
+    echo "   [RESET] Limpando cache do Unbound..."
     sudo -n unbound-control flush_zone . >/dev/null 2>&1 || sudo -n systemctl restart unbound
     pgrep -x unbound | xargs -r -n1 sudo -n taskset -acp "${SERVER_TASKSET}" >/dev/null 2>&1 || true
 
-    echo "   [COOLDOWN] 4. Aguardando 3s de estabilização do barramento e anéis..."
-    sleep 3
-
-    echo "   [RELOAD] 5. Recarregando componentes para o modo: ${MODE}..."
+    # 6. Pre-população dos Caches Instantaneamente (Abordagem 1)
+    echo "   [PRELOAD] 6. Pre-populando Caches Instantaneamente (Abordagem 1)..."
     case "${MODE}" in
       "unbound_standalone")
-        # Unbound já ativo e limpo
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
         ;;
       "unbound_hw_cache")
-        cd "${SERVER_BASE_DIR}" && sudo -n make load-hw >/dev/null 2>&1
-        sleep 2
-        nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/dns_listener" -i "${SERVER_IFACE}" >/dev/null 2>&1 &
-        sleep 1
-        nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds_daemon" >/dev/null 2>&1 &
-        sleep 2
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
         ;;
       "ates_driver")
-        nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds" -a "${SERVER_IP}" -i "${SERVER_IFACE}" -m "${CLIENT_MAC}" -s "${CLIENT_IP}" >/dev/null 2>&1 &
-        sleep 2
-        sudo -n python3 "${SERVER_BASE_DIR}/tests/manage_overload.py" normal 2>/dev/null || true
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
         ;;
       "ates_hw_cache")
-        cd "${SERVER_BASE_DIR}" && sudo -n make load-hw >/dev/null 2>&1
-        sleep 2
-        nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds" -a "${SERVER_IP}" -i "${SERVER_IFACE}" -m "${CLIENT_MAC}" -s "${CLIENT_IP}" >/dev/null 2>&1 &
-        sleep 2
-        nohup sudo -n taskset -c "${SERVER_TASKSET}" "${SERVER_BASE_DIR}/bin/atesnds_daemon" >/dev/null 2>&1 &
-        sleep 2
-        sudo -n python3 "${SERVER_BASE_DIR}/tests/manage_overload.py" normal 2>/dev/null || true
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
         ;;
     esac
-
-    # 6. Warmup resolvendo os top domínios do trace com xdnsperf
-    echo "   [WARMUP] 6. Aquecendo SRAM e Caches resolvendo Top Domínios com xdnsperf (15.000 QPS)..."
-    ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
-        sudo -n ip link set dev ${CLIENT_IFACE} up 2>/dev/null || true
-        sudo -n ip addr replace ${CLIENT_IP}/24 dev ${CLIENT_IFACE} 2>/dev/null || true
-        sudo -n arp -s ${SERVER_IP} ${SERVER_MAC} 2>/dev/null || true
-        sudo -n ${CLIENT_XDNSPERF_DIR}/bin/xdnsperf \
-            -i ${CLIENT_IFACE} \
-            -s ${SERVER_IP} \
-            -c 4 \
-            -d 4 \
-            -r 15000 \
-            -f ${CLIENT_TOP32K_WARMUP} >/dev/null 2>&1 || true
-    "
-    sleep 2
-    echo "   • Ambiente limpo e reaquecido com xdnsperf para a rodada!"
+    sleep 1
+    echo "   • Ambiente limpo e pre-populado para a rodada!"
 }
 
 echo "=========================================================================================="
@@ -223,9 +276,24 @@ done
 ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
     sudo -n cpupower frequency-set -g performance >/dev/null 2>&1 || true
     sudo -n ip link set dev ${CLIENT_IFACE} up 2>/dev/null || true
-    sudo -n ethtool -L ${CLIENT_IFACE} combined 4 >/dev/null 2>&1 || true
+    sudo -n sysctl -w net.core.rmem_max=67108864 >/dev/null 2>&1 || true
+    sudo -n sysctl -w net.core.wmem_max=67108864 >/dev/null 2>&1 || true
+    sudo -n sysctl -w net.ipv4.ip_local_port_range='1024 65535' >/dev/null 2>&1 || true
+    sudo -n ethtool -L ${CLIENT_IFACE} combined 6 >/dev/null 2>&1 || true
+    sudo -n ethtool -G ${CLIENT_IFACE} rx 4096 tx 4096 >/dev/null 2>&1 || true
+    sudo -n ip link set dev ${CLIENT_IFACE} xdpgeneric off 2>/dev/null || true
+    sudo -n ip link set dev ${CLIENT_IFACE} xdpdrv off 2>/dev/null || true
+    sudo -n ip link set dev ${CLIENT_IFACE} xdp off 2>/dev/null || true
     sudo -n ip addr replace ${CLIENT_IP}/24 dev ${CLIENT_IFACE} 2>/dev/null || true
     sudo -n arp -s ${SERVER_IP} ${SERVER_MAC} 2>/dev/null || true
+
+    CLI_IRQS=(\$(grep \"${CLIENT_IFACE}-\" /proc/interrupts | awk -F: '{print \$1}' | tr -d ' '))
+    for q in \"\${!CLI_IRQS[@]}\"; do
+        irq=\"\${CLI_IRQS[\$q]}\"
+        core=\$((q % 6 + 6))
+        mask=\$((1 << core))
+        printf \"%x\" \"\${mask}\" | sudo -n tee \"/proc/irq/\${irq}/smp_affinity\" >/dev/null || true
+    done
     sudo -n pkill -x mock_dns_server 2>/dev/null || true
     sleep 1
     sudo -n nohup taskset -c 11 ${CLIENT_BASE_DIR}/tests/mock_dns_server ${CLIENT_IP} 53 </dev/null >/tmp/mock_dns.log 2>&1 &
@@ -271,6 +339,7 @@ for MODE in "${MODES_TO_TEST[@]}"; do
                     -d ${DURATION} \
                     -r ${RATE} \
                     -f ${CLIENT_BENCH_TRACE} \
+                    --ednsopt=10:11223344556677889900aabb \
                     ${EXTRA_FLAGS:-} \
                     --csv
                 wait \${CLI_MPSTAT_PID} 2>/dev/null || true

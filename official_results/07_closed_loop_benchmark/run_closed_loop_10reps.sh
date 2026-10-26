@@ -186,21 +186,27 @@ reset_clean_and_warmup() {
         ;;
     esac
 
-    echo "   [WARMUP] 6. Aquecendo SRAM e Caches resolvendo Top Domínios com xdnsperf (15.000 QPS)..."
-    ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
-        sudo -n ip link set dev ${CLIENT_IFACE} up 2>/dev/null || true
-        sudo -n ip addr replace ${CLIENT_IP}/24 dev ${CLIENT_IFACE} 2>/dev/null || true
-        sudo -n arp -s ${SERVER_IP} ${SERVER_MAC} 2>/dev/null || true
-        sudo -n ${CLIENT_XDNSPERF_DIR}/bin/xdnsperf \
-            -i ${CLIENT_IFACE} \
-            -s ${SERVER_IP} \
-            -c 4 \
-            -d 4 \
-            -r 15000 \
-            -f ${CLIENT_TOP32K_WARMUP} >/dev/null 2>&1 || true
-    "
-    sleep 2
-    echo "   • Ambiente limpo e reaquecido com xdnsperf para a rodada!"
+    echo "   [PRELOAD] 6. Pre-populando Caches Instantaneamente (Abordagem 1)..."
+    case "${MODE}" in
+      "unbound_standalone")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        ;;
+      "unbound_hw_cache")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+        ;;
+      "ates_driver")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+        ;;
+      "ates_hw_cache")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+        ;;
+    esac
+    sleep 1
+    echo "   • Ambiente limpo e pre-populado para a rodada!"
 }
 
 echo "=========================================================================================="
@@ -340,6 +346,7 @@ for MODE in "${MODES_TO_TEST[@]}"; do
                     -W ${WIN} \
                     --busy-wait \
                     -f ${CLIENT_BENCH_TRACE} \
+                    --ednsopt=10:11223344556677889900aabb \
                     --csv
                 wait \${CLI_MPSTAT_PID} 2>/dev/null || true
                 CLI_CPU=\$(awk '/^Average:/ && \$2 == \"all\" { print 100.0 - \$12 }' /tmp/client_mpstat.txt)

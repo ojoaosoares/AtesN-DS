@@ -292,21 +292,28 @@ for MODE in "${MODES_TO_TEST[@]}"; do
         ;;
     esac
 
-    # Warmup em duas fases:
-    # Fase 1: Top 32k na SRAM da SmartNIC (a 3.000 QPS)
-    echo "-> [Warmup Fase 1] Top 32.768 domínios na SRAM da SmartNIC (3.000 QPS)..."
-    ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
-        dnsperf -s ${SERVER_IP} -d ${CLIENT_TOP32K_WARMUP} -n 1 -c 8 -T 2 -q 200 -Q 3000 -e -E 10:11223344556677889900aabb >/dev/null 2>&1 || true
-    "
-    sleep 2
-
-    # Fase 2: Domínios únicos do trace no cache do Host (a 20.000 QPS)
-    echo "-> [Warmup Fase 2] Domínios únicos do trace no Host Cache (20.000 QPS)..."
-    ssh -o StrictHostKeyChecking=no "${CLIENT_USER}@${CLIENT_MGMT_IP}" "
-        dnsperf -s ${SERVER_IP} -d ${CLIENT_UNIQUE_WARMUP} -n 1 -c 32 -T 4 -q 1000 -Q 20000 -e -E 10:11223344556677889900aabb >/dev/null 2>&1 || true
-    "
-    sleep 3
-    echo "   • Warmup de duas fases concluído com sucesso!"
+    # Pre-população dos Caches Instantaneamente (Abordagem 1)
+    echo "-> [PRELOAD] Pre-populando Caches Instantaneamente (Abordagem 1)..."
+    case "${MODE}" in
+      "unbound_standalone")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        ;;
+      "unbound_hw_cache")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+        ;;
+      "ates_driver")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+        ;;
+      "ates_hw_cache")
+        "${SERVER_BASE_DIR}/scripts/preload_unbound.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_driver.sh"
+        "${SERVER_BASE_DIR}/scripts/preload_hw.sh"
+        ;;
+    esac
+    sleep 1
+    echo "   • Caches pre-populados com sucesso!"
 
     for RATE in "${RATES[@]}"; do
         RATE_LABEL="${RATE}"
@@ -348,6 +355,7 @@ for MODE in "${MODES_TO_TEST[@]}"; do
                     -d ${DURATION} \
                     -r ${RATE} \
                     -f ${CLIENT_BENCH_TRACE} \
+                    --ednsopt=10:11223344556677889900aabb \
                     --csv
                 wait \${CLI_MPSTAT_PID} 2>/dev/null || true
                 CLI_CPU=\$(awk '/^Average:/ && \$2 == \"all\" { print 100.0 - \$12 }' /tmp/client_mpstat.txt)

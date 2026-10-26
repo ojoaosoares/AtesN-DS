@@ -36,9 +36,9 @@ $(shell mkdir -p $(OBJ_FOLDER))
 $(shell mkdir -p $(BIN_FOLDER))
 $(shell mkdir -p $(DATA_FOLDER))
 
-all: ${TARGET}
+all: ${TARGET} preload
 
-build-all: build-hw all daemon listener
+build-all: build-hw all daemon listener preload
 
 check: verify
 verify:
@@ -49,6 +49,14 @@ run: ${TARGET}
 
 ${TARGET}: ${MAIN} ${SKELETON} $(HEADERS)
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf
+
+PRELOAD_SRC = $(SRC_FOLDER)preload_cache.c
+PRELOAD_BIN = $(BIN_FOLDER)preload_cache
+
+preload: $(PRELOAD_BIN)
+
+$(PRELOAD_BIN): $(PRELOAD_SRC) $(HEADERS)
+	$(CC) $(PRELOAD_SRC) -o $@ -I $(INCLUDE_FOLDER) -lbpf
 
 ${SKELETON}: ${OBJ_FOLDER}dns.o
 	bpftool gen skeleton $< name dns | tee $@
