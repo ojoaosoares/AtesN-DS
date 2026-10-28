@@ -27,6 +27,7 @@
 #include "daemon_ingest.h"
 #include "daemon_cleaner.h"
 #include "daemon_prefetch.h"
+#include "dns_preload_utils.h"
 
 static struct daemon_ctx g_ctx;
 
@@ -45,13 +46,81 @@ static void print_usage(const char *prog) {
     printf("  -n, --capacity <entries>  SmartNIC hardware cache capacity (default: auto-detected, or %u)\n", DEFAULT_HW_CACHE_CAPACITY);
     printf("  -H, --high-watermark <%%>  High watermark percentage for eviction (default: 90)\n");
     printf("  -L, --low-watermark <%%>   Low watermark percentage target (default: 80)\n");
+    printf("  -w, --warmup <file>       Warmup trace to seed into Timing Wheel & SmartNIC\n");
+    printf("  --ttl <seconds>           Warmup TTL in seconds (default: 30)\n");
     printf("  --ingest-core <id>        CPU Core for Ingestion Worker (default: 1)\n");
-    printf("  --gov-core <id>           CPU Core for Governance Worker (default: 2)\n");
+    printf("  --gov-core <id>           CPU Core for Governance Worker (default: 0)\n");
     printf("  -v, --verbose             Enable detailed operational metrics\n");
     printf("  -h, --help                Show this help message\n");
 }
 
+static int seed_warmup(struct daemon_ctx *d) {
+    if (!d->cfg.warmup_trace[0]) return 0;
+
+    FILE *f = fopen(d->cfg.warmup_trace, "r");
+    if (!f) {
+        fprintf(stderr, "[WARN] Cannot open warmup trace file '%s': %s\n",
+                d->cfg.warmup_trace, strerror(errno));
+        return -1;
+    }
+
+    uint32_t now = (uint32_t)time(NULL);
+    uint32_t ttl = d->cfg.warmup_ttl ? d->cfg.warmup_ttl : 30;
+
+    char line[512];
+    uint32_t loaded = 0;
+    uint32_t skipped = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        char domain[256] = {0};
+        uint32_t entry_ttl = ttl;
+        if (sscanf(line, "%255s %u", domain, &entry_ttl) < 1) continue;
+        uint32_t entry_exp = now + entry_ttl;
+
+        uint8_t wire[MAX_DNS_NAME_LENGTH_HW];
+        memset(wire, 0, sizeof(wire));
+        int wlen = domain_to_wire(domain, wire, sizeof(wire));
+        if (wlen < 0) {
+            skipped++;
+            continue;
+        }
+
+        uint32_t h = hash_domain_name(domain);
+        uint32_t ip = get_synthetic_ip(h);
+
+        struct a_record_hw rec = {
+            .timestamp = entry_exp,
+            .ip = ip
+        };
+
+        /* 1. Seed into Host DRAM Timing Wheel */
+        if (d->wheel) {
+            timing_wheel_insert(d->wheel, (const char *)wire, entry_exp);
+        }
+
+        /* 2. Seed into SmartNIC Hardware Map via PCIe */
+        if (d->hw_cache_fd >= 0) {
+            if (bpf_map_update_elem(d->hw_cache_fd, wire, &rec, BPF_ANY) == 0) {
+                loaded++;
+                /* Pace PCIe DMA writes to avoid Netronome CMSG ring overflow: 1ms every 16 writes */
+                if ((loaded & 15) == 0) {
+                    usleep(1000);
+                }
+            } else {
+                skipped++;
+            }
+        }
+    }
+    fclose(f);
+
+    printf("✓ [WARMUP] Seeded %u domains into Timing Wheel & SmartNIC (TTL=%us, Wheel Total=%lu, Skipped=%u)\n",
+           loaded, ttl, d->wheel ? (unsigned long)d->wheel->total_entries : 0UL, skipped);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
+    setlinebuf(stdout);
+    setlinebuf(stderr);
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
 
@@ -65,8 +134,9 @@ int main(int argc, char *argv[]) {
     g_ctx.cfg.high_watermark_pct = 90;
     g_ctx.cfg.low_watermark_pct = 80;
     g_ctx.cfg.ingest_core = 1;
-    g_ctx.cfg.governance_core = 2;
-    g_ctx.cfg.resolver_core = 3;
+    g_ctx.cfg.governance_core = 0;
+    g_ctx.cfg.resolver_core = 0;
+    g_ctx.cfg.warmup_ttl = 30;
     g_ctx.cfg.verbose = false;
 
     static struct option long_opts[] = {
@@ -76,6 +146,8 @@ int main(int argc, char *argv[]) {
         {"capacity", required_argument, 0, 'n'},
         {"high-watermark", required_argument, 0, 'H'},
         {"low-watermark", required_argument, 0, 'L'},
+        {"warmup", required_argument, 0, 'w'},
+        {"ttl", required_argument, 0, 1003},
         {"ingest-core", required_argument, 0, 1001},
         {"gov-core", required_argument, 0, 1002},
         {"verbose", no_argument, 0, 'v'},
@@ -84,7 +156,7 @@ int main(int argc, char *argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "c:t:r:n:H:L:vh", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:t:r:n:H:L:w:vh", long_opts, NULL)) != -1) {
         switch (opt) {
         case 'c': strncpy(g_ctx.cfg.hw_cache_path, optarg, sizeof(g_ctx.cfg.hw_cache_path)-1); break;
         case 't': strncpy(g_ctx.cfg.time_map_path, optarg, sizeof(g_ctx.cfg.time_map_path)-1); break;
@@ -95,6 +167,8 @@ int main(int argc, char *argv[]) {
             break;
         case 'H': g_ctx.cfg.high_watermark_pct = atoi(optarg); break;
         case 'L': g_ctx.cfg.low_watermark_pct = atoi(optarg); break;
+        case 'w': strncpy(g_ctx.cfg.warmup_trace, optarg, sizeof(g_ctx.cfg.warmup_trace)-1); break;
+        case 1003: g_ctx.cfg.warmup_ttl = atoi(optarg); break;
         case 1001: g_ctx.cfg.ingest_core = atoi(optarg); break;
         case 1002: g_ctx.cfg.governance_core = atoi(optarg); break;
         case 'v': g_ctx.cfg.verbose = true; break;
@@ -155,6 +229,11 @@ int main(int argc, char *argv[]) {
         close(g_ctx.hw_cache_fd);
         close(g_ctx.time_map_fd);
         return 1;
+    }
+
+    /* Seed Warmup into both Host DRAM Timing Wheel and SmartNIC Hardware Cache */
+    if (g_ctx.cfg.warmup_trace[0]) {
+        seed_warmup(&g_ctx);
     }
 
     /* Create Ring Buffer Consumer */

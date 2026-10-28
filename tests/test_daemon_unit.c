@@ -235,9 +235,22 @@ static bool test_ingest_event_handler(void) {
     TEST_ASSERT(ret == 0, "sample handler return code must be 0");
     TEST_ASSERT(ctx.wheel->total_entries == 1, "event must be registered in timing wheel");
 
+    /* Duplicate sample for the SAME domain with refreshed TTL: must NOT increase entries or evict */
+    evt.timestamp = now + 20;
+    ret = handle_hw_sync_sample(&ctx, &evt, sizeof(evt));
+    TEST_ASSERT(ret == 0, "duplicate sample handler return code must be 0");
+    TEST_ASSERT(ctx.wheel->total_entries == 1, "duplicate sample must NOT increment total_entries");
+
     uint32_t count = 0;
-    struct wheel_node *node = timing_wheel_pop_expired(ctx.wheel, now + 15, &count);
-    TEST_ASSERT(count == 1, "registered node must be popped");
+    /* At now + 15: old TTL was 10, but renewed to 20, so nothing must expire */
+    struct wheel_node *node_early = timing_wheel_pop_expired(ctx.wheel, now + 15, &count);
+    TEST_ASSERT(count == 0, "renewed domain must NOT expire at old timestamp");
+    TEST_ASSERT(node_early == NULL, "popped node must be NULL");
+    TEST_ASSERT(ctx.wheel->total_entries == 1, "total_entries must remain 1");
+
+    /* At now + 25: renewed TTL is now reached */
+    struct wheel_node *node = timing_wheel_pop_expired(ctx.wheel, now + 25, &count);
+    TEST_ASSERT(count == 1, "registered node must be popped at renewed timestamp");
     TEST_ASSERT(strcmp(node->name, "ingest-test.org") == 0, "domain name must match");
 
     free(node);
@@ -272,6 +285,65 @@ static bool test_dual_watermark_math(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* 8. Test In-DRAM Hash Index Key Deduplication & Eviction Prevention       */
+/* ------------------------------------------------------------------------- */
+static bool test_timing_wheel_deduplication(void) {
+    printf("[TEST] Timing Wheel: In-DRAM Hash Deduplication & Eviction Prevention\n");
+
+    struct timing_wheel *w = timing_wheel_create(100);
+    TEST_ASSERT(w != NULL, "wheel creation failed");
+
+    uint32_t now = 50000;
+    w->last_tick = now;
+
+    /* 1. Insert novel key */
+    int ret = timing_wheel_insert(w, "duplicate-test.com", now + 10);
+    TEST_ASSERT(ret == 0, "initial insert must succeed");
+    TEST_ASSERT(w->total_entries == 1, "total_entries must be 1");
+    TEST_ASSERT(timing_wheel_contains(w, "duplicate-test.com") == true, "contains must return true");
+
+    /* 2. Re-insert same key with newer TTL (Renewal) */
+    ret = timing_wheel_insert(w, "duplicate-test.com", now + 30);
+    TEST_ASSERT(ret == 0, "duplicate insert must succeed");
+    TEST_ASSERT(w->total_entries == 1, "duplicate insert must NOT increment total_entries");
+
+    /* 3. At now + 15, key should NOT expire (old TTL overridden) */
+    uint32_t count = 0;
+    struct wheel_node *exp1 = timing_wheel_pop_expired(w, now + 15, &count);
+    TEST_ASSERT(exp1 == NULL, "key must not expire at old timestamp");
+    TEST_ASSERT(count == 0, "count must be 0");
+    TEST_ASSERT(w->total_entries == 1, "total_entries must remain 1");
+
+    /* 4. At now + 35, key should expire */
+    struct wheel_node *exp2 = timing_wheel_pop_expired(w, now + 35, &count);
+    TEST_ASSERT(exp2 != NULL, "key must expire at renewed timestamp");
+    TEST_ASSERT(count == 1, "count must be 1");
+    TEST_ASSERT(w->total_entries == 0, "wheel must now be empty");
+    TEST_ASSERT(timing_wheel_contains(w, "duplicate-test.com") == false, "contains must return false after expiration");
+
+    free(exp2);
+
+    /* 5. Saturation & eviction avoidance test:
+     * Fill wheel to small capacity, insert duplicates, verify victim eviction does NOT trigger */
+    uint32_t small_cap = 5;
+    struct timing_wheel *w_small = timing_wheel_create(small_cap);
+    for (uint32_t i = 0; i < small_cap; i++) {
+        char name[64];
+        snprintf(name, sizeof(name), "unique-%u.com", i);
+        timing_wheel_insert(w_small, name, now + 100 + i);
+    }
+    TEST_ASSERT(w_small->total_entries == small_cap, "small wheel must be at capacity");
+
+    /* Insert duplicate of unique-0.com: total_entries must remain small_cap */
+    timing_wheel_insert(w_small, "unique-0.com", now + 200);
+    TEST_ASSERT(w_small->total_entries == small_cap, "duplicate must not increase total_entries");
+
+    timing_wheel_destroy(w);
+    timing_wheel_destroy(w_small);
+    return true;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Main Test Runner                                                          */
 /* ------------------------------------------------------------------------- */
 int main(void) {
@@ -287,6 +359,7 @@ int main(void) {
     all_ok &= test_hw_key_boundary();
     all_ok &= test_ingest_event_handler();
     all_ok &= test_dual_watermark_math();
+    all_ok &= test_timing_wheel_deduplication();
 
     printf("\n==========================================================\n");
     if (all_ok) {

@@ -155,7 +155,9 @@ static int preload_hw(const char *trace_file, uint32_t ttl) {
 
     while (fgets(line, sizeof(line), f)) {
         char domain[256] = {0};
-        if (sscanf(line, "%255s", domain) != 1) continue;
+        uint32_t file_ttl = ttl;
+        int n_parsed = sscanf(line, "%255s %u", domain, &file_ttl);
+        if (n_parsed < 1) continue;
 
         uint8_t wire[MAX_DNS_NAME_LENGTH_HW];
         memset(wire, 0, sizeof(wire));
@@ -167,9 +169,10 @@ static int preload_hw(const char *trace_file, uint32_t ttl) {
 
         uint32_t h = hash_domain_name(domain);
         uint32_t ip = get_synthetic_ip(h);
+        uint32_t entry_ttl = (n_parsed >= 2) ? file_ttl : ((ttl >= 5) ? (ttl - 2 + (h % 5)) : ttl);
 
         struct a_record_hw rec = {
-            .timestamp = now + ttl,
+            .timestamp = now + entry_ttl,
             .ip = ip
         };
 
@@ -220,7 +223,9 @@ static int preload_driver(const char *trace_file, uint32_t ttl) {
 
     while (fgets(line, sizeof(line), f)) {
         char domain[256] = {0};
-        if (sscanf(line, "%255s", domain) != 1) continue;
+        uint32_t file_ttl = ttl;
+        int n_parsed = sscanf(line, "%255s %u", domain, &file_ttl);
+        if (n_parsed < 1) continue;
 
         uint8_t wire[MAX_DNS_NAME_LENGTH_SW];
         memset(wire, 0, sizeof(wire));
@@ -232,9 +237,10 @@ static int preload_driver(const char *trace_file, uint32_t ttl) {
 
         uint32_t h = hash_domain_name(domain);
         uint32_t ip = get_synthetic_ip(h);
+        uint32_t entry_ttl = (n_parsed >= 2) ? file_ttl : ((ttl >= 5) ? (ttl - 2 + (h % 5)) : ttl);
 
         struct a_record_sw rec = {
-            .timestamp = mono_now + ttl,
+            .timestamp = mono_now + entry_ttl,
             .ip = ip,
             .prefetch = 0
         };
@@ -275,6 +281,7 @@ static int preload_unbound(const char *trace_file, uint32_t ttl) {
     size_t cap = 65536;
     char **domains = malloc(cap * sizeof(char *));
     uint32_t *hashes = malloc(cap * sizeof(uint32_t));
+    uint32_t *ttls = malloc(cap * sizeof(uint32_t));
     uint32_t count = 0;
 
     char line[512];
@@ -283,14 +290,18 @@ static int preload_unbound(const char *trace_file, uint32_t ttl) {
 
     while (fgets(line, sizeof(line), f)) {
         char d[256] = {0};
-        if (sscanf(line, "%255s", d) != 1) continue;
+        uint32_t file_ttl = ttl;
+        int n_parsed = sscanf(line, "%255s %u", d, &file_ttl);
+        if (n_parsed < 1) continue;
         if (count >= cap) {
             cap *= 2;
             domains = realloc(domains, cap * sizeof(char *));
             hashes = realloc(hashes, cap * sizeof(uint32_t));
+            ttls = realloc(ttls, cap * sizeof(uint32_t));
         }
         domains[count] = strdup(d);
         hashes[count] = hash_domain_name(d);
+        ttls[count] = (n_parsed >= 2) ? file_ttl : ((ttl >= 5) ? (ttl - 2 + (hashes[count] % 5)) : ttl);
         count++;
     }
     fclose(f);
@@ -303,15 +314,17 @@ static int preload_unbound(const char *trace_file, uint32_t ttl) {
         uint8_t b2 = (uint8_t)((h >> 16) & 0xfe) | 1;
         uint8_t b3 = (uint8_t)((h >> 8) & 0xfe) | 1;
         uint8_t b4 = (uint8_t)(h & 0xfe) | 1;
-        fprintf(pipe, ";rrset %u 1 0 5 0\n", ttl);
-        fprintf(pipe, "%s.\t%u\tIN\tA\t%u.%u.%u.%u\n", domains[i], ttl, b1, b2, b3, b4);
+        uint32_t entry_ttl = ttls[i];
+        fprintf(pipe, ";rrset %u 1 0 5 0\n", entry_ttl);
+        fprintf(pipe, "%s.\t%u\tIN\tA\t%u.%u.%u.%u\n", domains[i], entry_ttl, b1, b2, b3, b4);
     }
     fprintf(pipe, "END_RRSET_CACHE\n");
 
     /* 2. MSG cache section */
     fprintf(pipe, "START_MSG_CACHE\n");
     for (uint32_t i = 0; i < count; i++) {
-        fprintf(pipe, "msg %s. IN A 33152 1 %u 0 1 0 0 -1\n", domains[i], ttl);
+        uint32_t entry_ttl = ttls[i];
+        fprintf(pipe, "msg %s. IN A 33152 1 %u 0 1 0 0 -1\n", domains[i], entry_ttl);
         fprintf(pipe, "%s. IN A 0\n", domains[i]);
     }
     fprintf(pipe, "END_MSG_CACHE\n");
@@ -324,6 +337,7 @@ static int preload_unbound(const char *trace_file, uint32_t ttl) {
     }
     free(domains);
     free(hashes);
+    free(ttls);
 
     clock_gettime(CLOCK_MONOTONIC, &t_end);
     double elapsed_ms = (t_end.tv_sec - t_start.tv_sec) * 1000.0 + (t_end.tv_nsec - t_start.tv_nsec) / 1000000.0;

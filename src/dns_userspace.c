@@ -13,6 +13,7 @@
 #include <linux/if_link.h>
 #include <sys/resource.h>
 #include <errno.h>
+#include <signal.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include "dns.h"
@@ -26,6 +27,12 @@
 
 static const char *standard_recursive_server = "8.8.8.8";
 static bool g_verbose = false;
+static volatile bool g_running = true;
+
+static void sig_handler(int sig) {
+    (void)sig;
+    g_running = false;
+}
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args) {
     if (level == LIBBPF_DEBUG && !g_verbose)
@@ -130,6 +137,12 @@ static int send_dns_query_from_ip(__u32 src_ip, __u16 src_port,
         perror("socket");
         return -1;
     }
+
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifdef SO_REUSEPORT
+    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
 
     struct sockaddr_in src_addr = {
         .sin_family = AF_INET,
@@ -331,6 +344,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
     printf("[ATES-INIT] Step 1/6: Opening BPF skeleton...\n");
     fflush(stdout);
     struct dns *skel = dns__open();
@@ -340,6 +356,24 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     printf("[ATES-INIT] BPF skeleton opened successfully (%p)\n", (void*)skel);
+    fflush(stdout);
+
+    if (!skel->bss) {
+        fprintf(stderr, "[ERROR] BPF skeleton has no BSS (global variables)\n");
+        fflush(stderr);
+        dns__destroy(skel);
+        return 1;
+    }
+
+    printf("[ATES-INIT] Configuring network globals before load...\n");
+    skel->bss->serverip = myip;
+    convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
+    inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
+    printf("   -> Server IP:    %s\n", inet_ntoa(*(struct in_addr *)&myip));
+    printf("   -> Gateway MAC:   %02x:%02x:%02x:%02x:%02x:%02x\n",
+           skel->bss->gateway_mac[0], skel->bss->gateway_mac[1], skel->bss->gateway_mac[2],
+           skel->bss->gateway_mac[3], skel->bss->gateway_mac[4], skel->bss->gateway_mac[5]);
+    printf("   -> Upstream IP:  %s\n", recursive);
     fflush(stdout);
 
     if (sw_cache_size > 0) {
@@ -371,22 +405,18 @@ int main(int argc, char *argv[]) {
     printf("[ATES-INIT] BPF skeleton loaded successfully into kernel!\n");
     fflush(stdout);
 
-    printf("[ATES-INIT] Step 3/6: Checking BSS global variables...\n");
-    fflush(stdout);
-    if (!skel->bss) {
-        fprintf(stderr, "[ERROR] BPF skeleton has no BSS (global variables)\n");
-        fflush(stderr);
-        dns__destroy(skel);
-        return 1;
-    }
-
-    printf("[ATES-INIT] Step 4/6: Configuring network globals (Server IP, MAC, Upstream)...\n");
-    fflush(stdout);
+    /* Guarantee BSS map values in kernel */
     skel->bss->serverip = myip;
     convert_mac_to_bytes(mac_address, skel->bss->gateway_mac);
     inet_pton(AF_INET, recursive, &skel->bss->recursive_server_ip);
 
-    printf("[ATES-INIT] Step 5/6: Populating tail call programs map...\n");
+    struct bpf_map *bss_map = bpf_object__find_map_by_name(skel->obj, "dns.bss");
+    if (bss_map) {
+        uint32_t zero = 0;
+        bpf_map_update_elem(bpf_map__fd(bss_map), &zero, skel->bss, BPF_ANY);
+    }
+
+    printf("[ATES-INIT] Step 3/6: Populating tail call programs map...\n");
     struct {
         int key;
         struct bpf_program *prog;
@@ -415,33 +445,32 @@ int main(int argc, char *argv[]) {
     printf("[ATES-INIT] Step 6/6: Attaching XDP program to interface %d...\n", index);
     int fd = bpf_program__fd(skel->progs.dns_filter);
     int exit_code = 0;
-    struct bpf_link_create_opts opts = {};
-    opts.sz = sizeof(opts);
+    int link_fd = -1;
+    struct bpf_map *hw_sync_map = NULL;
+    struct bpf_map *ovl_map = NULL;
+    struct bpf_map *cache_map = NULL;
+    struct ring_buffer *rb = NULL;
     
-    int link_fd = bpf_link_create(fd, index, BPF_XDP, &opts);
+    DECLARE_LIBBPF_OPTS(bpf_link_create_opts, link_opts);
+    link_opts.sz = sizeof(link_opts);
+    
+    link_fd = bpf_link_create(fd, index, BPF_XDP, &link_opts);
     if (link_fd < 0) {
         if (g_verbose) {
-            fprintf(stderr, "[DEBUG] bpf_link_create failed (errno %d: %s), trying bpf_program__attach_xdp...\n", errno, strerror(errno));
+            fprintf(stderr, "[DEBUG] bpf_link_create failed (errno %d: %s), trying bpf_xdp_attach...\n", errno, strerror(errno));
         }
-        struct bpf_link *link = bpf_program__attach_xdp(skel->progs.dns_filter, index);
-        long link_err = libbpf_get_error(link);
-        if (!link || link_err) {
-            if (g_verbose) {
-                fprintf(stderr, "[DEBUG] bpf_program__attach_xdp failed (err %ld), trying bpf_xdp_attach...\n", link_err);
-            }
-            int attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_DRV_MODE, NULL);
-            if (attach_err < 0) {
-                attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_SKB_MODE, NULL);
-            }
-            if (attach_err < 0) {
-                attach_err = bpf_xdp_attach(index, fd, 0, NULL);
-            }
-            if (attach_err < 0) {
-                fprintf(stderr, "[ERROR] Failed to attach XDP program to interface %d (errno %d: %s)\n",
-                        index, errno, strerror(errno));
-                exit_code = 1;
-                goto cleanup;
-            }
+        int attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_DRV_MODE, NULL);
+        if (attach_err < 0) {
+            attach_err = bpf_xdp_attach(index, fd, XDP_FLAGS_SKB_MODE, NULL);
+        }
+        if (attach_err < 0) {
+            attach_err = bpf_xdp_attach(index, fd, 0, NULL);
+        }
+        if (attach_err < 0) {
+            fprintf(stderr, "[ERROR] Failed to attach XDP program to interface %d (errno %d: %s)\n",
+                    index, errno, strerror(errno));
+            exit_code = 1;
+            goto cleanup;
         }
     }
 
@@ -450,18 +479,18 @@ int main(int argc, char *argv[]) {
         printf("CTRL + C to stop\n");
     }
 
-    struct bpf_map *hw_sync_map = bpf_object__find_map_by_name(skel->obj, "hw_sync_ringbuf");
+    hw_sync_map = bpf_object__find_map_by_name(skel->obj, "hw_sync_ringbuf");
     if (hw_sync_map) {
         unlink("/sys/fs/bpf/hw_sync_ringbuf");
         bpf_map__pin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
     }
 
-    struct bpf_map *ovl_map = bpf_object__find_map_by_name(skel->obj, "overload_ctrl");
+    ovl_map = bpf_object__find_map_by_name(skel->obj, "overload_ctrl");
     if (ovl_map && !bpf_map__is_pinned(ovl_map)) {
         bpf_map__pin(ovl_map, "/sys/fs/bpf/overload_ctrl");
     }
 
-    struct bpf_map *cache_map = bpf_object__find_map_by_name(skel->obj, "cache_arecords");
+    cache_map = bpf_object__find_map_by_name(skel->obj, "cache_arecords");
     if (cache_map) {
         unlink("/sys/fs/bpf/cache_arecords");
         bpf_map__pin(cache_map, "/sys/fs/bpf/cache_arecords");
@@ -471,7 +500,6 @@ int main(int argc, char *argv[]) {
         .saddr = myip
     };
 
-    struct ring_buffer *rb;
     rb = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf_send_packet), handle_ringbuf_event, &sctx, NULL);
     if (!rb) {
         fprintf(stderr, "Failed to create ring buffer\n");
@@ -479,18 +507,27 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-    while (1) {
+    while (g_running) {
         ring_buffer__poll(rb, 100);
     }
     
 cleanup: 
-    if (hw_sync_map) {
+    if (rb) {
+        ring_buffer__free(rb);
+    }
+    if (link_fd >= 0) {
+        close(link_fd);
+    }
+    bpf_xdp_detach(index, XDP_FLAGS_DRV_MODE, NULL);
+    bpf_xdp_detach(index, XDP_FLAGS_SKB_MODE, NULL);
+
+    if (hw_sync_map && bpf_map__is_pinned(hw_sync_map)) {
         bpf_map__unpin(hw_sync_map, "/sys/fs/bpf/hw_sync_ringbuf");
     }
-    if (ovl_map) {
+    if (ovl_map && bpf_map__is_pinned(ovl_map)) {
         bpf_map__unpin(ovl_map, "/sys/fs/bpf/overload_ctrl");
     }
-    if (cache_map) {
+    if (cache_map && bpf_map__is_pinned(cache_map)) {
         bpf_map__unpin(cache_map, "/sys/fs/bpf/cache_arecords");
     }
     dns__destroy(skel);

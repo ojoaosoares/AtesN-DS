@@ -33,6 +33,8 @@ struct daemon_config {
     int governance_core;
     int resolver_core;
     __u32 resolver_src_ip;
+    char warmup_trace[256];
+    uint32_t warmup_ttl;
     bool verbose;
 };
 

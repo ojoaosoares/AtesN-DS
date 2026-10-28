@@ -41,24 +41,41 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
         .ip = evt->ip
     };
 
-    uint32_t capacity = d->cfg.hw_cache_capacity ? d->cfg.hw_cache_capacity : DEFAULT_HW_CACHE_CAPACITY;
-    if (d->wheel && d->wheel->total_entries >= capacity) {
-        uint32_t count = 0;
-
-        struct wheel_node *victim = timing_wheel_pop_victims(d->wheel, now, 1, &count);
-        while (victim) {
-            struct wheel_node *next = victim->next;
-            if (d->hw_cache_fd >= 0) {
-                bpf_map_delete_elem(d->hw_cache_fd, victim->name);
-            }
-            free(victim);
-            d->total_passive_evicted++;
-            victim = next;
-        }
+    /* Check if domain is ALREADY indexed in timing wheel / SmartNIC hardware cache */
+    bool exists = false;
+    if (d->wheel) {
+        exists = timing_wheel_contains(d->wheel, key);
     }
 
-    if (d->wheel) {
-        timing_wheel_insert(d->wheel, key, hw_timestamp);
+    if (exists) {
+        /* Domain already cached: update expiration in timing wheel without evicting victims */
+        timing_wheel_update_expire(d->wheel, key, hw_timestamp);
+    } else {
+        /* Novel domain: only evict victims if timing wheel reached capacity */
+        uint32_t capacity = d->cfg.hw_cache_capacity ? d->cfg.hw_cache_capacity : DEFAULT_HW_CACHE_CAPACITY;
+        if (d->wheel && d->wheel->total_entries >= capacity) {
+            uint32_t count = 0;
+            uint32_t batch_deleted = 0;
+            /* Batch eviction of 64 victims to open space in one burst */
+            struct wheel_node *victim = timing_wheel_pop_victims(d->wheel, now, 64, &count);
+            while (victim) {
+                struct wheel_node *next = victim->next;
+                if (d->hw_cache_fd >= 0) {
+                    bpf_map_delete_elem(d->hw_cache_fd, victim->name);
+                    batch_deleted++;
+                }
+                free(victim);
+                d->total_passive_evicted++;
+                victim = next;
+            }
+            if (batch_deleted > 0) {
+                usleep(1500); /* 1.5ms pacing for PCIe CMSG ring */
+            }
+        }
+
+        if (d->wheel) {
+            timing_wheel_insert(d->wheel, key, hw_timestamp);
+        }
     }
 
     /* 2. Write to SmartNIC level_one_cache via PCIe DMA (paced to prevent NFP CMSG ring timeout) */
@@ -66,8 +83,8 @@ int handle_hw_sync_sample(void *ctx, void *data, size_t len) {
         int ret = bpf_map_update_elem(d->hw_cache_fd, key, &rec, BPF_ANY);
         if (ret == 0) {
             d->total_ingested++;
-            if ((d->total_ingested & 31) == 0) {
-                usleep(1000);
+            if ((d->total_ingested & 63) == 0) {
+                usleep(1500);
             }
         }
     }

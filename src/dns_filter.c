@@ -117,7 +117,7 @@ found_null:
     if (now_value < arecord->timestamp)
         diff = arecord->timestamp - now_value;
 
-    if (diff < MINIMUM_TTL)
+    if (diff < MINIMUM_TTL + 3)
     {
         bpf_map_delete_elem(&level_one_cache, domain_hw.name);
         return XDP_PASS;

@@ -214,7 +214,7 @@ int dns_filter(struct xdp_md *ctx) {
     {   
         __u64 diff = get_ttl_sw(arecord->timestamp);
 
-        if (diff >  MINIMUM_TTL)
+        if (diff >= MINIMUM_TTL)
         {
             __s16 newsize = (data + offset_h - data_end);
             __u8 status = RCODE_NXDOMAIN;
@@ -252,7 +252,7 @@ int dns_filter(struct xdp_md *ctx) {
                 arecord->prefetch = 1;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_PRE_FETCH_PROG);
-                return XDP_DROP;
+                return XDP_TX;
             }
 
             return XDP_TX;
@@ -1314,16 +1314,16 @@ int dns_pre_fetch(struct xdp_md *ctx) {
 
             __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH_SW);
 
-            myevent->id = curr.id.id;
-            myevent->port = curr.id.port;
-            myevent->ip = serverip;
-
-            bpf_ringbuf_submit(myevent, 0);
-
             __u32 rand32 = bpf_get_prandom_u32();
             __u16 rand16 = (__u16)(rand32 & 0xFFFF);
 
             query->id.id = rand16;
+
+            myevent->id = rand16;
+            myevent->port = curr.id.port;
+            myevent->ip = recursive_server_ip;
+
+            bpf_ringbuf_submit(myevent, 0);
 
             struct query_owner owner = {
                 .ip = 0,
