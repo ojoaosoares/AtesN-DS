@@ -1,16 +1,61 @@
 # AtesN-DS
+
 AtesN-DS is a high-performance, recursive DNS resolver built on eBPF that runs directly in the Linux kernel. By attaching to the XDP (eXpress Data Path) hook, it processes DNS queries at the network interface level, bypassing the kernel's network stack entirely. This approach avoids context switches and significantly reduces latency.
 
-This work was presetented at [SBESC 2025](https://sol.sbc.org.br/index.php/sbesc_estendido/article/view/39485) in Campinas, Brazil.
+This work was presented at [SBESC 2025](https://sol.sbc.org.br/index.php/sbesc_estendido/article/view/39485) in Campinas, Brazil.
 
-The project is split into two main programs:
+---
 
-- **Kernel Resolver** — a full recursive DNS resolver that runs in XDP generic or native mode. It performs the complete recursion process, querying root, TLD, and authoritative servers, and caches responses in eBPF maps.
-- **Hardware Cache** (`dns_filter`) — an XDP program designed for NIC hardware offload. It serves cached DNS responses directly from eBPF maps at line rate, without touching the CPU.
+## ⚡ Performance Highlights
 
-***
+### 1. AtesN-DS vs. State-of-the-Art ([hyDNS](https://dl.acm.org/doi/10.1145/3672197.3673439))
 
-When a cached response is available, it is returned directly to the client. On a cache miss, the query is forwarded to the kernel resolver for full recursion.
+Comparative evaluations against state-of-the-art kernel-bypass solutions like **hyDNS** ([ACM CoNEXT / SIGCOMM](https://dl.acm.org/doi/10.1145/3672197.3673439)) demonstrate substantial performance gains:
+
+- **+213% Throughput:** Achieves over 3× the query throughput of hyDNS.
+- **51% Latency Reduction:** Cuts end-to-end query resolution latency by more than half.
+- **< 2% CPU Usage:** Maintains negligible host CPU utilization throughout execution.
+
+| Metric | hyDNS | AtesN-DS | Advantage |
+| :--- | :--- | :--- | :--- |
+| **Throughput** | Baseline | **+213%** | **~3.1× higher capacity** |
+| **Latency** | Baseline | **-51%** | **Cut by more than half** |
+| **Host CPU Utilization** | Moderate | **< 2%** | **Minimal host footprint** |
+
+### 2. Standalone Driver-Space vs. Hardware Cache Offload (SmartNIC)
+
+To evaluate the architecture under genuine Internet conditions, comprehensive empirical benchmarks were conducted on a physical testbed by replaying real-world enterprise DNS traffic traces captured in an active university campus network.
+
+Augmenting AtesN-DS with the hardware-offloaded cache layer (`dns_filter`) on a SmartNIC yields dramatic improvements over standalone driver-space execution:
+
+- **Up to 1.80× Throughput:** Reaches a peak capacity of over **172,000 queries/s** (**10.35M queries/min**), sustaining a **1.52× advantage** even under peak stress of 16,384 concurrent connections.
+- **38.1% Latency Reduction:** Lowers mean latency across workloads spanning up to 4,096 simultaneous connections.
+- **72.8% Hardware Hit Rate (Host Bypass):** Filters over **7.5 million queries** directly on the SmartNIC in complete host bypass, without waking the CPU.
+- **Extended Saturation Knee:** Pushes the throughput-latency saturation knee beyond **166,000 queries/s**.
+- **+120% to +141.6% Computational Efficiency:** Sustains over **91,000 queries/s per 1% host CPU**.
+- **36.5% SoftIRQ Reduction:** Reduces kernel interrupt overhead while keeping global host CPU utilization strictly **below 2.15%** across all scenarios.
+
+| Metric | AtesN-DS (Standalone Driver-Space) | AtesN-DS + SmartNIC Cache Offload | Improvement |
+| :--- | :--- | :--- | :--- |
+| **Peak Throughput** | Baseline | **> 172,000 QPS** (~10.35M QPM) | **Up to 1.80× increase** |
+| **Mean Latency (≤ 4,096 conns)** | Baseline | Reduced by **38.1%** | **Line-rate response times** |
+| **Hardware Cache Hit Rate** | N/A (Host-only) | **72.8%** (>7.5M queries bypassed) | **Zero host CPU intervention** |
+| **Saturation Knee** | Saturation point | Shifted beyond **166,000 QPS** | **Significantly higher headroom** |
+| **Throughput @ 16,384 conns** | Baseline | **1.52×** higher throughput | **Resilient under extreme load** |
+| **Computational Efficiency** | Baseline | **> 91,000 QPS / 1% host CPU** | **+120% to +141.6%** |
+| **Host SoftIRQ Overhead** | Baseline | Reduced by **36.5%** | **Substantial kernel offloading** |
+| **Global Host CPU Utilization** | < 2% | **< 2.15%** | **Strictly bounded overhead** |
+
+---
+
+## Architecture Overview
+
+The system architecture is split into two complementary layers:
+
+- **Kernel Resolver** — A full recursive DNS resolver running in XDP generic or native mode. It executes the complete recursion lifecycle (querying root, TLD, and authoritative nameservers) and populates eBPF cache maps.
+- **Hardware Cache (`dns_filter`)** — An XDP program compiled for NIC hardware offload (SmartNIC). It serves cached DNS responses directly from hardware at line rate with zero host CPU involvement.
+
+When a cached record is present in the SmartNIC memory, the packet is served and transmitted directly to the client (**complete host bypass**). On a cache miss, the query is forwarded upstream to the host kernel resolver for full recursive resolution.
 
 ---
 
