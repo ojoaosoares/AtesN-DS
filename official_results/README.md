@@ -1,34 +1,53 @@
-# Diretório Oficial de Resultados e Análises (`official_results/`)
+# Diretório Oficial de Resultados Experimentais (`official_results/`)
 
-Este diretório centraliza **exclusivamente resultados empíricos reais**, scripts de extração, CSVs brutos e gráficos oficiais que serão inseridos em [`main.tex`](file:///home/joaosoares/Documents/Github/AtesN-DS/main.tex). Nenhum dado simulado ou não executado consta no artigo.
-
----
-
-## Estrutura do Diretório
-
-1. **[`01_trace_analysis/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/ANALYSIS.md)** — **[CONCLUÍDO / OFICIAL]**
-   - Caracterização completa em formato de fio (RFC 1035 wire format) dos traces de ISP ($2.000.000$ consultas, $83.659$ domínios únicos) e Campus ($734.161$ consultas, $39.919$ domínios únicos).
-   - CSVs: [`trace_summary_metrics.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/trace_summary_metrics.csv), [`trace_wire_length_cdf.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/trace_wire_length_cdf.csv).
-   - Gráfico CDF: [`qname_length_cdf.png`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/qname_length_cdf.png) e [`qname_length_cdf.pdf`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/qname_length_cdf.pdf).
-
-2. **`02_cleaner_daemon/`** — **[CONCLUÍDO / OFICIAL]**
-   - Avaliação empírica do *Passive Evict-on-Write Daemon* e *Time Updater Daemon* ($n=30$, IC 95%), já presente na Seção 4.5 (`tab:control_plane_overhead`) de [`main.tex`](file:///home/joaosoares/Documents/Github/AtesN-DS/main.tex).
-
-3. **`03_server_benchmarks/`** — **[PENDENTE — EXECUÇÃO CONJUNTA NO SERVIDOR]**
-   - Armazenará os CSVs brutos e consolidados da campanha de testes físicos no servidor (`joaosoares@150.164.2.93`) e cliente (`soares@150.164.2.81`) comparando os 4 modos em 1 core ($n=30$ repetições por faixa de QPS até saturação unbounded).
+Este diretório centraliza **exclusivamente medições empíricas reais**, scripts de execução de bancada física, datasets brutos (CSV), relatórios técnicos consolidados e figuras vetoriais integradas ao artigo ([`main.tex`](file:///home/joaosoares/Documents/Github/AtesN-DS/main.tex)).
 
 ---
 
-## Matriz de Verificação de Métricas Solicitadas pelos Revisores
+## 🎯 Suítes Principais do Artigo
 
-| Revisor & Comentário | Métrica Requisitada | Status Atual | Onde Está / Como Será Coletada |
+O manuscrito organiza a avaliação experimental em duas grandes baterias complementares (Seções 4.3 e 4.4 de [`main.tex`](file:///home/joaosoares/Documents/Github/AtesN-DS/main.tex)):
+
+### 1. [Evaluation Suite 1: Churn Dinâmico e TTL Variável](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/09_ttl30s_eviction_study/README.md)
+*Diretório:* [`official_results/suite1_variable_ttl/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/09_ttl30s_eviction_study/) (alias para [`09_ttl30s_eviction_study/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/09_ttl30s_eviction_study/))  
+*Seção do Artigo:* Seção 4.3 (*Suite 1: Dynamic TTL and Cache Churn*)  
+*Relatório Consolidado:* **[`SUITE1_VARIABLE_TTL_REPORT.md`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/09_ttl30s_eviction_study/SUITE1_VARIABLE_TTL_REPORT.md)**  
+*Objetivo:* Avaliar a resiliência do sistema e o comportamento do barramento PCIe sob **expirações contínuas de TTL e churn dinâmico de cache**.
+- **Carga de Trabalho:** 2.000.000 consultas do trace de ISP sob distribuição empírica real de TTL (Tabela 1: 60s dominante para 62,70%, 30s para 22,68%, 10s para 7,69%).
+- **Topologia de Barramento:** Slot PCIe Gen 2 ($5.0\,\text{GT/s} \times 8 = 32\,\text{Gbps}$ / $4.0\,\text{GB/s}$) com 4 filas de hardware ativas.
+- **Resultados Chave:**
+  - `ates_hw_cache` sustenta **3,75 MQPS** com **0,15% de perda** (ou 0,026% na faixa de operação) e atende **50,65% das queries diretamente em silício**.
+  - Libera **84,3% dos ciclos de CPU dedicada do Host** (consumo de apenas 22,8% vs 38,5% do driver e 44,9% do Unbound HW).
+  - Elimina completamente descartes de DMA no PCIe (`nic_rx_discards` = 0 de 500k a 2.5M QPS, e apenas 1.636 a 4.0 MQPS vs 187 milhões no `unbound_hw_cache`).
+  - Reduz $p_{50}$ em 22,9% (3,37 ms), $p_{90}$ em 15,4% (5,23 ms) e $p_{99}$ em 15,2% (5,65 ms).
+
+---
+
+### 2. [Evaluation Suite 2: Capacidade Máxima e TTL Estático](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/06_multicore_xdnsperf_calibrated/README.md)
+*Diretório:* [`official_results/suite2_static_ttl/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/06_multicore_xdnsperf_calibrated/) (alias para [`06_multicore_xdnsperf_calibrated/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/06_multicore_xdnsperf_calibrated/))  
+*Seção do Artigo:* Seção 4.4 (*Suite 2: Upper Bound with Static Capacity*)  
+*Relatório Consolidado:* **[`SUITE2_STATIC_TTL_REPORT.md`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/06_multicore_xdnsperf_calibrated/SUITE2_STATIC_TTL_REPORT.md)**  
+*Objetivo:* Estabelecer o **limite físico de taxa de linha (10GbE wire-speed)** e latência de piso sob regime estático de retenção ($\text{TTL} = 3.600\,\text{s}$).
+- **Carga de Trabalho:** Todas as 32.768 entradas da SmartNIC e 83.659 entradas do host pré-carregadas. Retenção de HW de $\approx 96,34\%$ a $98,07\%$.
+- **Resultados Chave:**
+  - Saturação de linha a **7,66 MQPS** com **0,17% de perda** (aceleração de **$1,70\times$** sobre o driver em kernel e **$60\times$** sobre o Unbound standalone).
+  - Redução de **85,8%** no uso de CPU dedicada (de 98,9% para 14,0%) e de **88,1%** em SoftIRQ (de 49,5% para 5,9%), deixando o host **86% ocioso**.
+  - Redução de **52,4%** no $p_{99}$ (2,81 ms vs 5,91 ms) e compressão de **76,7%** na dispersão estocástica ($p_{99.9} - p_{99} = 22,5\,\mu\text{s}$).
+
+---
+
+## 🔬 Suítes Experimentais Complementares
+
+| Diretório | Descrição | Status no Artigo | Datasets Principais |
 | :--- | :--- | :---: | :--- |
-| **R1 — Comment 2** | Máximo de Queries/s e Packets/s até saturação do host/NIC; utilização por núcleo (per-core CPU) da máquina cliente | **Pendente (Bateria no Servidor)** | Coletado via `dnsperf` + `mpstat -P ALL` no cliente e `ethtool -S` no servidor (`03_server_benchmarks/`) |
-| **R1 — Comment 4** | Hit rate do cache do driver; contagem de misses e falhas; avaliação com RTT de upstream realista | **Pendente (Bateria no Servidor)** | Contadores de mapa/driver + `mock_dns_server` com RTT configurável (`03_server_benchmarks/`) |
-| **R1 — Comment 5** | CDF do tamanho dos nomes em wire format; mix QTYPE; fração rejeitada em 24B vs 56B; latência SRAM vs DRAM; quebra dos misses (nome longo, cold miss, expiração TTL, tipo não suportado) | **CDF e Quebra Estrutural Concluídos** (`01_trace_analysis/`); **Misses Dinâmicos no Servidor Pendentes** | [`ANALYSIS.md`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/ANALYSIS.md) + contadores em tempo de execução no servidor |
-| **R1 — Comment 6** | Percentis de latência de cauda ($p_{50}, p_{75}, p_{90}, p_{99}, p_{99.9}$) e gráficos CDF de latência; drop counters da NIC/driver; separação de latência entre hit na NIC vs consulta no host | **Pendente (Bateria no Servidor)** | `dnsperf` / `sample_client_dnsperf.py` + `ethtool -S enp1s0np1` (`03_server_benchmarks/`) |
-| **R1 — Comment 7** | Custo de CPU e taxa de acesso à memória (map-access rate / PCIe load) do Time Daemon e Cleaner Daemon | **Oficial e Concluído** | Seção 4.5 (`tab:control_plane_overhead`) em [`main.tex`](file:///home/joaosoares/Documents/Github/AtesN-DS/main.tex) |
-| **R6 — Comment 4** | Distribuição de tamanho dos QNAMEs e porcentagem exata de queries que cabem na chave de hardware | **Oficial e Concluído** | [`01_trace_analysis/ANALYSIS.md`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/ANALYSIS.md) ($97,90\%$ ISP $\le 56\text{ B}$; $98,90\%$ Campus $\le 56\text{ B}$) |
-| **R6 — Comment 5** | Contagem direta de hits e misses extraída de dentro do programa offloaded na NIC | **Instrumentado / Pendente Execução** | Registradores de hardware `bpf_app2_pkts` (`XDP_TX` hits) e `bpf_pass_pkts` (`XDP_PASS` misses) via `ethtool -S` |
-| **R6 — Comment 7 & 8** | Saúde do gerador de carga no cliente: erros, timeouts, códigos de resposta (RCODEs), requisições falhas e percentis | **Instrumentado / Pendente Execução** | Telemetria de cliente (`RcvbufErrors`, `SndbufErrors`, timeouts, RCODEs) em `03_server_benchmarks/` |
-| **R3 — Comment 4** | Tail latency, packet loss, uso de recursos da NIC (instruções NFP, memória SRAM/DRAM), tráfego PCIe e contagem de interrupções (`/proc/interrupts`, SoftIRQ) | **Recursos da NIC e PCIe do Daemon Concluídos**; **Tail Latency, Loss e IRQs sob Carga Pendentes** | Seção 4.5 + coleta de `/proc/interrupts` e `mpstat -I SUM,SCPU` em `03_server_benchmarks/` |
+| **[`01_trace_analysis/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/ANALYSIS.md)** | Caracterização de wire-format RFC 1035 dos traces de ISP e Campus | Concluído (Seção 4.1) | [`trace_summary_metrics.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/trace_summary_metrics.csv), [`trace_wire_length_cdf.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/01_trace_analysis/trace_wire_length_cdf.csv) |
+| **`02_cleaner_daemon/`** | Sobrecarga de CPU e taxa de acesso a mapas do Time Updater e Cleaner Daemon ($n=30$) | Concluído (Seção 4.5, Tabela 4) | [`data/daemons_statistical_30_runs.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/data/daemons_statistical_30_runs.csv) |
+| **[`04_overload_fallback_study/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/04_overload_fallback_study/run_fallback_study.sh)** | Penalidade de latência de fallback sob regime de sobrecarga | Concluído (Seção 4.5) | [`summary_fallback_penalty.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/04_overload_fallback_study/summary_fallback_penalty.csv) |
+| **[`07_single_core_max_throughput/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/07_single_core_max_throughput/run_1core_clean_warmup_10reps.sh)** | Limite de escalabilidade e capacidade máxima em configuração de 1 único núcleo | Concluído | [`summary_1core_clean_warmup_10reps.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/07_single_core_max_throughput/summary_1core_clean_warmup_10reps.csv) |
+| **[`08_closed_loop_dnspyre/`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/08_closed_loop_dnspyre/run_closed_loop_dnspyre_10reps.sh)** | Medições em malha fechada via `dnspyre` avaliando latência sem perdas e saturação | Concluído | [`summary_closed_loop_dnspyre_10reps.csv`](file:///home/joaosoares/Documents/Github/AtesN-DS/official_results/08_closed_loop_dnspyre/summary_closed_loop_dnspyre_10reps.csv) |
+
+---
+
+## 🛠️ Scripts Auxiliares de Bancada
+
+Consulte o diretório [`scripts/`](file:///home/joaosoares/Documents/Github/AtesN-DS/scripts/README.md) para detalhes sobre geradores de jitter, pré-carregadores de cache determinísticos e parsers de telemetria.
