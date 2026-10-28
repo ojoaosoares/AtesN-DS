@@ -56,8 +56,7 @@ official_results/**/plots_*/
 *_backup.csv
 backup_*/
 official_results/**/backup_*/
-official_results/**/logs/*.txt
-official_results/**/logs/*.log
+official_results/**/logs/
 
 
 
