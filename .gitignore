@@ -60,17 +60,32 @@ official_results/**/logs/
 
 
 
-# LaTeX documents and build artifacts
+# Reviewer responses
+responses/
+*RESPONSE*.md
+
+# LaTeX documents, templates, packages, bibliographies, and build artifacts
 *.tex
+*.bib
+*.cls
+*.sty
+*.bst
+*.abs
 *.aux
 *.log
 *.toc
 *.bbl
 *.blg
 *.out
-*.synctex.gz
+*.synctex*
 *.fls
 *.fdb_latexmk
 *.nav
 *.snm
 *.vrb
+*.idx
+*.ilg
+*.ind
+*.lof
+*.lot
+flat_project/
