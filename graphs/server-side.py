@@ -4,21 +4,18 @@ import glob
 import os
 import re
 
-# Set general font settings for paper figures (extra large, bold and readable)
 plt.rcParams.update({
-    "font.size": 17,
-    "axes.labelsize": 19,
-    "axes.labelweight": "bold",
-    "axes.titlesize": 20,
-    "axes.titleweight": "bold",
-    "xtick.labelsize": 16,
-    "ytick.labelsize": 16,
-    "legend.fontsize": 16,
-    "figure.titlesize": 21,
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 13,
+    'figure.titlesize': 18
 })
 
 # =====================================================
-# LEITURA DOS DADOS DO SERVIDOR
+# LEITURA DOS DADOS
 # =====================================================
 
 rows = []
@@ -31,21 +28,32 @@ for file in files:
         continue
     seen_files.add(name)
 
-    if "no_hw_cache" in name:
-        cache_type = "Driver-mode"
+    if "unbound_standalone" in name:
+        cache_type = "Unbound (Standalone)"
+    elif "unbound_hw_cache" in name:
+        cache_type = "Unbound + HW Cache"
+    elif "ates_driver" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
+    elif "ates_hw_cache" in name:
+        cache_type = "AtesN-DS (Offloaded-Mode)"
+    elif "no_hw_cache" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
     elif "hw_cache" in name:
-        cache_type = "Offloaded-mode"
+        cache_type = "AtesN-DS (Offloaded-Mode)"
     else:
         continue
 
     match = re.search(r"(\d+)\.csv$", name)
+
     if not match:
+        print(f"Não consegui extrair concorrência de {name}")
         continue
 
     concurrency = int(match.group(1))
 
     try:
         metrics_df = pd.read_csv(file)
+
         metrics = {
             "cache_type": cache_type,
             "concurrency": concurrency,
@@ -53,28 +61,45 @@ for file in files:
 
         for _, row in metrics_df.iterrows():
             metric_name = str(row["metric"])
+
             metrics[metric_name] = float(row["mean"]) if "mean" in row else float(row["value"])
             if "std" in row:
                 metrics[f"{metric_name}_std"] = float(row["std"])
+            if "ci95" in row and pd.notna(row["ci95"]):
+                metrics[f"{metric_name}_ci95"] = float(row["ci95"])
+            elif "std" in row:
+                # Fallback: compute 95% CI from std assuming n=30 runs (t_crit=2.0452)
+                metrics[f"{metric_name}_ci95"] = 2.0452 * (float(row["std"]) / (30.0 ** 0.5))
 
         rows.append(metrics)
+
     except Exception as e:
         print(f"Erro ao processar {name}: {e}")
 
 if not rows:
     raise RuntimeError("Nenhum CSV encontrado.")
 
-df = pd.DataFrame(rows).sort_values(["cache_type", "concurrency"])
+df = pd.DataFrame(rows)
+
+df = df.sort_values(["cache_type", "concurrency"])
+
+print("\nDados carregados:")
+print(df[["cache_type", "concurrency"]])
 
 # =====================================================
 # MÉTRICA DERIVADA (CPU TOTAL)
 # =====================================================
 
-if "cpu_user_mean" in df.columns and "cpu_system_mean" in df.columns:
+if (
+    "cpu_user_mean" in df.columns
+    and "cpu_system_mean" in df.columns
+):
     softirq_mean = df["cpu_softirq_mean"] if "cpu_softirq_mean" in df.columns else 0.0
     irq_mean = df["cpu_irq_mean"] if "cpu_irq_mean" in df.columns else 0.0
     softirq_std = df["cpu_softirq_mean_std"] if "cpu_softirq_mean_std" in df.columns else 0.0
     irq_std = df["cpu_irq_mean_std"] if "cpu_irq_mean_std" in df.columns else 0.0
+    softirq_ci = df["cpu_softirq_mean_ci95"] if "cpu_softirq_mean_ci95" in df.columns else (softirq_std / (30.0 ** 0.5)) * 2.0452
+    irq_ci = df["cpu_irq_mean_ci95"] if "cpu_irq_mean_ci95" in df.columns else (irq_std / (30.0 ** 0.5)) * 2.0452
 
     df["cpu_total_mean"] = (
         df["cpu_user_mean"]
@@ -92,52 +117,88 @@ if "cpu_user_mean" in df.columns and "cpu_system_mean" in df.columns:
                 + irq_std ** 2
             ) ** 0.5
         )
+    if "cpu_user_mean_ci95" in df.columns and "cpu_system_mean_ci95" in df.columns:
+        df["cpu_total_mean_ci95"] = (
+            (
+                df["cpu_user_mean_ci95"] ** 2
+                + df["cpu_system_mean_ci95"] ** 2
+                + softirq_ci ** 2
+                + irq_ci ** 2
+            ) ** 0.5
+        )
+
+    # Calcular percentis para o CPU Total como a soma dos percentis dos componentes
+    for p in ["p50", "p75", "p90", "p99"]:
+        user_p = df[f"cpu_user_{p}"] if f"cpu_user_{p}" in df.columns else 0.0
+        system_p = df[f"cpu_system_{p}"] if f"cpu_system_{p}" in df.columns else 0.0
+        softirq_p = df[f"cpu_softirq_{p}"] if f"cpu_softirq_{p}" in df.columns else 0.0
+        irq_p = df[f"cpu_irq_{p}"] if f"cpu_irq_{p}" in df.columns else 0.0
+
+        user_p_std = df[f"cpu_user_{p}_std"] if f"cpu_user_{p}_std" in df.columns else 0.0
+        system_p_std = df[f"cpu_system_{p}_std"] if f"cpu_system_{p}_std" in df.columns else 0.0
+        softirq_p_std = df[f"cpu_softirq_{p}_std"] if f"cpu_softirq_{p}_std" in df.columns else 0.0
+        irq_p_std = df[f"cpu_irq_{p}_std"] if f"cpu_irq_{p}_std" in df.columns else 0.0
+
+        df[f"cpu_total_{p}"] = user_p + system_p + softirq_p + irq_p
+        df[f"cpu_total_{p}_std"] = (
+            user_p_std ** 2
+            + system_p_std ** 2
+            + softirq_p_std ** 2
+            + irq_p_std ** 2
+        ) ** 0.5
 
 # =====================================================
 # PLOT FUNCTION
 # =====================================================
 
-def plot_metric(metric, ylabel, filename, title=None, cache_types=None, ylim=None):
-    if metric not in df.columns:
-        return
+def plot_metric(metric, ylabel, filename):
+    plt.figure(figsize=(12, 6))
 
-    plt.figure(figsize=(9.5, 5.8))
-    types_to_plot = cache_types if cache_types is not None else sorted(df["cache_type"].unique())
+    for cache in sorted(df["cache_type"].unique()):
 
-    for cache in types_to_plot:
-        subset = df[df["cache_type"] == cache].sort_values("concurrency")
+        subset = (
+            df[df["cache_type"] == cache]
+            .sort_values("concurrency")
+        )
+
+        if metric not in subset.columns:
+            continue
+
         x = subset["concurrency"].to_numpy()
         y = subset[metric].to_numpy()
-
-        marker = "o" if cache in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "s"
-        color = "#1f77b4" if cache in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "#ff7f0e"
-
-        std_col = f"{metric}_std"
-        if std_col in subset.columns:
-            std = subset[std_col].fillna(0).to_numpy()
-            plt.fill_between(x, y - std, y + std, alpha=0.40, color=color)
 
         plt.plot(
             x,
             y,
-            marker=marker,
-            markersize=7.5,
-            linewidth=2.8,
+            marker="o",
+            linewidth=2,
             label=cache,
-            color=color,
         )
 
-    concurrencies = sorted(df["concurrency"].unique())
-    plt.xscale("log", base=2)
-    plt.xticks(concurrencies, labels=[str(c) for c in concurrencies], rotation=45, fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.xlabel("Concurrent Connections", fontweight="bold")
-    plt.ylabel(ylabel, fontweight="bold")
-    if ylim:
-        plt.ylim(ylim)
-    plt.title(title if title else f"{metric} vs Concurrency", fontweight="bold", pad=12)
-    plt.grid(True, which="both", alpha=0.3)
-    plt.legend(frameon=True, facecolor="white", edgecolor="#cccccc", framealpha=0.9, fontsize=16)
+        ci_col = f"{metric}_ci95"
+
+        if ci_col in subset.columns:
+            ci = subset[ci_col].fillna(0).to_numpy()
+            plt.fill_between(
+                x,
+                y - ci,
+                y + ci,
+                alpha=0.25,
+            )
+        elif f"{metric}_std" in subset.columns:
+            ci = (subset[f"{metric}_std"].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+            plt.fill_between(
+                x,
+                y - ci,
+                y + ci,
+                alpha=0.25,
+            )
+
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel(ylabel)
+    plt.title(f"{metric} (Mean ± 95% Confidence Interval)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
     plt.savefig(filename, dpi=300)
     plt.close()
@@ -146,130 +207,64 @@ def plot_metric(metric, ylabel, filename, title=None, cache_types=None, ylim=Non
 # CPU
 # =====================================================
 
-plot_metric("cpu_user_mean", "CPU User (%)", "cpu_user_mean.png", "Host CPU User Utilization")
-plot_metric("cpu_system_mean", "CPU System (%)", "cpu_system_mean.png", "Host CPU System Utilization")
-plot_metric("cpu_softirq_mean", "CPU SoftIRQ (%)", "cpu_softirq_mean.png", "Host CPU SoftIRQ Overhead")
-plot_metric("cpu_irq_mean", "CPU IRQ (%)", "cpu_irq_mean.png", "Host CPU HardIRQ Overhead")
-plot_metric("cpu_total_mean", "Total CPU (%)", "cpu_total_mean.png", "Global Host CPU Utilization")
-plot_metric("max_core_usage_mean", "Max Core Usage (%)", "max_core_usage_mean.png", "Maximum Core Utilization")
+plot_metric("cpu_user_mean", "CPU User (%)", "cpu_user_mean.png")
+plot_metric("cpu_system_mean", "CPU System (%)", "cpu_system_mean.png")
+plot_metric("cpu_softirq_mean", "CPU SoftIRQ (%)", "cpu_softirq_mean.png")
+plot_metric("cpu_irq_mean", "CPU IRQ (%)", "cpu_irq_mean.png")
+plot_metric("cpu_total_mean", "Total CPU (%)", "cpu_total_mean.png")
+plot_metric("max_core_usage_mean", "Max Core Usage (%)", "max_core_usage_mean.png")
 
 # =====================================================
 # MEMÓRIA
 # =====================================================
 
-plot_metric("mem_used_mean", "Memory Used (%)", "mem_used_mean.png", "Host Memory Utilization")
+plot_metric("mem_used_mean", "Memory Used (%)", "mem_used_mean.png")
 
 # =====================================================
 # CACHE MISSES & HIT RATE
 # =====================================================
 
-plot_metric("cache_misses", "Cache Misses", "cache_misses.png", "Cache Misses vs Concurrency")
-plot_metric("cache_hits", "Cache Hits", "cache_hits.png", "Cache Hits vs Concurrency")
-
-hit_rate_type = ["Offloaded-mode"] if "Offloaded-mode" in df["cache_type"].values else ["HW Cache"]
-plot_metric("cache_hit_rate", "Cache Hit Rate (%)", "cache_hit_rate.png", "Offloaded-mode Hit Rate vs Concurrency", cache_types=hit_rate_type, ylim=(55, 78))
+plot_metric("cache_misses", "Cache Misses", "cache_misses.png")
+plot_metric("cache_hits", "Cache Hits", "cache_hits.png")
+plot_metric("cache_hit_rate", "Cache Hit Rate (%)", "cache_hit_rate.png")
 
 # =====================================================
-# MÉTRICAS COMBINADAS (SE CLIENT FILES EXISTIREM)
+# Percentis (P50, P75, P90, P99)
 # =====================================================
 
-client_rows = []
-cfiles = glob.glob("client_results*.csv") + glob.glob("client_output*.csv")
-for f in sorted(cfiles):
-    name = os.path.basename(f)
-    ctype = "Offloaded-mode" if ("hw_cache" in name and "no_hw_cache" not in name) else ("Driver-mode" if "no_hw_cache" in name else None)
-    if not ctype:
-        continue
-    m = re.search(r"(\d+)\.csv$", name)
-    if not m:
-        continue
-    c = int(m.group(1))
-    cdf = pd.read_csv(f)
-    crow = {"cache_type": ctype, "concurrency": c}
-    for _, r in cdf.iterrows():
-        mname = str(r["metric"])
-        crow[mname] = float(r["mean"]) if "mean" in r else float(r["value"])
-        if "std" in r:
-            crow[f"{mname}_std"] = float(r["std"])
-    client_rows.append(crow)
+percentiles = ["p50", "p75", "p90", "p99"]
+generated_files = [
+    "cpu_user_mean.png",
+    "cpu_system_mean.png",
+    "cpu_softirq_mean.png",
+    "cpu_irq_mean.png",
+    "cpu_total_mean.png",
+    "max_core_usage_mean.png",
+    "mem_used_mean.png",
+    "cache_misses.png",
+    "cache_hits.png",
+    "cache_hit_rate.png",
+]
 
-if client_rows:
-    merged_df = pd.merge(pd.DataFrame(client_rows).drop_duplicates(["cache_type", "concurrency"]), df, on=["cache_type", "concurrency"])
+for p in percentiles:
+    plot_metric(f"cpu_user_{p}", f"CPU User {p.upper()} (%)", f"cpu_user_{p}.png")
+    plot_metric(f"cpu_system_{p}", f"CPU System {p.upper()} (%)", f"cpu_system_{p}.png")
+    plot_metric(f"cpu_softirq_{p}", f"CPU SoftIRQ {p.upper()} (%)", f"cpu_softirq_{p}.png")
+    plot_metric(f"cpu_irq_{p}", f"CPU IRQ {p.upper()} (%)", f"cpu_irq_{p}.png")
+    plot_metric(f"cpu_total_{p}", f"Total CPU {p.upper()} (%)", f"cpu_total_{p}.png")
+    plot_metric(f"max_core_usage_{p}", f"Max Core Usage {p.upper()} (%)", f"max_core_usage_{p}.png")
+    plot_metric(f"mem_used_{p}", f"Memory Used {p.upper()} (%)", f"mem_used_{p}.png")
     
-    # 1. Throughput vs Latency Trade-off Profile (Log-Log)
-    fig, ax = plt.subplots(figsize=(9.5, 5.8))
-    for ctype in sorted(merged_df["cache_type"].unique()):
-        s = merged_df[merged_df["cache_type"] == ctype].sort_values("concurrency")
-        x = s["queriesPerSecond"].to_numpy()
-        y = s["latency_mean_ms"].to_numpy()
-        color = "#1f77b4" if ctype in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "#ff7f0e"
-        marker = "o" if ctype in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "s"
-        ax.plot(
-            x,
-            y,
-            marker=marker,
-            markersize=7.5,
-            linewidth=2.8,
-            label=ctype,
-            color=color,
-        )
+    generated_files.extend([
+        f"cpu_user_{p}.png",
+        f"cpu_system_{p}.png",
+        f"cpu_softirq_{p}.png",
+        f"cpu_irq_{p}.png",
+        f"cpu_total_{p}.png",
+        f"max_core_usage_{p}.png",
+        f"mem_used_{p}.png",
+    ])
 
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("Throughput (Queries/s) [Log Scale]", fontweight="bold")
-    ax.set_ylabel("Mean Latency (ms) [Log Scale]", fontweight="bold")
-    ax.set_title("Throughput vs Latency Trade-off Profile", fontweight="bold", pad=12)
-
-    y_ticks = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
-    ax.set_yticks(y_ticks)
-    ax.set_yticklabels(["0.1", "0.2", "0.5", "1.0", "2.0", "5.0", "10.0"], fontsize=16)
-    ax.tick_params(axis="both", which="major", labelsize=16)
-
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend(frameon=True, facecolor="white", edgecolor="#cccccc", framealpha=0.9, fontsize=16)
-    plt.tight_layout()
-    plt.savefig("throughput_vs_latency.png", dpi=300)
-    plt.close()
-
-    # 2. Computational Efficiency (QPS per 1% Total Host CPU)
-    merged_df["qps_per_cpu"] = merged_df["queriesPerSecond"] / merged_df["cpu_total_mean"]
-    
-    # Error propagation for QPS / CPU
-    rel_q = (merged_df["queriesPerSecond_std"] / merged_df["queriesPerSecond"]).fillna(0) if "queriesPerSecond_std" in merged_df.columns else 0.0
-    rel_c = (merged_df["cpu_total_mean_std"] / merged_df["cpu_total_mean"]).fillna(0) if "cpu_total_mean_std" in merged_df.columns else 0.0
-    merged_df["qps_per_cpu_std"] = merged_df["qps_per_cpu"] * ((rel_q**2 + rel_c**2)**0.5)
-
-    plt.figure(figsize=(9.5, 5.8))
-    for ctype in sorted(merged_df["cache_type"].unique()):
-        s = merged_df[merged_df["cache_type"] == ctype].sort_values("concurrency")
-        x = s["concurrency"].to_numpy()
-        y = s["qps_per_cpu"].to_numpy()
-        std = s["qps_per_cpu_std"].to_numpy()
-        color = "#1f77b4" if ctype in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "#ff7f0e"
-        marker = "o" if ctype in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "s"
-
-        plt.fill_between(x, y - std, y + std, alpha=0.40, color=color)
-        plt.plot(
-            x,
-            y,
-            marker=marker,
-            markersize=7.5,
-            linewidth=2.8,
-            label=ctype,
-            color=color,
-        )
-
-    concurrencies = sorted(merged_df["concurrency"].unique())
-    plt.xscale("log", base=2)
-    plt.xticks(concurrencies, labels=[str(c) for c in concurrencies], rotation=45, fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.xlabel("Concurrent Connections", fontweight="bold")
-    plt.ylabel("Queries/s per 1% Host CPU", fontweight="bold")
-    plt.title("Computational Efficiency (QPS / Host CPU %)", fontweight="bold", pad=12)
-    plt.grid(True, which="both", alpha=0.3)
-    plt.legend(frameon=True, facecolor="white", edgecolor="#cccccc", framealpha=0.9, fontsize=16)
-    plt.tight_layout()
-    plt.savefig("cpu_efficiency.png", dpi=300)
-    plt.close()
-
-print("\nGráficos de servidor gerados com sucesso com sombra destacada!")
+print("\nGráficos gerados:")
+for f in generated_files:
+    print(f)

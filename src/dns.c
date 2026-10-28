@@ -24,8 +24,25 @@
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
+    __uint(max_entries, RESOLVER_RINGBUF_SIZE);
 } ringbuf_send_packet SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, HW_SYNC_RINGBUF_SIZE);
+} hw_sync_ringbuf SEC(".maps");
+
+static __always_inline void notify_hw_cache(const char *name, __u8 domain_size, __be32 ip, __u64 timestamp) {
+    if (domain_size > MAX_DNS_NAME_LENGTH_HW)
+        return;
+    struct hw_cache_sync_event *evt = bpf_ringbuf_reserve(&hw_sync_ringbuf, sizeof(*evt), 0);
+    if (!evt)
+        return;
+    __builtin_memcpy(evt->name, name, MAX_DNS_NAME_LENGTH_HW);
+    evt->ip = ip;
+    evt->timestamp = (__u32)timestamp;
+    bpf_ringbuf_submit(evt, 0);
+}
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY); 
@@ -86,6 +103,14 @@ struct {
 
 } dns_misses SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct overload_ctrl);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} overload_ctrl SEC(".maps");
+
 // Include recursive logic AFTER maps so it can access them
 #include "dns_owner.h"
 #include "dns_authoritative.h"
@@ -122,6 +147,22 @@ int dns_filter(struct xdp_md *ctx) {
             break;
     }
 
+    // -------------------------------------------------------------------------
+    // Adaptive Overload Shedding (Early Pre-Lookup Check)
+    // -------------------------------------------------------------------------
+    __u32 ovl_zero = 0;
+    struct overload_ctrl *ctrl = bpf_map_lookup_elem(&overload_ctrl, &ovl_zero);
+    if (ctrl && ctrl->is_overloaded) {
+        if (ctrl->shed_mode == SHED_EARLY_PRE_LOOKUP) {
+            return XDP_PASS;
+        }
+        if (ctrl->shed_mode == SHED_PROPORTIONAL && ctrl->shed_ratio > 0) {
+            if ((bpf_get_prandom_u32() % 100) < ctrl->shed_ratio) {
+                return XDP_PASS;
+            }
+        }
+    }
+
     __u32 zero = 0;
     struct dns_query *dnsquery = bpf_map_lookup_elem(&tmp_query_buf, &zero);
 
@@ -153,8 +194,6 @@ int dns_filter(struct xdp_md *ctx) {
     }
 
     if (query_response != QUERY_RETURN) {
-        
-        bpf_printk("Received response for domain: %s\n", dnsquery->query.name);
         dnsquery->id.port = get_dest_port(data);
 
         bpf_tail_call(ctx, &tail_programs, DNS_RESPONSE_PROG);
@@ -167,8 +206,6 @@ int dns_filter(struct xdp_md *ctx) {
         *miss_cnt += 1;
     }
 
-    bpf_printk("Received query for domain: %s\n", dnsquery->query.name);
-
     dnsquery->id.port = get_source_port(data);
 
     struct a_record_sw *arecord = bpf_map_lookup_elem(&cache_arecords, dnsquery->query.name);
@@ -177,7 +214,7 @@ int dns_filter(struct xdp_md *ctx) {
     {   
         __u64 diff = get_ttl_sw(arecord->timestamp);
 
-        if (diff >  MINIMUM_TTL)
+        if (diff >= MINIMUM_TTL)
         {
             __s16 newsize = (data + offset_h - data_end);
             __u8 status = RCODE_NXDOMAIN;
@@ -215,7 +252,7 @@ int dns_filter(struct xdp_md *ctx) {
                 arecord->prefetch = 1;
 
                 bpf_tail_call(ctx, &tail_programs, DNS_PRE_FETCH_PROG);
-                return XDP_DROP;
+                return XDP_TX;
             }
 
             return XDP_TX;
@@ -223,6 +260,11 @@ int dns_filter(struct xdp_md *ctx) {
         else {
             bpf_map_delete_elem(&cache_arecords, dnsquery->query.name);
         }
+    }
+
+    // If overloaded and configured to shed misses, immediately fallback to userspace resolver
+    if (ctrl && ctrl->is_overloaded && ctrl->shed_mode == SHED_MISSES_ONLY) {
+        return XDP_PASS;
     }
 
     __u32 ip = recursive_server_ip;
@@ -399,6 +441,7 @@ int dns_response(struct xdp_md *ctx)
                     return XDP_DROP;
 
                 bpf_map_update_elem(&cache_arecords, dnsquery->query.name, &cache_record, BPF_ANY);
+                notify_hw_cache(dnsquery->query.name, dnsquery->query.domain_size, cache_record.ip, cache_record.timestamp);
             }
 
             if (!powner->ip)
@@ -831,6 +874,7 @@ int dns_create_new_query(struct xdp_md *ctx) {
                     default:
 
                         bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
+                        notify_hw_cache(query->query.name, query->query.domain_size, cache_record.ip, cache_record.timestamp);
 
                         if (hide_in_dest_ip_safe(data, data_end, RCODE_NXDOMAIN) == DROP)
                             return XDP_DROP;
@@ -935,6 +979,7 @@ int dns_back_to_last_query(struct xdp_md *ctx) {
                 if (cache_record.timestamp)
                 {
                     bpf_map_update_elem(&cache_arecords, query->query.name, &cache_record, BPF_ANY);
+                    notify_hw_cache(query->query.name, query->query.domain_size, cache_record.ip, cache_record.timestamp);
                 }
 
                 if (cache_record.ip == 0)
@@ -1269,16 +1314,16 @@ int dns_pre_fetch(struct xdp_md *ctx) {
 
             __builtin_memcpy(myevent->domain, query->query.name, MAX_DNS_NAME_LENGTH_SW);
 
-            myevent->id = curr.id.id;
-            myevent->port = curr.id.port;
-            myevent->ip = serverip;
-
-            bpf_ringbuf_submit(myevent, 0);
-
             __u32 rand32 = bpf_get_prandom_u32();
             __u16 rand16 = (__u16)(rand32 & 0xFFFF);
 
             query->id.id = rand16;
+
+            myevent->id = rand16;
+            myevent->port = curr.id.port;
+            myevent->ip = recursive_server_ip;
+
+            bpf_ringbuf_submit(myevent, 0);
 
             struct query_owner owner = {
                 .ip = 0,

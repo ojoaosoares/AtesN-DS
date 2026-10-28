@@ -1,23 +1,22 @@
-#include "dns.h"
-#include "csum.h"
-#include "gets.h"
-#include "ttl.h"
-#include "net_format.h"
-#include "dns_headers.h"
-#include "dns_query.h"
-#include "dns_answer.h"
-#include "dns_filter.h"
 #include <linux/bpf.h>
+#include "dns.h"
+#include "net_format.h"
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+#include <linux/udp.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 
+#ifndef HW_CACHE_MAX_ENTRIES
+#define HW_CACHE_MAX_ENTRIES 32768 /* Sized for on-chip SRAM fabric (NFP-3800 ~2.3 MB) */
+#endif
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 2000000);
+    __uint(max_entries, HW_CACHE_MAX_ENTRIES);
     __uint(key_size, MAX_DNS_NAME_LENGTH_HW);
     __uint(map_flags, 0);
     __uint(value_size, sizeof(struct a_record_hw));
-
 } level_one_cache SEC(".maps");
 
 struct {
@@ -28,148 +27,123 @@ struct {
     __uint(map_flags, 0);
 } time_map SEC(".maps");
 
-#define EDNS0_OPT_SIZE      11
-#define ETH_HDR_SIZE        14
-#define IP_HDR_SIZE         20
-#define UDP_HDR_SIZE        8
-#define DNS_HDR_SIZE        12
-#define MAX_DNS_NAME_LENGTH 24
-#define MAX_DNS_QUERY_SIZE  (DNS_HDR_SIZE + MAX_DNS_NAME_LENGTH + 1 + 2 + 2 + EDNS0_OPT_SIZE)
-#define MAX_PACKET_SIZE     (ETH_HDR_SIZE + IP_HDR_SIZE + UDP_HDR_SIZE + MAX_DNS_QUERY_SIZE)
-
 SEC("xdp")
 int dns_filter(struct xdp_md *ctx) {
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data     = (void *)(long)ctx->data;
 
-    void *data_end = (void*) (long) ctx->data_end;
-    void *data = (void*) (long) ctx->data;
+    if ((void *)((__u8 *)data + DNS_MIN_QUERY_LEN) > data_end)
+        return XDP_PASS;
 
-    __u64 offset_h = 0;
+    if (*(__be16 *)((__u8 *)data + offsetof(struct ethhdr, h_proto)) != bpf_htons(ETH_P_IP))
+        return XDP_PASS;
 
-    switch (filter_dns(data, &offset_h, data_end))
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        default:
-            break;
-    }
+    struct iphdr *ipv4 = (struct iphdr *)((__u8 *)data + IPV4_OFFSET);
+    if (ipv4->protocol != UDP_PROTOCOL)
+        return XDP_PASS;
+    if (ipv4->frag_off & IP_FRAGMENTED_MASK)
+        return XDP_PASS;
 
-    struct dns_query dnsquery = {0};
+    struct udphdr *udp = (struct udphdr *)((__u8 *)data + UDP_OFFSET);
+    struct dns_header *dns = (struct dns_header *)((__u8 *)data + DNS_OFFSET);
 
-    __u64 query_response = is_dns_query_or_response(data, &offset_h, data_end, &dnsquery.id.id);
+    if (dns->questions != bpf_htons(1))
+        return XDP_PASS;
 
-    switch (query_response)
-    {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        case QUERY_RETURN:
-        case RESPONSE_RETURN:
-            break;
-        default:
-            return XDP_PASS;
-            break;
-    }
-    
-    dnsquery.id.port = get_source_port(data);
+    if (dns->flags & bpf_htons(DNS_FLAG_QR))
+        return XDP_PASS;
 
-    uint8_t domain_size = 0;
+    if (udp->dest != bpf_htons(DNS_PORT) || dns->name_servers != 0)
+        return XDP_PASS;
+
+    __u8 *content = (__u8 *)data + DNS_QUESTION_OFFSET;
+    if (*content == 0)
+        return XDP_DROP;
+
     struct dns_domain_hw domain_hw = {0};
+    size_t size = MAX_DNS_NAME_LENGTH_HW;
 
-    switch (get_domain_hw(data, &offset_h, data_end, &domain_hw, &domain_size))
+    #pragma unroll
+    for (size_t i = 0; i < 7; i++)
     {
-        case DROP:
-            return XDP_DROP;
-        case PASS:
-            return XDP_PASS;
-        default:
-            break;
+        __u8 c = content[i];
+        if (c == 0) {
+            size = i;
+            asm volatile("" : "+r"(size));
+            goto found_null;
+        }
+        domain_hw.name[i] = (char)c;
     }
 
-    __u32 *now = 0;
-    __u32 key = 0;
-
-    now = bpf_map_lookup_elem(&time_map, &key);
-
-    if (!now)
-        return XDP_PASS;
-
-    if (RESPONSE_RETURN == query_response)
-    {   
-        offset_h = ETH_HDR_SIZE + IP_HDR_SIZE + UDP_HDR_SIZE + DNS_HDR_SIZE + domain_size + 5;
-
-        if (data + offset_h > data_end)
-            return XDP_DROP;
-        
-        struct a_record_hw cache_record = {0};
-        cache_record.ip = 0;
-        cache_record.timestamp = 0;
-
-        __u32 now_value = *now;
-        
-        if (get_dns_answer_hw(data, &offset_h, data_end, &cache_record, now_value) == DROP)
+    #pragma unroll
+    for (size_t i = 7; i < MAX_DNS_NAME_LENGTH_HW; i++)
+    {
+        if ((void *)(content + i + 1) > data_end)
             return XDP_DROP;
 
-        if (cache_record.timestamp)
-        {
-            bpf_map_update_elem(&level_one_cache, domain_hw.name, &cache_record, BPF_ANY);
+        __u8 c = content[i];
+        if (c == 0) {
+            size = i;
+            asm volatile("" : "+r"(size));
+            goto found_null;
         }
-
-        return XDP_PASS;
-    }
-
-    struct a_record_hw *arecord;
-    arecord = bpf_map_lookup_elem(&level_one_cache, domain_hw.name);
-
-    if (arecord)
-    { 
-	    __u32 now_value = *now;
-        __u64 diff = 0;
-
-        if (now_value < arecord->timestamp)
-            diff = arecord->timestamp - now_value;
-        
-        if (diff < MINIMUM_TTL)
-        {
-            bpf_map_delete_elem(&level_one_cache, domain_hw.name);
-            return XDP_PASS;
-        }
-
-        __s16 newsize = (data + offset_h - data_end);
-
-        __u8 status = RCODE_NXDOMAIN;
-
-        if (arecord->ip != 0)
-        {
-            newsize += sizeof(struct dns_response);
-            status = RCODE_NOERROR;
-        }
-
-        if (bpf_xdp_adjust_tail(ctx, (int) newsize) < 0)
-            return XDP_PASS;
-
-        data = (void*) (long) ctx->data;
-        data_end = (void*) (long) ctx->data_end;
-
-        offset_h = 0;
-
-        if (format_network_access_layer_hw(data, &offset_h, data_end) == DROP)
-            return XDP_DROP;
-
-        if (swap_internet_layer_hw(data, &offset_h, data_end) == DROP)
-            return XDP_DROP;
-
-        if (swap_transport_layer(data, &offset_h, data_end) == DROP)
-            return XDP_DROP;
-
-        if (create_dns_answer(data, &offset_h, data_end, arecord->ip, diff, status, domain_size) == DROP)
-            return XDP_DROP;
-
-        return XDP_TX;
+        domain_hw.name[i] = (char)c;
     }
 
     return XDP_PASS;
+
+found_null:
+
+    if ((void *)(content + size + DNS_QTAIL_LEN) > data_end)
+        return XDP_DROP;
+
+    __be16 *qtype  = (__be16 *)(content + size + 1);
+    __be16 *qclass = (__be16 *)(content + size + 3);
+
+    if (*qtype != bpf_htons(A_RECORD_TYPE) || *qclass != bpf_htons(DNS_CLASS_IN))
+        return XDP_PASS;
+
+    struct a_record_hw *arecord = bpf_map_lookup_elem(&level_one_cache, domain_hw.name);
+    if (!arecord)
+        return XDP_PASS;
+
+    __u32 key = 0;
+    __u32 *now = bpf_map_lookup_elem(&time_map, &key);
+    if (!now)
+        return XDP_PASS;
+    __u32 now_value = *now;
+
+    __u32 diff = 0;
+    if (now_value < arecord->timestamp)
+        diff = arecord->timestamp - now_value;
+
+    if (diff < MINIMUM_TTL + 3)
+    {
+        bpf_map_delete_elem(&level_one_cache, domain_hw.name);
+        return XDP_PASS;
+    }
+
+    int cur_len = (__u8 *)data_end - (__u8 *)data;
+    int target_len = DNS_QUESTION_OFFSET + size + DNS_QTAIL_LEN;
+    __u8 status = RCODE_NXDOMAIN;
+
+    if (arecord->ip != 0)
+    {
+        target_len += sizeof(struct dns_response);
+        status = RCODE_NOERROR;
+    }
+
+    int newsize = target_len - cur_len;
+    if (bpf_xdp_adjust_tail(ctx, newsize) < 0)
+        return XDP_PASS;
+
+    data     = (void *)(long)ctx->data;
+    data_end = (void *)(long)ctx->data_end;
+
+    if (send_dns_response_hw(data, data_end, arecord->ip, diff, status, (__u8)size) == DROP)
+        return XDP_DROP;
+
+    return XDP_TX;
 }
+
 char _license[] SEC("license") = "GPL";

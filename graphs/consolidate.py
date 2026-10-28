@@ -58,10 +58,33 @@ def enrich_server_files_with_hit_rate(client_dir, server_dir, mode, concurrency)
             print(f"Aviso: Erro ao calcular hit rate para a run {run_num}: {e}", file=sys.stderr)
 
 
+def get_t_crit(n, confidence=0.95):
+    """Returns the two-tailed Student-t critical value for n samples."""
+    try:
+        from scipy import stats
+        return float(stats.t.ppf((1 + confidence) / 2.0, df=n - 1))
+    except Exception:
+        t_table_95 = {
+            1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571,
+            6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
+            15: 2.131, 20: 2.086, 25: 2.060, 30: 2.0452, 40: 2.021,
+            50: 2.009, 60: 2.000, 100: 1.984, 120: 1.980
+        }
+        if n <= 1:
+            return 0.0
+        df = n - 1
+        if df in t_table_95:
+            return t_table_95[df]
+        for k in sorted(t_table_95.keys()):
+            if df <= k:
+                return t_table_95[k]
+        return 1.960
+
+
 def consolidate_files(input_dir, file_pattern, output_file, is_server_data=False):
     """
-    Finds all CSV files matching a pattern, calculates mean and std dev for each metric,
-    and saves to a consolidated CSV file.
+    Finds all CSV files matching a pattern, calculates mean, std dev, and 95% CI
+    for each metric, and saves to a consolidated CSV file.
     """
     try:
         file_paths = glob.glob(os.path.join(input_dir, file_pattern))
@@ -90,21 +113,40 @@ def consolidate_files(input_dir, file_pattern, output_file, is_server_data=False
         if is_server_data:
             # Server data is in long format: metric, value
             combined_df['value'] = pd.to_numeric(combined_df['value'], errors='coerce')
-            summary = combined_df.groupby('metric')['value'].agg(['mean', 'std']).reset_index()
-            summary.columns = ['metric', 'mean', 'std']
+
+            def calc_ci95(series):
+                s = series.dropna()
+                n = len(s)
+                if n <= 1:
+                    return 0.0
+                std_val = s.std()
+                sem = std_val / (n ** 0.5)
+                return get_t_crit(n, 0.95) * sem
+
+            summary = combined_df.groupby('metric')['value'].agg(
+                mean='mean',
+                std='std',
+                count='count',
+                ci95=calc_ci95
+            ).reset_index()
             summary_df = summary
         else:
             # Client data is in wide format, one column per metric.
             numeric_cols = combined_df.select_dtypes(include='number').columns
-            summary_mean = combined_df[numeric_cols].mean()
-            summary_std = combined_df[numeric_cols].std()
-
             rows = []
             for col in numeric_cols:
+                series = combined_df[col].dropna()
+                n = len(series)
+                m = series.mean()
+                s = series.std() if n > 1 else 0.0
+                sem = (s / (n ** 0.5)) if n > 0 else 0.0
+                ci95 = get_t_crit(n, 0.95) * sem if n > 1 else 0.0
                 rows.append({
                     "metric": col,
-                    "mean": summary_mean[col],
-                    "std": summary_std[col]
+                    "mean": m,
+                    "std": s,
+                    "count": n,
+                    "ci95": ci95
                 })
             summary_df = pd.DataFrame(rows)
 

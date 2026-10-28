@@ -1,0 +1,5 @@
+num_cores,mode,target_qps,reps,achieved_qps_mean,achieved_qps_std,loss_pct_mean,loss_pct_std,lat_mean_ms,lat_p99_ms,lat_p99_9_ms,hw_cache_hits_mean,driver_hits_mean,userspace_hits_mean,hw_hit_rate_pct,srv_c0_busy_mean,srv_c1_busy_mean,srv_c2_busy_mean,srv_c3_busy_mean,srv_all_busy_mean,srv_softirq_mean,client_cpu_busy_mean
+2,ates_driver,1000000,1,875590,0,1.02,0.00,97.906,685.399,1075.924,0,157603936,2306,0.00,17.2,17.3,2.7,2.6,9.7,7.4,13.0
+2,ates_hw_cache,1000000,1,878682,0,1.02,0.00,97.645,683.019,1072.711,147449165,10713062,590,93.23,3.3,3.2,0.5,0.5,1.9,1.2,13.0
+2,unbound_hw_cache,1000000,1,797810,0,10.02,0.00,104.481,716.571,1123.272,143523905,0,81965,99.94,5.1,5.3,0.8,1.0,3.0,1.8,12.0
+2,unbound_standalone,1000000,1,69683,0,90.56,0.00,264.899,1422.282,2184.014,0,0,12543033,0.00,99.6,99.6,1.6,2.9,51.1,40.2,6.0

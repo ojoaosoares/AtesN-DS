@@ -1,6 +1,11 @@
 .vscode/
 
-data*/*.png
+data*/
+data*
+!data/
+data/*
+!data/daemons_statistical_30_runs.csv
+!data/saturation_eviction_comparison.csv
 
 bin/
 
@@ -8,7 +13,14 @@ obj/
 
 .venv/
 
+# Tests and benchmark outputs
 test/
+quick_data*/
+/tests/mock_dns_server
+
+# Firmware packages and binaries
+firmware/
+*.deb
 
 nohup*
 
@@ -18,4 +30,62 @@ nohup*
 
 *.skel.h
 
+*.txt
+
 *.pcap
+
+__pycache__/
+*.py[cod]
+
+# Images, plots and vector graphics
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+results/
+scratch_plots/
+plots_*/
+official_results/**/plots_*/
+
+# Backups and temporary intermediate files
+*.bak
+*.bak*
+*.partial*
+*.old_*
+*_backup.csv
+backup_*/
+official_results/**/backup_*/
+official_results/**/logs/
+
+
+
+# Reviewer responses
+responses/
+*RESPONSE*.md
+
+# LaTeX documents, templates, packages, bibliographies, and build artifacts
+*.tex
+*.bib
+*.cls
+*.sty
+*.bst
+*.abs
+*.aux
+*.log
+*.toc
+*.bbl
+*.blg
+*.out
+*.synctex*
+*.fls
+*.fdb_latexmk
+*.nav
+*.snm
+*.vrb
+*.idx
+*.ilg
+*.ind
+*.lof
+*.lot
+flat_project/

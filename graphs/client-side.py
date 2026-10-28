@@ -3,42 +3,48 @@ import matplotlib.pyplot as plt
 import glob
 import os
 import re
+import math
 
-# Set general font settings for paper figures (extra large, bold and readable)
 plt.rcParams.update({
-    "font.size": 17,
-    "axes.labelsize": 19,
-    "axes.labelweight": "bold",
-    "axes.titlesize": 20,
-    "axes.titleweight": "bold",
-    "xtick.labelsize": 16,
-    "ytick.labelsize": 16,
-    "legend.fontsize": 16,
-    "figure.titlesize": 21,
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 13,
+    'figure.titlesize': 18
 })
 
 rows = []
-seen_files = set()
-files = glob.glob("client_results*.csv") + glob.glob("client_output*.csv")
 
-for file in files:
+for file in glob.glob("*.csv"):
     name = os.path.basename(file)
-    if name in seen_files:
-        continue
-    seen_files.add(name)
 
-    if "no_hw_cache" in name:
-        cache_type = "Driver-mode"
+    if "server" in name:
+        continue
+
+    if "unbound_standalone" in name:
+        cache_type = "Unbound (Standalone)"
+    elif "unbound_hw_cache" in name:
+        cache_type = "Unbound + HW Cache"
+    elif "ates_driver" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
+    elif "ates_hw_cache" in name:
+        cache_type = "AtesN-DS (Offloaded-Mode)"
+    elif "no_hw_cache" in name:
+        cache_type = "AtesN-DS (Driver-Mode)"
     elif "hw_cache" in name:
-        cache_type = "Offloaded-mode"
+        cache_type = "AtesN-DS (Offloaded-Mode)"
     else:
         continue
 
     match = re.search(r"(\d+)\.csv$", name)
+
     if not match:
         continue
 
     concurrency = int(match.group(1))
+
     metrics_df = pd.read_csv(file)
 
     metrics = {
@@ -48,144 +54,254 @@ for file in files:
 
     for _, row in metrics_df.iterrows():
         metric_name = str(row["metric"])
+
         metrics[metric_name] = float(row["mean"]) if "mean" in row else float(row["value"])
-        if "std" in row:
+        if "std" in row and pd.notna(row["std"]):
             metrics[f"{metric_name}_std"] = float(row["std"])
+        if "ci95" in row and pd.notna(row["ci95"]):
+            metrics[f"{metric_name}_ci95"] = float(row["ci95"])
+        elif "std" in row and pd.notna(row["std"]):
+            # Fallback: calculate 95% CI from std assuming n=30 runs (t_crit=2.0452)
+            n_runs = float(row["count"]) if ("count" in row and pd.notna(row["count"]) and float(row["count"]) > 1) else 30.0
+            metrics[f"{metric_name}_ci95"] = 2.0452 * (float(row["std"]) / (n_runs ** 0.5))
 
     rows.append(metrics)
 
 if not rows:
-    raise ValueError("Nenhum CSV foi carregado. Verifique se o script está na pasta correta.")
+    raise ValueError(
+        "Nenhum CSV foi carregado. Verifique se o script está na pasta correta."
+    )
 
-df = pd.DataFrame(rows).sort_values(["cache_type", "concurrency"])
-concurrencies = sorted(df["concurrency"].unique())
+df = pd.DataFrame(rows)
 
-def plot_client_metric(metric, ylabel, filename, title=None, max_c=None, min_c=None):
+print("\n=== COLUNAS DO DATAFRAME ===")
+for c in sorted(df.columns):
+    print(c)
+
+print("\nDados carregados:")
+print(df[["cache_type", "concurrency"]].sort_values("concurrency"))
+
+df = df.sort_values(["cache_type", "concurrency"])
+
+# =====================================================
+# Throughput
+# =====================================================
+
+plt.figure(figsize=(12, 6))
+
+for cache in df["cache_type"].unique():
+    subset = df[df["cache_type"] == cache]
+
+    x = subset["concurrency"].to_numpy()
+    y = subset["queriesPerSecond"].to_numpy()
+
+    plt.plot(
+        x,
+        y,
+        marker="o",
+        linewidth=2,
+        label=cache,
+    )
+
+    if "queriesPerSecond_ci95" in subset.columns:
+        ci = subset["queriesPerSecond_ci95"].fillna(0).to_numpy()
+        plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+    elif "queriesPerSecond_std" in subset.columns:
+        ci = (subset["queriesPerSecond_std"].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+        plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+
+plt.xlabel("Concurrent Connections")
+plt.ylabel("Queries/s")
+plt.title("Throughput vs Concurrency (Mean ± 95% Confidence Interval)")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.savefig("throughput_vs_concurrency.png", dpi=300)
+plt.close()
+
+# =====================================================
+# Mean Latency
+# =====================================================
+
+plt.figure(figsize=(12, 6))
+
+for cache in df["cache_type"].unique():
+    subset = df[df["cache_type"] == cache]
+
+    x = subset["concurrency"].to_numpy()
+    y = subset["latency_mean_ms"].to_numpy()
+
+    plt.plot(
+        x,
+        y,
+        marker="o",
+        linewidth=2,
+        label=cache,
+    )
+
+    if "latency_mean_ms_ci95" in subset.columns:
+        ci = subset["latency_mean_ms_ci95"].fillna(0).to_numpy()
+        plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+    elif "latency_mean_ms_std" in subset.columns:
+        ci = (subset["latency_mean_ms_std"].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+        plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+
+plt.xlabel("Concurrent Connections")
+plt.ylabel("Mean Latency (ms)")
+plt.title("Mean Latency vs Concurrency (Mean ± 95% Confidence Interval)")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.savefig("latency_mean_vs_concurrency.png", dpi=300)
+plt.close()
+
+# =====================================================
+# Percentis
+# =====================================================
+
+percentiles = [
+    "latency_p50_ms",
+    "latency_p75_ms",
+    "latency_p90_ms",
+    "latency_p95_ms",
+    "latency_p99_ms",
+]
+
+for metric in percentiles:
     if metric not in df.columns:
-        return
+        continue
 
-    subset_df = df.copy()
-    if max_c is not None:
-        subset_df = subset_df[subset_df["concurrency"] <= max_c]
-    if min_c is not None:
-        subset_df = subset_df[subset_df["concurrency"] >= min_c]
+    plt.figure(figsize=(12, 6))
 
-    plt.figure(figsize=(9.5, 5.8))
+    for cache in df["cache_type"].unique():
+        subset = df[df["cache_type"] == cache]
 
-    for cache in sorted(subset_df["cache_type"].unique()):
-        subset = subset_df[subset_df["cache_type"] == cache].sort_values("concurrency")
         x = subset["concurrency"].to_numpy()
         y = subset[metric].to_numpy()
-
-        marker = "o" if cache in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "s"
-        color = "#1f77b4" if cache in ["Offloaded-mode", "Offloaded mode", "HW Cache", "offloaded-mode"] else "#ff7f0e"
-
-        std_col = f"{metric}_std"
-        if std_col in subset.columns:
-            std = subset[std_col].fillna(0).to_numpy()
-            plt.fill_between(x, y - std, y + std, alpha=0.40, color=color)
 
         plt.plot(
             x,
             y,
-            marker=marker,
-            markersize=7.5,
-            linewidth=2.8,
+            marker="o",
+            linewidth=2,
             label=cache,
-            color=color,
         )
 
-    c_ticks = sorted(subset_df["concurrency"].unique())
-    plt.xscale("log", base=2)
-    plt.xticks(c_ticks, labels=[str(c) for c in c_ticks], rotation=45 if len(c_ticks) > 5 else 0, fontsize=16)
-    plt.yticks(fontsize=16)
-    
-    if max_c and not min_c:
-        plt.xlabel(f"Concurrent Connections (1 to {max_c})", fontweight="bold")
-    elif min_c and not max_c:
-        plt.xlabel(f"Concurrent Connections ({min_c} to 16384)", fontweight="bold")
-    elif min_c and max_c:
-        plt.xlabel(f"Concurrent Connections ({min_c} to {max_c})", fontweight="bold")
-    else:
-        plt.xlabel("Concurrent Connections", fontweight="bold")
+        ci_col = f"{metric}_ci95"
+        std_col = f"{metric}_std"
+        if ci_col in subset.columns:
+            ci = subset[ci_col].fillna(0).to_numpy()
+            plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+        elif std_col in subset.columns:
+            ci = (subset[std_col].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+            plt.fill_between(x, y - ci, y + ci, alpha=0.25)
 
-    plt.ylabel(ylabel, fontweight="bold")
-    plt.title(title if title else f"{metric} vs Concurrency", fontweight="bold", pad=12)
-    plt.grid(True, which="both", alpha=0.3)
-    plt.legend(frameon=True, facecolor="white", edgecolor="#cccccc", framealpha=0.9, fontsize=16)
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Latency (ms)")
+    plt.title(f"{metric} (Mean ± 95% Confidence Interval)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(filename, dpi=300)
+    plt.savefig(f"{metric}.png", dpi=300)
     plt.close()
 
 # =====================================================
-# Plots
+# Total Requests
 # =====================================================
 
-plot_client_metric("queriesPerSecond", "Throughput (Queries/s)", "throughput_vs_concurrency.png", "Throughput vs Concurrency")
+if "totalRequests" in df.columns:
+    plt.figure(figsize=(12, 6))
 
-# Latência Média Completa e Dividida
-plot_client_metric("latency_mean_ms", "Mean Latency (ms)", "latency_mean_vs_concurrency.png", "Mean Latency vs Concurrency (Full Range)")
-plot_client_metric("latency_mean_ms", "Mean Latency (ms)", "latency_mean_low_concurrency.png", "Mean Latency: Low to Moderate Load (≤ 4096)", max_c=4096)
-plot_client_metric("latency_mean_ms", "Mean Latency (ms)", "latency_mean_high_concurrency.png", "Mean Latency: High-Load Overload Regime (≥ 4096)", min_c=4096)
+    for cache in df["cache_type"].unique():
+        subset = df[df["cache_type"] == cache]
 
-# Latência P99 Completa e Dividida
-plot_client_metric("latency_p99_ms", "Latency P99 (ms)", "latency_p99_ms.png", "Latency P99 vs Concurrency (Full Range)")
-plot_client_metric("latency_p99_ms", "Latency P99 (ms)", "latency_p99_low_concurrency.png", "Latency P99: Low to Moderate Load (≤ 4096)", max_c=4096)
-plot_client_metric("latency_p99_ms", "Latency P99 (ms)", "latency_p99_high_concurrency.png", "Latency P99: High-Load Overload Regime (≥ 4096)", min_c=4096)
+        x = subset["concurrency"].to_numpy()
+        y = subset["totalRequests"].to_numpy()
 
-# Latência Mediana (P50) e Percentis
-plot_client_metric("latency_p50_ms", "Median Latency (ms)", "latency_p50_ms.png", "Median Latency ($p50$) vs Concurrency")
-plot_client_metric("latency_p75_ms", "Latency P75 (ms)", "latency_p75_ms.png", "Latency P75 vs Concurrency")
-plot_client_metric("latency_p90_ms", "Latency P90 (ms)", "latency_p90_ms.png", "Latency P90 vs Concurrency")
-plot_client_metric("latency_p95_ms", "Latency P95 (ms)", "latency_p95_ms.png", "Latency P95 vs Concurrency")
+        plt.plot(
+            x,
+            y,
+            marker="o",
+            linewidth=2,
+            label=cache,
+        )
 
-plot_client_metric("totalRequests", "Total Requests", "total_requests_vs_concurrency.png", "Total Requests vs Concurrency")
+        if "totalRequests_ci95" in subset.columns:
+            ci = subset["totalRequests_ci95"].fillna(0).to_numpy()
+            plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+        elif "totalRequests_std" in subset.columns:
+            ci = (subset["totalRequests_std"].fillna(0).to_numpy() / (30.0 ** 0.5)) * 2.0452
+            plt.fill_between(x, y - ci, y + ci, alpha=0.25)
+
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Total Requests")
+    plt.title("Total Requests vs Concurrency (Mean ± 95% Confidence Interval)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("total_requests_vs_concurrency.png", dpi=300)
+    plt.close()
 
 # =====================================================
 # Speedup
 # =====================================================
 
-hw_key = "Offloaded-mode" if "Offloaded-mode" in df["cache_type"].values else ("HW Cache" if "HW Cache" in df["cache_type"].values else None)
-nohw_key = "Driver-mode" if "Driver-mode" in df["cache_type"].values else ("No HW Cache" if "No HW Cache" in df["cache_type"].values else None)
+pairs_to_check = [
+    ("AtesN-DS (Offload Speedup)", "AtesN-DS (Offloaded-Mode)", "AtesN-DS (Driver-Mode)"),
+    ("Unbound (HW Accel Speedup)", "Unbound + HW Cache", "Unbound (Standalone)"),
+    ("HW Cache Speedup", "HW Cache", "No HW Cache"),
+]
 
-if hw_key and nohw_key:
-    hw = df[df["cache_type"] == hw_key].set_index("concurrency").sort_index()
-    no_hw = df[df["cache_type"] == nohw_key].set_index("concurrency").sort_index()
-    common = hw.index.intersection(no_hw.index)
+speedup_plotted = False
+plt.figure(figsize=(12, 6))
 
-    if not common.empty and "queriesPerSecond" in hw.columns:
-        speedup = hw.loc[common, "queriesPerSecond"] / no_hw.loc[common, "queriesPerSecond"]
-        
-        std_hw = hw.loc[common, "queriesPerSecond_std"] if "queriesPerSecond_std" in hw.columns else 0.0
-        std_nohw = no_hw.loc[common, "queriesPerSecond_std"] if "queriesPerSecond_std" in no_hw.columns else 0.0
-        rel_hw = (std_hw / hw.loc[common, "queriesPerSecond"]).fillna(0)
-        rel_nohw = (std_nohw / no_hw.loc[common, "queriesPerSecond"]).fillna(0)
-        speedup_std = speedup * ((rel_hw**2 + rel_nohw**2)**0.5)
-
-        plt.figure(figsize=(9.5, 5.8))
-        plt.fill_between(common, speedup - speedup_std, speedup + speedup_std, alpha=0.40, color="#1f77b4")
-        plt.plot(
-            common,
-            speedup,
-            marker="o",
-            markersize=7.5,
-            linewidth=2.8,
-            color="#1f77b4",
-            label="Offloaded-mode Speedup",
+for label, num_type, den_type in pairs_to_check:
+    if num_type in df["cache_type"].values and den_type in df["cache_type"].values:
+        hw = (
+            df[df["cache_type"] == num_type]
+            .set_index("concurrency")
+            .sort_index()
         )
+        no_hw = (
+            df[df["cache_type"] == den_type]
+            .set_index("concurrency")
+            .sort_index()
+        )
+        common = hw.index.intersection(no_hw.index)
+        if not common.empty and "queriesPerSecond" in hw.columns and "queriesPerSecond" in no_hw.columns:
+            speedup = (
+                hw.loc[common, "queriesPerSecond"]
+                / no_hw.loc[common, "queriesPerSecond"]
+            )
+            plt.plot(
+                common,
+                speedup,
+                marker="o",
+                linewidth=2,
+                label=label,
+            )
+            speedup_plotted = True
 
-        plt.axhline(1.0, linestyle="--", color="gray", linewidth=1.5, label="Baseline (1.0x)")
+if speedup_plotted:
+    plt.axhline(1.0, linestyle="--", color="gray", alpha=0.7)
+    plt.xlabel("Concurrent Connections")
+    plt.ylabel("Speedup Ratio")
+    plt.title("Hardware Acceleration Speedup vs Software Baseline")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("speedup.png", dpi=300)
+    plt.close()
+else:
+    plt.close()
 
-        plt.xscale("log", base=2)
-        plt.xticks(common, labels=[str(c) for c in common], rotation=45, fontsize=16)
-        plt.yticks(fontsize=16)
-        plt.xlabel("Concurrent Connections", fontweight="bold")
-        plt.ylabel("Speedup (Multiplicative Factor)", fontweight="bold")
-        plt.title("Throughput Speedup (Offloaded-mode / Driver-mode)", fontweight="bold", pad=12)
-        plt.grid(True, which="both", alpha=0.3)
-        plt.legend(frameon=True, facecolor="white", edgecolor="#cccccc", framealpha=0.9, fontsize=16)
-        plt.tight_layout()
-        plt.savefig("speedup.png", dpi=300)
-        plt.close()
-
-print("\nTodos os gráficos de cliente foram gerados com sucesso com sombra destacada!")
+print("\nGráficos gerados:")
+print("throughput_vs_concurrency.png")
+print("latency_mean_vs_concurrency.png")
+print("latency_p50_ms.png")
+print("latency_p75_ms.png")
+print("latency_p90_ms.png")
+print("latency_p95_ms.png")
+print("latency_p99_ms.png")
+print("total_requests_vs_concurrency.png")
+print("speedup.png")

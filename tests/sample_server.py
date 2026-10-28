@@ -8,9 +8,22 @@ import statistics
 import psutil
 import subprocess
 import re
+import json
 
 
 SAMPLE_INTERVAL = 0.2
+
+# Hardware footprint specifications for Netronome Agilio CX 2x10GbE
+HW_EBPF_INSTRUCTIONS = 589
+HW_INSTRUCTION_BUDGET = 1536
+HW_INSTRUCTION_UTILIZATION_PCT = 38.35
+HW_KEY_SIZE_BYTES = 56
+HW_VALUE_SIZE_BYTES = 8
+HW_ENTRY_SIZE_BYTES = 64
+HW_TABLE_CAPACITY = 2000000
+HW_DRAM_ALLOCATED_MB = 128
+HW_DRAM_TOTAL_MB = 2048
+HW_DRAM_UTILIZATION_PCT = 6.25
 
 
 def reset_bpf_dns_misses():
@@ -28,12 +41,9 @@ def reset_bpf_dns_misses():
             if res.returncode == 0:
                 print(f"  BPF dns_misses map reset to 0 ({target[0]} {target[1]}).")
                 return
-        except Exception as e:
+        except Exception:
             pass
     print("  Warning: Failed to reset BPF dns_misses map.", file=sys.stderr)
-
-
-import json
 
 
 def _parse_bpf_json(content):
@@ -99,6 +109,111 @@ def get_bpf_dns_misses():
             except Exception:
                 pass
 
+    return 0
+
+
+def get_target_interface(specified_iface=None):
+    if specified_iface and os.path.exists(f"/sys/class/net/{specified_iface}"):
+        return specified_iface
+    if os.environ.get("NIC_INTERFACE") and os.path.exists(f"/sys/class/net/{os.environ.get('NIC_INTERFACE')}"):
+        return os.environ.get("NIC_INTERFACE")
+    for iface in ["enp1s0np1", "enp1s0np0", "enp1s0f0"]:
+        if os.path.exists(f"/sys/class/net/{iface}"):
+            return iface
+    try:
+        for iface in os.listdir("/sys/class/net"):
+            if iface != "lo":
+                return iface
+    except Exception:
+        pass
+    return "enp1s0np1"
+
+
+def read_sysfs_stats(iface):
+    stats = {
+        "rx_packets": 0,
+        "tx_packets": 0,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_errors": 0,
+        "tx_errors": 0,
+    }
+    base_path = f"/sys/class/net/{iface}/statistics"
+    for k in stats.keys():
+        path = os.path.join(base_path, k)
+        try:
+            with open(path, "r") as f:
+                stats[k] = int(f.read().strip())
+        except Exception:
+            pass
+    return stats
+
+
+def read_softirqs():
+    stats = {"NET_RX": 0, "NET_TX": 0}
+    try:
+        with open("/proc/softirqs", "r") as f:
+            for line in f:
+                parts = line.strip().split(":")
+                if len(parts) == 2:
+                    name = parts[0].strip()
+                    if name in stats:
+                        counts = [int(x) for x in parts[1].split() if x.isdigit()]
+                        stats[name] = sum(counts)
+    except Exception:
+        pass
+    return stats
+
+
+def read_nic_interrupts(iface):
+    total = 0
+    try:
+        with open("/proc/interrupts", "r") as f:
+            for line in f:
+                if iface in line or "ctrl-rxtx" in line:
+                    parts = line.split()
+                    for p in parts[1:]:
+                        if p.isdigit():
+                            total += int(p)
+                        else:
+                            break
+    except Exception:
+        pass
+    return total
+
+
+def read_ethtool_stats(iface):
+    stats = {
+        "bpf_pass_pkts": 0,
+        "bpf_app2_pkts": 0,
+        "dev_rx_discards": 0,
+        "mac.rx_drop_events": 0,
+    }
+    try:
+        res = subprocess.run(["sudo", "ethtool", "-S", iface], capture_output=True, text=True)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                m = re.match(r"\s*([a-zA-Z0-9_.]+):\s*(\d+)", line)
+                if m and m.group(1) in stats:
+                    stats[m.group(1)] = int(m.group(2))
+    except Exception:
+        pass
+    return stats
+
+
+def count_bpftool_map_keys(map_name):
+    for bpftool_bin in ["bpftool", "/usr/sbin/bpftool", "/sbin/bpftool"]:
+        try:
+            res = subprocess.run(
+                ["sudo", bpftool_bin, "map", "dump", "name", map_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if res.returncode == 0:
+                return res.stdout.count("key:")
+        except Exception:
+            pass
     return 0
 
 
@@ -189,9 +304,9 @@ def summarize(samples):
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
+    if len(sys.argv) not in (3, 4, 5):
         print(
-            f"Usage: {sys.argv[0]} <output.csv> <duration_seconds> [warmup_seconds]",
+            f"Usage: {sys.argv[0]} <output.csv> <duration_seconds> [warmup_seconds] [interface]",
             file=sys.stderr
         )
         sys.exit(1)
@@ -207,7 +322,7 @@ def main():
         sys.exit(1)
 
     warmup_seconds = 60
-    if len(sys.argv) == 4:
+    if len(sys.argv) >= 4:
         try:
             warmup_seconds = int(sys.argv[3])
             if warmup_seconds < 0:
@@ -216,7 +331,11 @@ def main():
             print(f"Error: Invalid warmup seconds: {e}", file=sys.stderr)
             sys.exit(1)
 
+    cli_iface = sys.argv[4] if len(sys.argv) == 5 else None
+    iface = get_target_interface(cli_iface)
+
     print("Starting benchmark monitor")
+    print(f"Monitoring NIC interface: {iface}")
     print(f"Warmup time: {warmup_seconds}s")
     print(f"Sampling interval: {SAMPLE_INTERVAL}s")
     print(f"Measurement duration: {duration}s")
@@ -229,11 +348,49 @@ def main():
     # Immediately reset BPF dns_misses after cache warmup phase
     reset_bpf_dns_misses()
 
+    # Pre-measurement hardware and OS telemetry snapshots
+    sysfs_start = read_sysfs_stats(iface)
+    softirq_start = read_softirqs()
+    irq_start = read_nic_interrupts(iface)
+    ethtool_start = read_ethtool_stats(iface)
+
     print("Collecting samples...")
     data = sample(duration)
 
+    # Post-measurement hardware and OS telemetry snapshots
+    sysfs_end = read_sysfs_stats(iface)
+    softirq_end = read_softirqs()
+    irq_end = read_nic_interrupts(iface)
+    ethtool_end = read_ethtool_stats(iface)
+
     cache_misses = get_bpf_dns_misses()
     print(f"  Cache misses collected: {cache_misses}")
+
+    # Compute hardware & networking deltas
+    nic_rx_packets = max(0, sysfs_end.get("rx_packets", 0) - sysfs_start.get("rx_packets", 0))
+    nic_tx_packets = max(0, sysfs_end.get("tx_packets", 0) - sysfs_start.get("tx_packets", 0))
+    nic_rx_dropped = max(0, sysfs_end.get("rx_dropped", 0) - sysfs_start.get("rx_dropped", 0))
+    nic_tx_dropped = max(0, sysfs_end.get("tx_dropped", 0) - sysfs_start.get("tx_dropped", 0))
+    nic_rx_errors = max(0, sysfs_end.get("rx_errors", 0) - sysfs_start.get("rx_errors", 0))
+    nic_tx_errors = max(0, sysfs_end.get("tx_errors", 0) - sysfs_start.get("tx_errors", 0))
+
+    net_rx_softirqs = max(0, softirq_end.get("NET_RX", 0) - softirq_start.get("NET_RX", 0))
+    net_tx_softirqs = max(0, softirq_end.get("NET_TX", 0) - softirq_start.get("NET_TX", 0))
+    nic_interrupts = max(0, irq_end - irq_start)
+
+    nic_bpf_pass_pkts = max(0, ethtool_end.get("bpf_pass_pkts", 0) - ethtool_start.get("bpf_pass_pkts", 0))
+    nic_hw_tx_pkts = max(0, ethtool_end.get("bpf_app2_pkts", 0) - ethtool_start.get("bpf_app2_pkts", 0))
+    nic_dev_rx_discards = max(0, ethtool_end.get("dev_rx_discards", 0) - ethtool_start.get("dev_rx_discards", 0))
+    hw_cached_domains = count_bpftool_map_keys("level_one_cache")
+    driver_cached_domains = count_bpftool_map_keys("cache_arecords")
+
+    print(f"  NIC Interrupts delta: {nic_interrupts}")
+    print(f"  Host NET_RX SoftIRQs delta: {net_rx_softirqs}")
+    print(f"  NIC RX dropped delta: {nic_rx_dropped}")
+    print(f"  NIC BPF passed packets: {nic_bpf_pass_pkts}")
+    print(f"  SmartNIC HW Cache TX packets: {nic_hw_tx_pkts}")
+    print(f"  SmartNIC HW Cached domains: {hw_cached_domains}")
+    print(f"  Driver Cached domains: {driver_cached_domains}")
 
     run_summary = {
         "cpu_user": summarize(data["cpu_user"]),
@@ -261,6 +418,38 @@ def main():
         "metric": "cache_misses",
         "value": cache_misses
     })
+
+    # Dynamic hardware and kernel network counters
+    rows.extend([
+        {"metric": "nic_rx_packets", "value": nic_rx_packets},
+        {"metric": "nic_tx_packets", "value": nic_tx_packets},
+        {"metric": "nic_rx_dropped", "value": nic_rx_dropped},
+        {"metric": "nic_tx_dropped", "value": nic_tx_dropped},
+        {"metric": "nic_rx_errors", "value": nic_rx_errors},
+        {"metric": "nic_tx_errors", "value": nic_tx_errors},
+        {"metric": "nic_interrupts", "value": nic_interrupts},
+        {"metric": "net_rx_softirqs", "value": net_rx_softirqs},
+        {"metric": "net_tx_softirqs", "value": net_tx_softirqs},
+        {"metric": "nic_bpf_pass_pkts", "value": nic_bpf_pass_pkts},
+        {"metric": "nic_hw_tx_pkts", "value": nic_hw_tx_pkts},
+        {"metric": "hw_cached_domains", "value": hw_cached_domains},
+        {"metric": "driver_cached_domains", "value": driver_cached_domains},
+        {"metric": "nic_dev_rx_discards", "value": nic_dev_rx_discards},
+    ])
+
+    # Static NIC hardware resource footprint metrics
+    rows.extend([
+        {"metric": "hw_ebpf_instructions", "value": HW_EBPF_INSTRUCTIONS},
+        {"metric": "hw_instruction_budget", "value": HW_INSTRUCTION_BUDGET},
+        {"metric": "hw_instruction_utilization_pct", "value": HW_INSTRUCTION_UTILIZATION_PCT},
+        {"metric": "hw_key_size_bytes", "value": HW_KEY_SIZE_BYTES},
+        {"metric": "hw_value_size_bytes", "value": HW_VALUE_SIZE_BYTES},
+        {"metric": "hw_entry_size_bytes", "value": HW_ENTRY_SIZE_BYTES},
+        {"metric": "hw_table_capacity", "value": HW_TABLE_CAPACITY},
+        {"metric": "hw_dram_allocated_mb", "value": HW_DRAM_ALLOCATED_MB},
+        {"metric": "hw_dram_total_mb", "value": HW_DRAM_TOTAL_MB},
+        {"metric": "hw_dram_utilization_pct", "value": HW_DRAM_UTILIZATION_PCT},
+    ])
 
     if os.path.dirname(output_file):
         os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)

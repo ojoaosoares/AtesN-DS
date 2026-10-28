@@ -138,42 +138,4 @@ static __always_inline __u8 get_dns_answer_sw(void *data, __u64 *offset, void *d
     return ACCEPT_NO_ANSWER;
 }
 
-static __always_inline __u8 get_dns_answer_hw(void *data, __u64 *offset, void *data_end, struct a_record_hw *record, __u32 now) {
-     if ((void *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct dns_header)) > data_end)
-         return DROP;
-
-     struct dns_header *header = (struct dns_header *)((__u8 *)data + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr));
-     __u16 rcode = bpf_ntohs(header->flags) & 0x000F;
-
-     if (rcode == 2)
-         return ACCEPT_NO_ANSWER;
-     if (rcode != 0 && rcode != 3)
-         return ACCEPT_ERROR;
-
-     if (bpf_ntohs(header->answer_count)) {
-         struct dns_response *response = (struct dns_response *)((__u8 *)data + *offset);
-         if ((void *)response + sizeof(struct dns_response) > data_end)
-             return DROP;
-
-         *offset += sizeof(struct dns_response);
-
-         if (bpf_ntohs(response->record_type) != A_RECORD_TYPE)
-             return ACCEPT_NO_ANSWER;
-         if (bpf_ntohs(response->record_class) != DNS_CLASS_IN)
-             return ACCEPT_NO_ANSWER;
-
-         record->ip = response->ip;
-         record->timestamp = now + bpf_ntohl(response->ttl);
-         return ACCEPT;
-     }
-
-     if (rcode == 3) {
-         record->ip = 0;
-         record->timestamp = now + 60;
-         return ACCEPT;
-     }
-
-     return ACCEPT_NO_ANSWER;
- }
-
 #endif

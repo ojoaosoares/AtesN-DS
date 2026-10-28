@@ -26,40 +26,159 @@ PROG_PIN       = $(PROG_MOUNT_PATH)/xdp_prog
 # all sources, objs, and header files
 MAIN      = ${SRC_FOLDER}dns_userspace.c
 SKELETON  = ${INCLUDE_FOLDER}dns.skel.h
+LISTENER_SKEL = ${INCLUDE_FOLDER}dns_listener.skel.h
 TARGET    = ${BIN_FOLDER}atesnds
 SRC       = $(wildcard $(SRC_FOLDER)*.c)
 OBJ       = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(SRC))
+HEADERS   = $(filter-out $(SKELETON) $(LISTENER_SKEL), $(wildcard $(INCLUDE_FOLDER)*.h))
 PROG_MOUNT_PATH = /sys/fs/bpf
-# time_updater
-TIME_SRC  = $(SRC_FOLDER)time_updater.c
-TIME_BIN  = $(BIN_FOLDER)time_updater
 $(shell mkdir -p $(OBJ_FOLDER))
 $(shell mkdir -p $(BIN_FOLDER))
 $(shell mkdir -p $(DATA_FOLDER))
 
-all: ${TARGET}
+all: ${TARGET} preload
+
+build-all: build-hw all daemon listener preload
+
+check: verify
+verify:
+	@./verify.sh
 
 run: ${TARGET}
 	sudo ${TARGET} -a ${IP} -i ${DEV} -m ${MAC}
 
-${TARGET}: ${MAIN} ${SKELETON}
+${TARGET}: ${MAIN} ${SKELETON} $(HEADERS)
 	${CC} $< -o $@ -I ${INCLUDE_FOLDER} -lbpf
+
+PRELOAD_SRC = $(SRC_FOLDER)preload_cache.c
+PRELOAD_BIN = $(BIN_FOLDER)preload_cache
+
+preload: $(PRELOAD_BIN)
+
+$(PRELOAD_BIN): $(PRELOAD_SRC) $(HEADERS)
+	$(CC) $(PRELOAD_SRC) -o $@ -I $(INCLUDE_FOLDER) -lbpf
 
 ${SKELETON}: ${OBJ_FOLDER}dns.o
 	bpftool gen skeleton $< name dns | tee $@
 
-${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c
+${OBJ_FOLDER}dns.o: ${SRC_FOLDER}dns.c $(HEADERS)
 	$(CC) $(CXXFLAGS) -c $< -o $@ -I $(INCLUDE_FOLDER)
 # ------------------------------------------------
-# time_updater (userspace, atualiza time_map)
+# atesnds_daemon (Unified Modular Multithreaded Control-Plane Runtime)
 # ------------------------------------------------
-time-updater: $(TIME_BIN)
-$(TIME_BIN): $(TIME_SRC)
-	clang-15 -O2 -Wall -o $@ $< -lbpf
-run-time-updater: $(TIME_BIN)
-	sudo rm -f $(PROG_MOUNT_PATH)/time_map
-	sudo bpftool map pin id $(TIME_MAP_ID) $(PROG_MOUNT_PATH)/time_map
-	sudo $(TIME_BIN) $(PROG_MOUNT_PATH)/time_map
+DAEMON_SRCS = $(SRC_FOLDER)daemon_timing_wheel.c \
+              $(SRC_FOLDER)daemon_ingest.c \
+              $(SRC_FOLDER)daemon_cleaner.c \
+              $(SRC_FOLDER)daemon_prefetch.c \
+              $(SRC_FOLDER)atesnds_daemon.c
+DAEMON_OBJS = $(patsubst $(SRC_FOLDER)%.c, $(OBJ_FOLDER)%.o, $(DAEMON_SRCS))
+DAEMON_BIN  = $(BIN_FOLDER)atesnds_daemon
+
+daemon: $(DAEMON_BIN)
+$(DAEMON_BIN): $(DAEMON_SRCS) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $(DAEMON_SRCS) -I $(INCLUDE_FOLDER) -lbpf -pthread
+
+run-daemon: $(DAEMON_BIN)
+	sudo $(DAEMON_BIN) -v
+
+# ------------------------------------------------
+# dns_listener (Decoupled DNS Listener for Unbound)
+# ------------------------------------------------
+LISTENER_BPF_SRC = $(SRC_FOLDER)dns_listener.bpf.c
+LISTENER_BPF_OBJ = $(OBJ_FOLDER)dns_listener.bpf.o
+LISTENER_SRC     = $(SRC_FOLDER)dns_listener.c
+LISTENER_BIN     = $(BIN_FOLDER)dns_listener
+
+listener: $(LISTENER_BIN)
+
+$(LISTENER_SKEL): $(LISTENER_BPF_OBJ)
+	bpftool gen skeleton $< name dns_listener > $@
+
+$(LISTENER_BPF_OBJ): $(LISTENER_BPF_SRC) $(HEADERS)
+	$(CC) -O2 -target bpf -g -c $< -o $@ -I $(INCLUDE_FOLDER)
+
+$(LISTENER_BIN): $(LISTENER_SRC) $(LISTENER_SKEL) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf
+
+run-listener: $(LISTENER_BIN)
+	sudo $(LISTENER_BIN) -v -i $(DEV)
+
+# ------------------------------------------------
+# Unit tests (CLI & Daemon modules)
+# ------------------------------------------------
+TEST_DAEMON_SRC = tests/test_daemon_unit.c
+TEST_DAEMON_BIN = $(BIN_FOLDER)test_daemon_unit
+
+$(TEST_DAEMON_BIN): $(TEST_DAEMON_SRC) $(SRC_FOLDER)daemon_timing_wheel.c $(SRC_FOLDER)daemon_ingest.c $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< $(SRC_FOLDER)daemon_timing_wheel.c $(SRC_FOLDER)daemon_ingest.c -I $(INCLUDE_FOLDER) -lbpf -pthread
+
+test-daemon: $(TEST_DAEMON_BIN)
+	@echo "=========================================================="
+	@echo "🧪 Running Native C Daemon Unit Tests"
+	@echo "=========================================================="
+	@$(TEST_DAEMON_BIN)
+
+test-cli:
+	@echo "=========================================================="
+	@echo "🧪 Running Python Unit Tests (CLI & Architecture)"
+	@echo "=========================================================="
+	@python3 -m unittest discover -s tests -p "test_*.py"
+
+test: $(TEST_DAEMON_BIN) test-cli
+	@echo ""
+	@echo "=========================================================="
+	@echo "🧪 Running Native C Daemon Unit Tests"
+	@echo "=========================================================="
+	@$(TEST_DAEMON_BIN)
+
+# ------------------------------------------------
+# Control-plane benchmarks & plotting
+# ------------------------------------------------
+RUNS ?= 30
+ENTRIES ?= 2000000
+
+BENCH_SAT_SRC = tests/bench_saturation.c
+BENCH_SAT_BIN = $(BIN_FOLDER)bench_saturation
+BENCH_DAEMONS_SRC = tests/bench_daemons_statistical.c
+BENCH_DAEMONS_BIN = $(BIN_FOLDER)bench_daemons_statistical
+
+bench-saturation: $(BENCH_SAT_BIN)
+$(BENCH_SAT_BIN): $(BENCH_SAT_SRC) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf -lm
+
+run-bench-saturation: $(BENCH_SAT_BIN)
+	sudo $(BENCH_SAT_BIN) -r $(RUNS) -n $(ENTRIES) -m 200000 -H 90 -L 80 -e 5
+
+bench-daemons: $(BENCH_DAEMONS_BIN)
+$(BENCH_DAEMONS_BIN): $(BENCH_DAEMONS_SRC) $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< -I $(INCLUDE_FOLDER) -lbpf -lm
+
+run-bench-daemons: $(BENCH_DAEMONS_BIN)
+	sudo $(BENCH_DAEMONS_BIN) -r $(RUNS) -n 100000
+
+plot-daemons:
+	python3 graphs/plot_statistical_distributions.py
+
+plot-distributions: plot-daemons
+
+
+# ------------------------------------------------
+# Passive Eviction Benchmark (Active Sweep vs. Passive On-Write)
+# ------------------------------------------------
+BENCH_PASSIVE_SRC = tests/bench_passive_eviction.c
+BENCH_PASSIVE_BIN = $(BIN_FOLDER)bench_passive_eviction
+
+bench-passive: $(BENCH_PASSIVE_BIN)
+$(BENCH_PASSIVE_BIN): $(BENCH_PASSIVE_SRC) $(SRC_FOLDER)daemon_timing_wheel.c $(HEADERS)
+	$(CC) -O2 -Wall -o $@ $< $(SRC_FOLDER)daemon_timing_wheel.c -I $(INCLUDE_FOLDER) -lbpf -pthread -lm
+
+run-bench-passive: $(BENCH_PASSIVE_BIN)
+	$(BENCH_PASSIVE_BIN) -n $(ENTRIES) -r $(RUNS) -m 50000 -e 100000
+
+plot-passive:
+	python3 graphs/plot_passive_eviction.py
+
+eval-passive: bench-passive run-bench-passive plot-passive
 
 
 # ------------------------------------------------
@@ -68,7 +187,7 @@ run-time-updater: $(TIME_BIN)
 
 build-hw: $(HW_OBJ)
 
-$(HW_OBJ): $(HW_SRC)
+$(HW_OBJ): $(HW_SRC) $(HEADERS)
 	$(CC) -O2 -target bpf -c $< -o $@ -g \
 		-I $(INCLUDE_FOLDER) \
 		-D __TARGET_ARCH_x86 \
@@ -76,32 +195,59 @@ $(HW_OBJ): $(HW_SRC)
 
 load-hw: $(HW_OBJ)
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
+	sudo bpftool net detach xdp dev $(HW_DEV) 2>/dev/null || true
+	sudo ip link set dev $(HW_DEV) xdp off 2>/dev/null || true
 	sudo rm -f $(PROG_PIN) $(PROG_MOUNT_PATH)/time_map $(PROG_MOUNT_PATH)/level_one_cache
-	sudo bpftool prog load $(HW_OBJ) $(PROG_PIN) \
+	sudo bpftool -d prog load $(HW_OBJ) $(PROG_PIN) \
 		type xdp \
 		dev $(HW_DEV)
 	sudo bpftool net attach xdpoffload \
 		pinned $(PROG_PIN) \
 		dev $(HW_DEV)
-	sudo rm -f $(PROG_MOUNT_PATH)/time_map
+	@HW_CACHE_ID=$$(sudo bpftool map show 2>/dev/null | grep "name level_one_cache" | head -n1 | cut -d: -f1 || true); \
+	if [ -n "$$HW_CACHE_ID" ]; then \
+		sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache; \
+		sudo bpftool map pin id "$$HW_CACHE_ID" $(PROG_MOUNT_PATH)/level_one_cache 2>/dev/null || true; \
+	fi
+	@TIME_ID=$$(sudo bpftool map show 2>/dev/null | grep "name time_map" | head -n1 | cut -d: -f1 || true); \
+	if [ -n "$$TIME_ID" ]; then \
+		sudo rm -f $(PROG_MOUNT_PATH)/time_map; \
+		sudo bpftool map pin id "$$TIME_ID" $(PROG_MOUNT_PATH)/time_map 2>/dev/null || true; \
+	fi
 	
 unload-hw:
 	sudo bpftool net detach xdpoffload dev $(HW_DEV) 2>/dev/null || true
 	sudo rm -f $(PROG_PIN)
 	sudo rm -f $(PROG_MOUNT_PATH)/time_map
 	sudo rm -f $(PROG_MOUNT_PATH)/level_one_cache
+	sudo rm -f $(PROG_MOUNT_PATH)/hw_sync_ringbuf
+	sudo rm -f $(PROG_MOUNT_PATH)/ringbuf_send_packet
 reload-hw: unload-hw build-hw load-hw
 
+load-and-run-daemon: load-hw daemon
+	sudo $(DAEMON_BIN)
 
-load-and-run-time-updater:
-		$(MAKE) load-hw
-		$(MAKE) run-time-updater TIME_MAP_ID=$$(sudo bpftool map show | \
-					grep "name time_map" | \
-							head -n1 | \
-									cut -d: -f1)
+load-and-run-time-updater: load-and-run-daemon
+time-updater: daemon
+cleaner: daemon
 # ------------------------------------------------
 
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
 install:
+	@echo "Installing ates CLI to $(BINDIR)..."
+	@sudo install -d $(BINDIR)
+	@sudo ln -sf $(CURDIR)/ates.py $(BINDIR)/ates
+	@sudo ln -sf $(CURDIR)/ates.py $(BINDIR)/ates.py
+	@echo "✅ ates CLI successfully installed! You can now run 'ates' or 'ates.py' from any directory."
+
+uninstall:
+	@echo "Uninstalling ates CLI from $(BINDIR)..."
+	@sudo rm -f $(BINDIR)/ates $(BINDIR)/ates.py
+	@echo "✅ Uninstalled successfully."
+
+install-deps:
 	sudo chmod +x ${INSTALL} && sudo ${INSTALL}
 
 load:
