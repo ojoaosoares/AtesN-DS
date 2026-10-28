@@ -118,7 +118,10 @@ def save_png(fig, base_name, alt_numbered_name=None):
 
 def plot_line_metric(col_name, ylabel, title, filename_base, num_prefix=None, log_scale=False,
                      y_min=None, y_max=None, legend_loc='best', bbox_to_anchor=None, custom_yticks=None):
-    fig, ax = plt.subplots(figsize=(8.8, 5.6))
+    if bbox_to_anchor is not None and bbox_to_anchor[0] > 1.0:
+        fig, ax = plt.subplots(figsize=(10.2, 5.6))
+    else:
+        fig, ax = plt.subplots(figsize=(8.8, 5.6))
     for mode in MODE_ORDER:
         mdf = df[df['mode'] == mode]
         means = []
@@ -414,17 +417,17 @@ ax.legend(loc='lower right', framealpha=0.94, fontsize=13)
 plt.tight_layout()
 save_png(fig, "calibrated_2core_cpu_saturation_curve", "14_cpu_saturation_curve")
 
-# 4.2 Dedicated CPU Utilization vs Rate (Legend on the Left)
+# 4.2 Dedicated CPU Utilization vs Rate (Legend Outside)
 plot_line_metric('srv_dedicated_busy', "Dedicated CPU Utilization (%)",
-                 "Dedicated Server Core Utilization vs. Offered Load",
+                 "Dedicated Server Core CPU Utilization",
                  "calibrated_2core_cpu_cores_active", "15_cpu_dedicated_cores",
-                 y_min=-2, y_max=103, legend_loc='center left', bbox_to_anchor=(0.04, 0.55))
+                 y_min=-2, y_max=103, legend_loc='center left', bbox_to_anchor=(1.02, 0.5))
 
-# 4.3 SoftIRQ Load (Legend Center Left - In the Middle)
+# 4.3 SoftIRQ Load (Legend Outside on the Right)
 plot_line_metric('srv_softirq', "Server SoftIRQ Load (%)",
-                 "Host Kernel SoftIRQ CPU Load vs. Offered Load",
+                 "Host Kernel SoftIRQ CPU Load",
                  "calibrated_2core_cpu_softirq", "16_cpu_softirq_load",
-                 y_min=-3, y_max=56, legend_loc='center left', bbox_to_anchor=(0.04, 0.40))
+                 y_min=-3, y_max=56, legend_loc='center left', bbox_to_anchor=(1.02, 0.5))
 
 # 4.4 Client CPU Utilization
 plot_line_metric('client_cpu_busy', "Client CPU Utilization (%)",
